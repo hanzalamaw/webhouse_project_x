@@ -1,122 +1,244 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
-import './App.css'
+import { useEffect } from "react";
 
-function App() {
-  const [count, setCount] = useState(0)
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from "react-router-dom";
 
-  return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.jsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
+import { AuthProvider, useAuth } from "./context/AuthContext";
 
-      <div className="ticks"></div>
+import { ThemeProvider } from "./context/ThemeContext";
 
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
+import { API_BASE } from "./config/api";
 
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+import MainLayout from "./components/layout/MainLayout";
+
+import Login from "./portals/wh-portal/pages/Login";
+
+import Dashboard from "./portals/wh-portal/pages/Dashboard";
+
+import CreateTenant from "./portals/wh-portal/pages/tenants/CreateTenant";
+
+import ManageTenant from "./portals/wh-portal/pages/tenants/ManageTenant";
+
+import Transaction from "./portals/wh-portal/pages/tenants/Transaction";
+
+import CreateTicket from "./portals/wh-portal/pages/support/CreateTicket";
+
+import ManageTickets from "./portals/wh-portal/pages/support/ManageTickets";
+
+import Impersonation from "./portals/wh-portal/pages/Impersonation";
+
+
+
+const ProtectedRoute = ({ children }) => {
+
+  const { user, loading } = useAuth();
+
+  const location = useLocation();
+
+  if (loading) return null;
+
+  if (!user) {
+
+    const redirect = encodeURIComponent(location.pathname || "/dashboard");
+
+    return <Navigate to={`/login?redirect=${redirect}`} replace />;
+
+  }
+
+  return children;
+
+};
+
+
+
+function clearSessionAndRedirectToLogin() {
+
+  localStorage.removeItem("token");
+
+  localStorage.removeItem("refreshToken");
+
+  localStorage.removeItem("user");
+
+  window.location.href = "/login";
+
 }
 
-export default App
+
+
+function AuthFetchInterceptor() {
+
+  const { user } = useAuth();
+
+  useEffect(() => {
+
+    if (!user) return;
+
+    const originalFetch = window.fetch;
+
+    window.fetch = async function (...args) {
+
+      const res = await originalFetch.apply(this, args);
+
+      const url = typeof args[0] === "string" ? args[0] : args[0]?.url || "";
+
+      const isApi = url.includes("/api/");
+
+      const isAuthEndpoint = /\/api\/(login|refresh)/.test(url);
+
+      if (res.status === 401 && isApi && !isAuthEndpoint) {
+
+        const refreshToken = localStorage.getItem("refreshToken");
+
+        if (!refreshToken) {
+
+          clearSessionAndRedirectToLogin();
+
+          return res;
+
+        }
+
+        try {
+
+          const refreshRes = await originalFetch(`${API_BASE}/refresh`, {
+
+            method: "POST",
+
+            headers: { "Content-Type": "application/json" },
+
+            body: JSON.stringify({ refreshToken }),
+
+          });
+
+          if (!refreshRes.ok) {
+
+            clearSessionAndRedirectToLogin();
+
+            return res;
+
+          }
+
+          const data = await refreshRes.json().catch(() => ({}));
+
+          if (!data?.token) {
+
+            clearSessionAndRedirectToLogin();
+
+            return res;
+
+          }
+
+          localStorage.setItem("token", data.token);
+
+          const newHeaders = { ...(args[1]?.headers || {}), Authorization: `Bearer ${data.token}` };
+
+          return originalFetch(args[0], { ...args[1], headers: newHeaders });
+
+        } catch {
+
+          clearSessionAndRedirectToLogin();
+
+          return res;
+
+        }
+
+      }
+
+      return res;
+
+    };
+
+    return () => {
+
+      window.fetch = originalFetch;
+
+    };
+
+  }, [user]);
+
+  return null;
+
+}
+
+
+
+function AppRoutes() {
+
+  const { user } = useAuth();
+
+
+
+  return (
+
+    <Routes>
+
+      <Route path="/login" element={user ? <Navigate to="/dashboard" replace /> : <Login />} />
+
+      <Route
+
+        element={
+
+          <ProtectedRoute>
+
+            <MainLayout />
+
+          </ProtectedRoute>
+
+        }
+
+      >
+
+        <Route index element={<Navigate to="/dashboard" replace />} />
+
+        <Route path="dashboard" element={<Dashboard />} />
+
+        <Route path="tenants/create" element={<CreateTenant />} />
+
+        <Route path="tenants/manage" element={<ManageTenant />} />
+
+        <Route path="tenants/transactions" element={<Transaction />} />
+
+        <Route path="support/create" element={<CreateTicket />} />
+
+        <Route path="support/manage" element={<ManageTickets />} />
+
+        <Route path="impersonation" element={<Impersonation />} />
+
+      </Route>
+
+      <Route path="*" element={<Navigate to="/dashboard" replace />} />
+
+    </Routes>
+
+  );
+
+}
+
+
+
+function App() {
+
+  return (
+
+    <ThemeProvider>
+
+      <AuthProvider>
+
+        <Router>
+
+          <AuthFetchInterceptor />
+
+          <AppRoutes />
+
+        </Router>
+
+      </AuthProvider>
+
+    </ThemeProvider>
+
+  );
+
+}
+
+
+
+export default App;
+
