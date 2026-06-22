@@ -1186,9 +1186,9 @@ CREATE TABLE IF NOT EXISTS `finance_expense_sub_categories` (
   `category_id` INT NOT NULL,
   `tenant_id` INT NOT NULL,
   PRIMARY KEY (`id`),
-  INDEX `fk_finance_expense_sub_categories_finance_expense_categories1_idx` (`category_id` ASC),
+  INDEX `fk_fin_exp_sub_cat_fin_exp_cat1_idx` (`category_id` ASC),
   INDEX `fk_finance_expense_sub_categories_wh_tenants1_idx` (`tenant_id` ASC),
-  CONSTRAINT `fk_finance_expense_sub_categories_finance_expense_categories1`
+  CONSTRAINT `fk_fin_exp_sub_cat_fin_exp_cat1`
     FOREIGN KEY (`category_id`)
     REFERENCES `finance_expense_categories` (`id`)
     ON DELETE NO ACTION
@@ -1251,14 +1251,14 @@ CREATE TABLE IF NOT EXISTS `finance_recurring_expenses` (
   `tenant_id` INT NOT NULL,
   PRIMARY KEY (`id`),
   INDEX `fk_finance_recurring_expenses_finance_expense_categories1_idx` (`category_id` ASC),
-  INDEX `fk_finance_recurring_expenses_finance_expense_sub_categories1_idx` (`sub_category_id` ASC),
+  INDEX `fk_fin_recur_exp_fin_exp_sub_cat1_idx` (`sub_category_id` ASC),
   INDEX `fk_finance_recurring_expenses_wh_tenants1_idx` (`tenant_id` ASC),
   CONSTRAINT `fk_finance_recurring_expenses_finance_expense_categories1`
     FOREIGN KEY (`category_id`)
     REFERENCES `finance_expense_categories` (`id`)
     ON DELETE NO ACTION
     ON UPDATE NO ACTION,
-  CONSTRAINT `fk_finance_recurring_expenses_finance_expense_sub_categories1`
+  CONSTRAINT `fk_fin_recur_exp_fin_exp_sub_cat1`
     FOREIGN KEY (`sub_category_id`)
     REFERENCES `finance_expense_sub_categories` (`id`)
     ON DELETE NO ACTION
