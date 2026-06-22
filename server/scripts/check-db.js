@@ -1,5 +1,5 @@
 import dotenv from "dotenv";
-import { createPool } from "../src/db/pool.js";
+import { createPool, closePool } from "../src/db/pool.js";
 import { verifyPassword } from "../src/utils/cipher.js";
 
 dotenv.config();
@@ -21,4 +21,4 @@ try {
 } catch (e) {
   console.error("DB error:", e.message);
 }
-await db.end();
+await closePool(db);

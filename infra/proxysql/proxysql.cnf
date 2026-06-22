@@ -1,0 +1,52 @@
+# ProxySQL config for WebHouse ERP
+# Deploy on a small always-on GCE VM (e2-micro). Cloud Run containers connect here,
+# never directly to Cloud SQL. Tune mysql-max_connections as you grow.
+
+datadir="/var/lib/proxysql"
+
+admin_variables=
+{
+    admin_credentials="admin:CHANGE_ME_ADMIN_PASSWORD"
+    mysql_ifaces="0.0.0.0:6032"
+}
+
+mysql_variables=
+{
+    # Frontend: thousands of app connections multiplex here
+    interfaces="0.0.0.0:6033"
+    max_connections=2048
+
+    # Backend: fixed cap on real Cloud SQL connections (tune 50 → 100 as you grow)
+    mysql-max_connections=50
+
+    connect_timeout_server=3000
+    ping_timeout_server=500
+    ping_interval_server_msec=10000
+}
+
+# Replace with your Cloud SQL private IP (same VPC as this VM)
+mysql_servers =
+(
+    {
+        address="10.0.0.0"
+        port=3306
+        hostgroup_id=10
+        max_connections=50
+        weight=1000
+        comment="cloud-sql-primary"
+    }
+)
+
+mysql_users =
+(
+    {
+        username="webhouse_app"
+        password="CHANGE_ME_APP_PASSWORD"
+        default_hostgroup=10
+        active=1
+    }
+)
+
+mysql_query_rules =
+(
+)

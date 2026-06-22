@@ -2,7 +2,7 @@ import dotenv from "dotenv";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { createPool } from "../src/db/pool.js";
+import { createPool, closePool } from "../src/db/pool.js";
 import { encrypt } from "../src/utils/cipher.js";
 
 dotenv.config();
@@ -58,5 +58,5 @@ try {
   process.exit(1);
 }
 
-await db.end();
+await closePool(db);
 console.log("Database setup complete.");

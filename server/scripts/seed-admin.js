@@ -1,6 +1,6 @@
 import dotenv from "dotenv";
 import { encrypt } from "../src/utils/cipher.js";
-import { createPool } from "../src/db/pool.js";
+import { createPool, closePool } from "../src/db/pool.js";
 
 dotenv.config();
 
@@ -32,7 +32,7 @@ const run = async () => {
     console.log(`Created admin user: ${username}`);
   }
 
-  await db.end();
+  await closePool(db);
 };
 
 run().catch((err) => {
