@@ -1,7 +1,7 @@
 import jwt from "jsonwebtoken";
 
 /**
- * Returns middleware that verifies JWT and attaches userId and userRole to req.
+ * Returns middleware that verifies JWT and attaches userId, userRole, sessionId, tenantId to req.
  * @param {string} JWT_SECRET
  */
 export const createVerifyToken = (JWT_SECRET) => {
@@ -21,6 +21,8 @@ export const createVerifyToken = (JWT_SECRET) => {
 
       req.userId = decoded.id;
       req.userRole = decoded.role;
+      req.sessionId = decoded.sessionId ?? null;
+      req.tenantId = decoded.tenantId ?? null;
       next();
     } catch {
       return res.status(401).json({ message: "Invalid token" });

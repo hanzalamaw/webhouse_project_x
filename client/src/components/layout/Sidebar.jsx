@@ -74,7 +74,7 @@ export default function Sidebar() {
 
   const handleLogout = async () => {
     await logout();
-    navigate("/login");
+    navigate("/webhouse-portal");
   };
 
   const handleNavigate = (path) => {

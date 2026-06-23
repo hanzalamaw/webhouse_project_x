@@ -1,6 +1,7 @@
 import { PageHeader } from "../../../../components/PageHeader";
 import { Card } from "../../../../components/Card";
 import { StatCard } from "../../../../components/StatCard";
+import { formatPKR } from "../../../../utils/currency";
 
 export default function Transaction() {
   return (
@@ -10,9 +11,9 @@ export default function Transaction() {
         description="Generate invoices and track payments, dues, and discounts for tenant billing."
       />
       <div className="wh-stat-grid wh-stat-grid--3">
-        <StatCard label="Outstanding Dues" value="$12,400" tone="warning" />
-        <StatCard label="Received This Month" value="$48,200" tone="success" />
-        <StatCard label="Discounts Applied" value="$1,850" />
+        <StatCard label="Outstanding Dues" value={formatPKR(12400)} tone="warning" />
+        <StatCard label="Received This Month" value={formatPKR(48200)} tone="success" />
+        <StatCard label="Discounts Applied" value={formatPKR(1850)} />
       </div>
       <div className="wh-grid-2">
         <Card>

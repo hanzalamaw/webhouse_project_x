@@ -41,6 +41,30 @@ export const ImpersonateIcon = () => (
   </svg>
 );
 
+export const SubscriptionIcon = () => (
+  <svg {...iconProps}>
+    <rect x="2" y="5" width="20" height="14" rx="2" />
+    <line x1="2" y1="10" x2="22" y2="10" />
+  </svg>
+);
+
+export const ModuleIcon = () => (
+  <svg {...iconProps}>
+    <path d="M12 2L2 7l10 5 10-5-10-5z" />
+    <path d="M2 17l10 5 10-5" />
+    <path d="M2 12l10 5 10-5" />
+  </svg>
+);
+
+export const LogsIcon = () => (
+  <svg {...iconProps}>
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+    <polyline points="14 2 14 8 20 8" />
+    <line x1="16" y1="13" x2="8" y2="13" />
+    <line x1="16" y1="17" x2="8" y2="17" />
+  </svg>
+);
+
 export const HelpIcon = () => (
   <svg {...iconProps}>
     <circle cx="12" cy="12" r="10" />
@@ -73,7 +97,11 @@ export const ChevronIcon = ({ direction = "right" }) => (
     strokeWidth="2"
     strokeLinecap="round"
     strokeLinejoin="round"
-    style={{ transform: direction === "down" ? "rotate(90deg)" : direction === "left" ? "rotate(180deg)" : "none", transition: "transform 0.3s ease" }}
+    style={{
+      transform:
+        direction === "down" ? "rotate(90deg)" : direction === "left" ? "rotate(180deg)" : "none",
+      transition: "transform 0.3s ease",
+    }}
   >
     <polyline points="9 18 15 12 9 6" />
   </svg>

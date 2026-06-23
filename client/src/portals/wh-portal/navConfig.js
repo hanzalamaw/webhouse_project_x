@@ -7,13 +7,18 @@ import {
   LogoutIcon,
   MoonIcon,
   ChevronIcon,
+  SubscriptionIcon,
+  ModuleIcon,
+  LogsIcon,
 } from "../../components/icons";
+
+const BASE = "/webhouse-portal";
 
 export const MENU_ITEMS = [
   {
     id: "dashboard",
     label: "Dashboard",
-    path: "/dashboard",
+    path: `${BASE}/dashboard`,
     icon: DashboardIcon,
   },
   {
@@ -21,9 +26,28 @@ export const MENU_ITEMS = [
     label: "Tenant Management",
     icon: TenantsIcon,
     children: [
-      { id: "create-tenant", label: "Create Tenant", path: "/tenants/create" },
-      { id: "manage-tenant", label: "Manage Tenant", path: "/tenants/manage" },
-      { id: "transactions", label: "Transaction", path: "/tenants/transactions" },
+      { id: "create-tenant", label: "Create Tenant", path: `${BASE}/tenants/create` },
+      { id: "manage-tenant", label: "Manage Tenant", path: `${BASE}/tenants/manage` },
+      { id: "sessions", label: "Sessions", path: `${BASE}/tenants/sessions` },
+      { id: "transactions", label: "Transaction", path: `${BASE}/tenants/transactions` },
+    ],
+  },
+  {
+    id: "subscription",
+    label: "Subscription",
+    icon: SubscriptionIcon,
+    children: [
+      { id: "sub-create", label: "Create", path: `${BASE}/subscriptions/create` },
+      { id: "sub-manage", label: "Manage", path: `${BASE}/subscriptions/manage` },
+    ],
+  },
+  {
+    id: "module",
+    label: "Module",
+    icon: ModuleIcon,
+    children: [
+      { id: "mod-create", label: "Create", path: `${BASE}/modules/create` },
+      { id: "mod-manage", label: "Manage", path: `${BASE}/modules/manage` },
     ],
   },
   {
@@ -31,15 +55,21 @@ export const MENU_ITEMS = [
     label: "Support Tickets",
     icon: SupportIcon,
     children: [
-      { id: "create-ticket", label: "Create", path: "/support/create" },
-      { id: "manage-tickets", label: "Manage", path: "/support/manage" },
+      { id: "create-ticket", label: "Create", path: `${BASE}/support/create` },
+      { id: "manage-tickets", label: "Manage", path: `${BASE}/support/manage` },
     ],
   },
   {
     id: "impersonation",
     label: "Impersonation",
-    path: "/impersonation",
+    path: `${BASE}/impersonation`,
     icon: ImpersonateIcon,
+  },
+  {
+    id: "logs",
+    label: "Logs",
+    path: `${BASE}/logs`,
+    icon: LogsIcon,
   },
 ];
 

@@ -86,7 +86,7 @@ const Login = () => {
 
         login(data.user, data.token, data.refreshToken ?? null);
 
-        const redirect = searchParams.get("redirect") || "/dashboard";
+        const redirect = searchParams.get("redirect") || "/webhouse-portal/dashboard";
 
         navigate(redirect);
 

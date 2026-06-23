@@ -1,0 +1,92 @@
+# Cursor Rules
+
+## 1. SQL Queries — Soft Delete Pattern
+
+Always use `deleted_at IS NULL` in queries to filter out soft-deleted records.
+
+Example:
+
+SELECT * FROM orders WHERE deleted_at IS NULL;
+
+Apply this to every SELECT query on any table that has a `deleted_at` column.
+
+Never show records where `deleted_at` is not null unless explicitly asked for deleted records.
+
+---
+
+## 2. Delete Confirmation — UI Pattern
+
+When the user triggers a delete action, show a confirmation modal/prompt on the page.
+
+Rules:
+
+* The modal must warn the user that deleting this record will also delete everything related to it (cascading delete warning).
+* Display a text input field with a specific phrase the user must type exactly to confirm (e.g. "DELETE" or the record name).
+* The Delete button must remain disabled until the user has typed the confirmation phrase exactly as shown.
+* Once the user types the exact phrase, enable the Delete button.
+* If the input does not match exactly (case-sensitive), keep the button disabled.
+
+Example confirmation phrase to show:
+
+Type DELETE to confirm
+
+Example logic:
+
+deleteButton.disabled = confirmInput.value !== "DELETE";
+
+---
+
+## 3. Database & Code Structure — Future ProxySQL Ready
+
+Write all database-related code in a way that allows ProxySQL, read replicas, and future database scaling without requiring application code changes.
+
+Rules:
+
+* Never write SQL queries directly inside controllers.
+* Controllers should call services.
+* Services should call repositories.
+* Repositories should handle all database queries.
+* Use a centralized database connection layer.
+* Never create direct MySQL connections inside modules.
+* Always use a shared connection pool.
+* Keep database access abstracted so the underlying database topology can change later without modifying business logic.
+
+Example Structure:
+
+src/
+├── controllers/
+├── services/
+├── repositories/
+├── database/
+│   ├── db.js
+│   ├── readDb.js
+│   └── writeDb.js
+
+Example:
+
+// Controller
+const customers = await customerService.getAll();
+
+// Service
+return customerRepository.getAll();
+
+// Repository
+return db.query(`  SELECT *
+  FROM customers
+  WHERE deleted_at IS NULL`);
+
+Current Setup:
+
+readDb.query(...)
+writeDb.query(...)
+
+Today both may point to the same MySQL database.
+
+Future:
+
+ProxySQL
+├── Write Node
+├── Read Replica 1
+├── Read Replica 2
+
+No application code changes should be required when moving to ProxySQL or read replicas.
