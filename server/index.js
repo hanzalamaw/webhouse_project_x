@@ -19,9 +19,10 @@ const startServer = async () => {
 
   const JWT_SECRET = process.env.JWT_SECRET || "webhouse_secret";
   const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "1h";
-  const verifyToken = createVerifyToken(db, JWT_SECRET);
+  const JWT_REFRESH_EXPIRES_IN = process.env.JWT_REFRESH_EXPIRES_IN || "7d";
+  const verifyToken = createVerifyToken(JWT_SECRET);
 
-  registerAuthRoutes(app, db, { JWT_SECRET, JWT_EXPIRES_IN, verifyToken });
+  registerAuthRoutes(app, db, { JWT_SECRET, JWT_EXPIRES_IN, JWT_REFRESH_EXPIRES_IN, verifyToken });
   registerDashboardRoutes(app, db, verifyToken);
 
   app.get("/", (req, res) => {

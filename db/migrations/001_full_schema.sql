@@ -1,0 +1,3 @@
+-- Migration 001: full schema
+-- Source of truth: ../schema.sql (57 tables)
+-- Apply with: cd server && npm run setup:db

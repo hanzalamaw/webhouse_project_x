@@ -1,6 +1,12 @@
 -- Full schema snapshot for webhouse_project_x
 -- 57 tables: Webhouse Admin, Client Admin, Portal, Inventory, CRM,
 -- E-Commerce, Orders, Finance, Logistics, POS
+--
+-- Soft delete: every table has deleted_at (NULL = active). Purge-after-7d is app/cron later.
+-- Foreign keys: ON DELETE CASCADE, ON UPDATE CASCADE
+--
+-- Apply: cd server && npm run setup:db
+-- Or:    mysql -u root -p < db/schema.sql
 
 CREATE DATABASE IF NOT EXISTS `webhouse_project_x`
   DEFAULT CHARACTER SET utf8mb4
@@ -24,6 +30,7 @@ CREATE TABLE IF NOT EXISTS `wh_admin_users` (
   `last_login_at` TIMESTAMP NULL DEFAULT NULL,
   `created_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE INDEX `uk_wh_admin_users_email` (`email` ASC)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -36,6 +43,7 @@ CREATE TABLE IF NOT EXISTS `modules` (
   `module_name` VARCHAR(45) NOT NULL,
   `created_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
   `last_updated_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -48,6 +56,7 @@ CREATE TABLE IF NOT EXISTS `wh_subscription_plans` (
   `plan_price` DECIMAL(12,2) NOT NULL,
   `created_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
   `last_updated_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -64,6 +73,7 @@ CREATE TABLE IF NOT EXISTS `wh_tenants` (
   `status` VARCHAR(45) NOT NULL,
   `created_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -74,6 +84,7 @@ CREATE TABLE IF NOT EXISTS `wh_subscription_module` (
   `id` INT NOT NULL AUTO_INCREMENT,
   `subscription_plan_id` INT NOT NULL,
   `module_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE INDEX `uk_wh_subscription_module_plan_module` (`subscription_plan_id` ASC, `module_id` ASC),
   INDEX `fk_wh_subscription_module_wh_subscription_plans1_idx` (`subscription_plan_id` ASC),
@@ -81,13 +92,13 @@ CREATE TABLE IF NOT EXISTS `wh_subscription_module` (
   CONSTRAINT `fk_wh_subscription_module_wh_subscription_plans1`
     FOREIGN KEY (`subscription_plan_id`)
     REFERENCES `wh_subscription_plans` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_wh_subscription_module_modules1`
     FOREIGN KEY (`module_id`)
     REFERENCES `modules` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------
@@ -100,6 +111,7 @@ CREATE TABLE IF NOT EXISTS `wh_tenant_modules` (
   `disabled_at` TIMESTAMP NULL DEFAULT NULL,
   `module_id` INT NOT NULL,
   `tenant_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE INDEX `uk_wh_tenant_modules_tenant_module` (`tenant_id` ASC, `module_id` ASC),
   INDEX `fk_wh_tenant_modules_modules1_idx` (`module_id` ASC),
@@ -107,13 +119,13 @@ CREATE TABLE IF NOT EXISTS `wh_tenant_modules` (
   CONSTRAINT `fk_wh_tenant_modules_modules1`
     FOREIGN KEY (`module_id`)
     REFERENCES `modules` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_wh_tenant_modules_wh_tenants1`
     FOREIGN KEY (`tenant_id`)
     REFERENCES `wh_tenants` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------
@@ -126,14 +138,15 @@ CREATE TABLE IF NOT EXISTS `wh_tenant_limits` (
   `max_stores` INT NOT NULL,
   `max_orders_per_month` INT NOT NULL,
   `tenant_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE INDEX `uk_wh_tenant_limits_tenant` (`tenant_id` ASC),
   INDEX `fk_wh_tenant_limits_wh_tenants1_idx` (`tenant_id` ASC),
   CONSTRAINT `fk_wh_tenant_limits_wh_tenants1`
     FOREIGN KEY (`tenant_id`)
     REFERENCES `wh_tenants` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------
@@ -150,19 +163,20 @@ CREATE TABLE IF NOT EXISTS `wh_tenant_subscriptions` (
   `amount_due` DECIMAL(12,2) NOT NULL,
   `tenant_id` INT NOT NULL,
   `subscription_plan_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   INDEX `fk_wh_tenant_subscriptions_wh_tenants1_idx` (`tenant_id` ASC),
   INDEX `fk_wh_tenant_subscriptions_wh_subscription_plans1_idx` (`subscription_plan_id` ASC),
   CONSTRAINT `fk_wh_tenant_subscriptions_wh_tenants1`
     FOREIGN KEY (`tenant_id`)
     REFERENCES `wh_tenants` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_wh_tenant_subscriptions_wh_subscription_plans1`
     FOREIGN KEY (`subscription_plan_id`)
     REFERENCES `wh_subscription_plans` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------
@@ -175,13 +189,14 @@ CREATE TABLE IF NOT EXISTS `wh_tenant_payments` (
   `total_received` DECIMAL(12,2) NOT NULL,
   `received_at` TIMESTAMP NULL DEFAULT NULL,
   `tenant_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   INDEX `fk_wh_tenant_payments_wh_tenants1_idx` (`tenant_id` ASC),
   CONSTRAINT `fk_wh_tenant_payments_wh_tenants1`
     FOREIGN KEY (`tenant_id`)
     REFERENCES `wh_tenants` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------
@@ -195,13 +210,14 @@ CREATE TABLE IF NOT EXISTS `wh_support_tickets` (
   `created_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
   `resolved_at` TIMESTAMP NULL DEFAULT NULL,
   `tenant_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   INDEX `fk_wh_support_tickets_wh_tenants1_idx` (`tenant_id` ASC),
   CONSTRAINT `fk_wh_support_tickets_wh_tenants1`
     FOREIGN KEY (`tenant_id`)
     REFERENCES `wh_tenants` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------
@@ -215,13 +231,14 @@ CREATE TABLE IF NOT EXISTS `wh_audit_logs` (
   `ip_address` VARCHAR(45) NOT NULL,
   `created_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
   `admin_user_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   INDEX `fk_wh_audit_logs_wh_admin_users1_idx` (`admin_user_id` ASC),
   CONSTRAINT `fk_wh_audit_logs_wh_admin_users1`
     FOREIGN KEY (`admin_user_id`)
     REFERENCES `wh_admin_users` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================================================
@@ -239,14 +256,15 @@ CREATE TABLE IF NOT EXISTS `roles` (
   `created_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `tenant_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE INDEX `uk_roles_tenant_role_name` (`tenant_id` ASC, `role_name` ASC),
   INDEX `fk_roles_wh_tenants1_idx` (`tenant_id` ASC),
   CONSTRAINT `fk_roles_wh_tenants1`
     FOREIGN KEY (`tenant_id`)
     REFERENCES `wh_tenants` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------
@@ -264,6 +282,7 @@ CREATE TABLE IF NOT EXISTS `users` (
   `created_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `role_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE INDEX `uk_users_tenant_email` (`tenant_id` ASC, `email` ASC),
   INDEX `fk_users_wh_tenants1_idx` (`tenant_id` ASC),
@@ -271,13 +290,13 @@ CREATE TABLE IF NOT EXISTS `users` (
   CONSTRAINT `fk_users_wh_tenants1`
     FOREIGN KEY (`tenant_id`)
     REFERENCES `wh_tenants` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_users_roles1`
     FOREIGN KEY (`role_id`)
     REFERENCES `roles` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------
@@ -290,19 +309,20 @@ CREATE TABLE IF NOT EXISTS `permissions` (
   `created_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
   `role_id` INT NOT NULL,
   `module_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   INDEX `fk_permissions_roles1_idx` (`role_id` ASC),
   INDEX `fk_permissions_modules1_idx` (`module_id` ASC),
   CONSTRAINT `fk_permissions_roles1`
     FOREIGN KEY (`role_id`)
     REFERENCES `roles` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_permissions_modules1`
     FOREIGN KEY (`module_id`)
     REFERENCES `modules` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================================================
@@ -323,6 +343,7 @@ CREATE TABLE IF NOT EXISTS `audit_logs` (
   `tenant_id` INT NOT NULL,
   `module_id` INT NOT NULL,
   `user_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   INDEX `fk_audit_logs_wh_tenants1_idx` (`tenant_id` ASC),
   INDEX `fk_audit_logs_modules1_idx` (`module_id` ASC),
@@ -330,18 +351,18 @@ CREATE TABLE IF NOT EXISTS `audit_logs` (
   CONSTRAINT `fk_audit_logs_wh_tenants1`
     FOREIGN KEY (`tenant_id`)
     REFERENCES `wh_tenants` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_audit_logs_modules1`
     FOREIGN KEY (`module_id`)
     REFERENCES `modules` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_audit_logs_users1`
     FOREIGN KEY (`user_id`)
     REFERENCES `users` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------
@@ -357,19 +378,20 @@ CREATE TABLE IF NOT EXISTS `sessions` (
   `is_active` TINYINT(1) NOT NULL DEFAULT 1,
   `tenant_id` INT NOT NULL,
   `user_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   INDEX `fk_sessions_wh_tenants1_idx` (`tenant_id` ASC),
   INDEX `fk_sessions_users1_idx` (`user_id` ASC),
   CONSTRAINT `fk_sessions_wh_tenants1`
     FOREIGN KEY (`tenant_id`)
     REFERENCES `wh_tenants` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_sessions_users1`
     FOREIGN KEY (`user_id`)
     REFERENCES `users` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------
@@ -387,14 +409,15 @@ CREATE TABLE IF NOT EXISTS `organization_settings` (
   `created_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
   `last_updated_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `tenant_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE INDEX `uk_organization_settings_tenant` (`tenant_id` ASC),
   INDEX `fk_organization_settings_wh_tenants1_idx` (`tenant_id` ASC),
   CONSTRAINT `fk_organization_settings_wh_tenants1`
     FOREIGN KEY (`tenant_id`)
     REFERENCES `wh_tenants` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------
@@ -410,19 +433,20 @@ CREATE TABLE IF NOT EXISTS `activity_alerts` (
   `created_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
   `user_id` INT NOT NULL,
   `tenant_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   INDEX `fk_activity_alerts_users1_idx` (`user_id` ASC),
   INDEX `fk_activity_alerts_wh_tenants1_idx` (`tenant_id` ASC),
   CONSTRAINT `fk_activity_alerts_users1`
     FOREIGN KEY (`user_id`)
     REFERENCES `users` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_activity_alerts_wh_tenants1`
     FOREIGN KEY (`tenant_id`)
     REFERENCES `wh_tenants` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================================================
@@ -438,13 +462,14 @@ CREATE TABLE IF NOT EXISTS `inventory_categories` (
   `status` VARCHAR(45) NOT NULL,
   `created_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
   `tenant_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   INDEX `fk_inventory_categories_wh_tenants1_idx` (`tenant_id` ASC),
   CONSTRAINT `fk_inventory_categories_wh_tenants1`
     FOREIGN KEY (`tenant_id`)
     REFERENCES `wh_tenants` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------
@@ -462,6 +487,7 @@ CREATE TABLE IF NOT EXISTS `inventory_products` (
   `updated_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `category_id` INT NOT NULL,
   `tenant_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE INDEX `uk_inventory_products_tenant_sku` (`tenant_id` ASC, `sku` ASC),
   INDEX `fk_inventory_products_inventory_categories1_idx` (`category_id` ASC),
@@ -469,13 +495,13 @@ CREATE TABLE IF NOT EXISTS `inventory_products` (
   CONSTRAINT `fk_inventory_products_inventory_categories1`
     FOREIGN KEY (`category_id`)
     REFERENCES `inventory_categories` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_inventory_products_wh_tenants1`
     FOREIGN KEY (`tenant_id`)
     REFERENCES `wh_tenants` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------
@@ -489,13 +515,14 @@ CREATE TABLE IF NOT EXISTS `inventory_warehouses` (
   `status` VARCHAR(45) NOT NULL,
   `created_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
   `tenant_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   INDEX `fk_inventory_warehouses_wh_tenants1_idx` (`tenant_id` ASC),
   CONSTRAINT `fk_inventory_warehouses_wh_tenants1`
     FOREIGN KEY (`tenant_id`)
     REFERENCES `wh_tenants` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------
@@ -511,6 +538,7 @@ CREATE TABLE IF NOT EXISTS `inventory_stock_levels` (
   `product_id` INT NOT NULL,
   `warehouse_id` INT NOT NULL,
   `tenant_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE INDEX `uk_inventory_stock_levels_tenant_product_warehouse` (`tenant_id` ASC, `product_id` ASC, `warehouse_id` ASC),
   INDEX `fk_inventory_stock_levels_inventory_products1_idx` (`product_id` ASC),
@@ -519,18 +547,18 @@ CREATE TABLE IF NOT EXISTS `inventory_stock_levels` (
   CONSTRAINT `fk_inventory_stock_levels_inventory_products1`
     FOREIGN KEY (`product_id`)
     REFERENCES `inventory_products` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_inventory_stock_levels_inventory_warehouses1`
     FOREIGN KEY (`warehouse_id`)
     REFERENCES `inventory_warehouses` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_inventory_stock_levels_wh_tenants1`
     FOREIGN KEY (`tenant_id`)
     REFERENCES `wh_tenants` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------
@@ -546,6 +574,7 @@ CREATE TABLE IF NOT EXISTS `inventory_stock_movements` (
   `warehouse_id` INT NOT NULL,
   `created_by` INT NOT NULL,
   `tenant_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   INDEX `fk_inventory_stock_movements_inventory_products1_idx` (`product_id` ASC),
   INDEX `fk_inventory_stock_movements_inventory_warehouses1_idx` (`warehouse_id` ASC),
@@ -554,23 +583,23 @@ CREATE TABLE IF NOT EXISTS `inventory_stock_movements` (
   CONSTRAINT `fk_inventory_stock_movements_inventory_products1`
     FOREIGN KEY (`product_id`)
     REFERENCES `inventory_products` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_inventory_stock_movements_inventory_warehouses1`
     FOREIGN KEY (`warehouse_id`)
     REFERENCES `inventory_warehouses` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_inventory_stock_movements_users1`
     FOREIGN KEY (`created_by`)
     REFERENCES `users` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_inventory_stock_movements_wh_tenants1`
     FOREIGN KEY (`tenant_id`)
     REFERENCES `wh_tenants` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------
@@ -586,6 +615,7 @@ CREATE TABLE IF NOT EXISTS `inventory_stock_transfers` (
   `from_warehouse_id` INT NOT NULL,
   `to_warehouse_id` INT NOT NULL,
   `tenant_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   INDEX `fk_inventory_stock_transfers_inventory_products1_idx` (`product_id` ASC),
   INDEX `fk_inventory_stock_transfers_from_warehouse_idx` (`from_warehouse_id` ASC),
@@ -594,23 +624,23 @@ CREATE TABLE IF NOT EXISTS `inventory_stock_transfers` (
   CONSTRAINT `fk_inventory_stock_transfers_inventory_products1`
     FOREIGN KEY (`product_id`)
     REFERENCES `inventory_products` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_inventory_stock_transfers_from_warehouse`
     FOREIGN KEY (`from_warehouse_id`)
     REFERENCES `inventory_warehouses` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_inventory_stock_transfers_to_warehouse`
     FOREIGN KEY (`to_warehouse_id`)
     REFERENCES `inventory_warehouses` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_inventory_stock_transfers_wh_tenants1`
     FOREIGN KEY (`tenant_id`)
     REFERENCES `wh_tenants` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================================================
@@ -632,19 +662,20 @@ CREATE TABLE IF NOT EXISTS `crm_leads` (
   `updated_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `assigned_to` INT NULL DEFAULT NULL,
   `tenant_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   INDEX `fk_crm_leads_users1_idx` (`assigned_to` ASC),
   INDEX `fk_crm_leads_wh_tenants1_idx` (`tenant_id` ASC),
   CONSTRAINT `fk_crm_leads_users1`
     FOREIGN KEY (`assigned_to`)
     REFERENCES `users` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_crm_leads_wh_tenants1`
     FOREIGN KEY (`tenant_id`)
     REFERENCES `wh_tenants` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------
@@ -661,13 +692,14 @@ CREATE TABLE IF NOT EXISTS `crm_customers` (
   `updated_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `note` TEXT NULL DEFAULT NULL,
   `tenant_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   INDEX `fk_crm_customers_wh_tenants1_idx` (`tenant_id` ASC),
   CONSTRAINT `fk_crm_customers_wh_tenants1`
     FOREIGN KEY (`tenant_id`)
     REFERENCES `wh_tenants` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------
@@ -683,19 +715,20 @@ CREATE TABLE IF NOT EXISTS `crm_customer_addresses` (
   `is_default` TINYINT(1) NOT NULL DEFAULT 0,
   `customer_id` INT NOT NULL,
   `tenant_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   INDEX `fk_crm_customer_addresses_crm_customers1_idx` (`customer_id` ASC),
   INDEX `fk_crm_customer_addresses_wh_tenants1_idx` (`tenant_id` ASC),
   CONSTRAINT `fk_crm_customer_addresses_crm_customers1`
     FOREIGN KEY (`customer_id`)
     REFERENCES `crm_customers` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_crm_customer_addresses_wh_tenants1`
     FOREIGN KEY (`tenant_id`)
     REFERENCES `wh_tenants` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------
@@ -712,6 +745,7 @@ CREATE TABLE IF NOT EXISTS `crm_customer_complaints` (
   `customer_id` INT NOT NULL,
   `user_id` INT NOT NULL,
   `tenant_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   INDEX `fk_crm_customer_complaints_crm_customers1_idx` (`customer_id` ASC),
   INDEX `fk_crm_customer_complaints_users1_idx` (`user_id` ASC),
@@ -719,18 +753,18 @@ CREATE TABLE IF NOT EXISTS `crm_customer_complaints` (
   CONSTRAINT `fk_crm_customer_complaints_crm_customers1`
     FOREIGN KEY (`customer_id`)
     REFERENCES `crm_customers` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_crm_customer_complaints_users1`
     FOREIGN KEY (`user_id`)
     REFERENCES `users` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_crm_customer_complaints_wh_tenants1`
     FOREIGN KEY (`tenant_id`)
     REFERENCES `wh_tenants` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================================================
@@ -759,6 +793,7 @@ CREATE TABLE IF NOT EXISTS `orders` (
   `customer_id` INT NULL DEFAULT NULL,
   `created_by` INT NULL DEFAULT NULL,
   `tenant_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE INDEX `uk_orders_tenant_order_no` (`tenant_id` ASC, `order_no` ASC),
   INDEX `fk_orders_crm_customers1_idx` (`customer_id` ASC),
@@ -767,18 +802,18 @@ CREATE TABLE IF NOT EXISTS `orders` (
   CONSTRAINT `fk_orders_crm_customers1`
     FOREIGN KEY (`customer_id`)
     REFERENCES `crm_customers` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_orders_users1`
     FOREIGN KEY (`created_by`)
     REFERENCES `users` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_orders_wh_tenants1`
     FOREIGN KEY (`tenant_id`)
     REFERENCES `wh_tenants` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------
@@ -795,6 +830,7 @@ CREATE TABLE IF NOT EXISTS `order_items` (
   `order_id` INT NOT NULL,
   `product_id` INT NULL DEFAULT NULL,
   `tenant_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   INDEX `fk_order_items_orders1_idx` (`order_id` ASC),
   INDEX `fk_order_items_inventory_products1_idx` (`product_id` ASC),
@@ -802,18 +838,18 @@ CREATE TABLE IF NOT EXISTS `order_items` (
   CONSTRAINT `fk_order_items_orders1`
     FOREIGN KEY (`order_id`)
     REFERENCES `orders` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_order_items_inventory_products1`
     FOREIGN KEY (`product_id`)
     REFERENCES `inventory_products` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_order_items_wh_tenants1`
     FOREIGN KEY (`tenant_id`)
     REFERENCES `wh_tenants` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------
@@ -827,6 +863,7 @@ CREATE TABLE IF NOT EXISTS `order_assignments` (
   `status` VARCHAR(45) NOT NULL,
   `order_id` INT NOT NULL,
   `tenant_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   INDEX `fk_order_assignments_orders1_idx` (`order_id` ASC),
   INDEX `fk_order_assignments_users1_idx` (`assigned_to` ASC),
@@ -834,18 +871,18 @@ CREATE TABLE IF NOT EXISTS `order_assignments` (
   CONSTRAINT `fk_order_assignments_orders1`
     FOREIGN KEY (`order_id`)
     REFERENCES `orders` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_order_assignments_users1`
     FOREIGN KEY (`assigned_to`)
     REFERENCES `users` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_order_assignments_wh_tenants1`
     FOREIGN KEY (`tenant_id`)
     REFERENCES `wh_tenants` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------
@@ -859,19 +896,20 @@ CREATE TABLE IF NOT EXISTS `order_payments` (
   `paid_at` TIMESTAMP NULL DEFAULT NULL,
   `order_id` INT NOT NULL,
   `tenant_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   INDEX `fk_order_payments_orders1_idx` (`order_id` ASC),
   INDEX `fk_order_payments_wh_tenants1_idx` (`tenant_id` ASC),
   CONSTRAINT `fk_order_payments_orders1`
     FOREIGN KEY (`order_id`)
     REFERENCES `orders` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_order_payments_wh_tenants1`
     FOREIGN KEY (`tenant_id`)
     REFERENCES `wh_tenants` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------
@@ -884,6 +922,7 @@ CREATE TABLE IF NOT EXISTS `order_cancellations` (
   `order_id` INT NOT NULL,
   `cancelled_by` INT NOT NULL,
   `tenant_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   INDEX `fk_order_cancellations_orders1_idx` (`order_id` ASC),
   INDEX `fk_order_cancellations_users1_idx` (`cancelled_by` ASC),
@@ -891,18 +930,18 @@ CREATE TABLE IF NOT EXISTS `order_cancellations` (
   CONSTRAINT `fk_order_cancellations_orders1`
     FOREIGN KEY (`order_id`)
     REFERENCES `orders` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_order_cancellations_users1`
     FOREIGN KEY (`cancelled_by`)
     REFERENCES `users` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_order_cancellations_wh_tenants1`
     FOREIGN KEY (`tenant_id`)
     REFERENCES `wh_tenants` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------
@@ -916,6 +955,7 @@ CREATE TABLE IF NOT EXISTS `order_returns` (
   `order_id` INT NOT NULL,
   `created_by` INT NOT NULL,
   `tenant_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   INDEX `fk_order_returns_orders1_idx` (`order_id` ASC),
   INDEX `fk_order_returns_users1_idx` (`created_by` ASC),
@@ -923,18 +963,18 @@ CREATE TABLE IF NOT EXISTS `order_returns` (
   CONSTRAINT `fk_order_returns_orders1`
     FOREIGN KEY (`order_id`)
     REFERENCES `orders` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_order_returns_users1`
     FOREIGN KEY (`created_by`)
     REFERENCES `users` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_order_returns_wh_tenants1`
     FOREIGN KEY (`tenant_id`)
     REFERENCES `wh_tenants` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------
@@ -950,6 +990,7 @@ CREATE TABLE IF NOT EXISTS `order_exchanges` (
   `new_product_id` INT NOT NULL,
   `created_by` INT NOT NULL,
   `tenant_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   INDEX `fk_order_exchanges_orders1_idx` (`order_id` ASC),
   INDEX `fk_order_exchanges_inventory_products1_idx` (`old_product_id` ASC),
@@ -959,28 +1000,28 @@ CREATE TABLE IF NOT EXISTS `order_exchanges` (
   CONSTRAINT `fk_order_exchanges_orders1`
     FOREIGN KEY (`order_id`)
     REFERENCES `orders` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_order_exchanges_inventory_products1`
     FOREIGN KEY (`old_product_id`)
     REFERENCES `inventory_products` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_order_exchanges_inventory_products2`
     FOREIGN KEY (`new_product_id`)
     REFERENCES `inventory_products` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_order_exchanges_users1`
     FOREIGN KEY (`created_by`)
     REFERENCES `users` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_order_exchanges_wh_tenants1`
     FOREIGN KEY (`tenant_id`)
     REFERENCES `wh_tenants` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------
@@ -996,6 +1037,7 @@ CREATE TABLE IF NOT EXISTS `order_refunds` (
   `order_id` INT NOT NULL,
   `created_by` INT NOT NULL,
   `tenant_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   INDEX `fk_order_refunds_orders1_idx` (`order_id` ASC),
   INDEX `fk_order_refunds_users1_idx` (`created_by` ASC),
@@ -1003,18 +1045,18 @@ CREATE TABLE IF NOT EXISTS `order_refunds` (
   CONSTRAINT `fk_order_refunds_orders1`
     FOREIGN KEY (`order_id`)
     REFERENCES `orders` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_order_refunds_users1`
     FOREIGN KEY (`created_by`)
     REFERENCES `users` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_order_refunds_wh_tenants1`
     FOREIGN KEY (`tenant_id`)
     REFERENCES `wh_tenants` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================================================
@@ -1036,13 +1078,14 @@ CREATE TABLE IF NOT EXISTS `ecom_store_connections` (
   `last_synced_at` TIMESTAMP NULL DEFAULT NULL,
   `created_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
   `tenant_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   INDEX `fk_ecom_store_connections_wh_tenants1_idx` (`tenant_id` ASC),
   CONSTRAINT `fk_ecom_store_connections_wh_tenants1`
     FOREIGN KEY (`tenant_id`)
     REFERENCES `wh_tenants` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------
@@ -1057,19 +1100,20 @@ CREATE TABLE IF NOT EXISTS `ecom_sync_logs` (
   `synced_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
   `store_id` INT NOT NULL,
   `tenant_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   INDEX `fk_ecom_sync_logs_ecom_store_connections1_idx` (`store_id` ASC),
   INDEX `fk_ecom_sync_logs_wh_tenants1_idx` (`tenant_id` ASC),
   CONSTRAINT `fk_ecom_sync_logs_ecom_store_connections1`
     FOREIGN KEY (`store_id`)
     REFERENCES `ecom_store_connections` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_ecom_sync_logs_wh_tenants1`
     FOREIGN KEY (`tenant_id`)
     REFERENCES `wh_tenants` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------
@@ -1085,6 +1129,7 @@ CREATE TABLE IF NOT EXISTS `ecom_external_orders` (
   `created_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
   `store_id` INT NOT NULL,
   `tenant_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   INDEX `fk_ecom_external_orders_ecom_store_connections1_idx` (`store_id` ASC),
   INDEX `fk_ecom_external_orders_orders1_idx` (`internal_order_id` ASC),
@@ -1092,18 +1137,18 @@ CREATE TABLE IF NOT EXISTS `ecom_external_orders` (
   CONSTRAINT `fk_ecom_external_orders_ecom_store_connections1`
     FOREIGN KEY (`store_id`)
     REFERENCES `ecom_store_connections` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_ecom_external_orders_orders1`
     FOREIGN KEY (`internal_order_id`)
     REFERENCES `orders` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_ecom_external_orders_wh_tenants1`
     FOREIGN KEY (`tenant_id`)
     REFERENCES `wh_tenants` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================================================
@@ -1123,13 +1168,14 @@ CREATE TABLE IF NOT EXISTS `finance_vendor_bills` (
   `status` VARCHAR(45) NOT NULL,
   `created_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
   `tenant_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   INDEX `fk_finance_vendor_bills_wh_tenants1_idx` (`tenant_id` ASC),
   CONSTRAINT `fk_finance_vendor_bills_wh_tenants1`
     FOREIGN KEY (`tenant_id`)
     REFERENCES `wh_tenants` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------
@@ -1142,19 +1188,20 @@ CREATE TABLE IF NOT EXISTS `finance_vendor_payments` (
   `paid_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
   `vendor_bill_id` INT NOT NULL,
   `tenant_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   INDEX `fk_finance_vendor_payments_finance_vendor_bills1_idx` (`vendor_bill_id` ASC),
   INDEX `fk_finance_vendor_payments_wh_tenants1_idx` (`tenant_id` ASC),
   CONSTRAINT `fk_finance_vendor_payments_finance_vendor_bills1`
     FOREIGN KEY (`vendor_bill_id`)
     REFERENCES `finance_vendor_bills` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_finance_vendor_payments_wh_tenants1`
     FOREIGN KEY (`tenant_id`)
     REFERENCES `wh_tenants` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------
@@ -1166,13 +1213,14 @@ CREATE TABLE IF NOT EXISTS `finance_expense_categories` (
   `monthly_allocated_budget` DECIMAL(12,2) NULL DEFAULT NULL,
   `notes` TEXT NULL DEFAULT NULL,
   `tenant_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   INDEX `fk_finance_expense_categories_wh_tenants1_idx` (`tenant_id` ASC),
   CONSTRAINT `fk_finance_expense_categories_wh_tenants1`
     FOREIGN KEY (`tenant_id`)
     REFERENCES `wh_tenants` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------
@@ -1185,19 +1233,20 @@ CREATE TABLE IF NOT EXISTS `finance_expense_sub_categories` (
   `notes` TEXT NULL DEFAULT NULL,
   `category_id` INT NOT NULL,
   `tenant_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   INDEX `fk_fin_exp_sub_cat_fin_exp_cat1_idx` (`category_id` ASC),
   INDEX `fk_finance_expense_sub_categories_wh_tenants1_idx` (`tenant_id` ASC),
   CONSTRAINT `fk_fin_exp_sub_cat_fin_exp_cat1`
     FOREIGN KEY (`category_id`)
     REFERENCES `finance_expense_categories` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_finance_expense_sub_categories_wh_tenants1`
     FOREIGN KEY (`tenant_id`)
     REFERENCES `wh_tenants` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------
@@ -1214,6 +1263,7 @@ CREATE TABLE IF NOT EXISTS `finance_expenses` (
   `category_id` INT NOT NULL,
   `sub_category_id` INT NULL DEFAULT NULL,
   `tenant_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   INDEX `fk_finance_expenses_finance_expense_categories1_idx` (`category_id` ASC),
   INDEX `fk_finance_expenses_finance_expense_sub_categories1_idx` (`sub_category_id` ASC),
@@ -1221,18 +1271,18 @@ CREATE TABLE IF NOT EXISTS `finance_expenses` (
   CONSTRAINT `fk_finance_expenses_finance_expense_categories1`
     FOREIGN KEY (`category_id`)
     REFERENCES `finance_expense_categories` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_finance_expenses_finance_expense_sub_categories1`
     FOREIGN KEY (`sub_category_id`)
     REFERENCES `finance_expense_sub_categories` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_finance_expenses_wh_tenants1`
     FOREIGN KEY (`tenant_id`)
     REFERENCES `wh_tenants` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------
@@ -1249,6 +1299,7 @@ CREATE TABLE IF NOT EXISTS `finance_recurring_expenses` (
   `category_id` INT NOT NULL,
   `sub_category_id` INT NULL DEFAULT NULL,
   `tenant_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   INDEX `fk_finance_recurring_expenses_finance_expense_categories1_idx` (`category_id` ASC),
   INDEX `fk_fin_recur_exp_fin_exp_sub_cat1_idx` (`sub_category_id` ASC),
@@ -1256,18 +1307,18 @@ CREATE TABLE IF NOT EXISTS `finance_recurring_expenses` (
   CONSTRAINT `fk_finance_recurring_expenses_finance_expense_categories1`
     FOREIGN KEY (`category_id`)
     REFERENCES `finance_expense_categories` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_fin_recur_exp_fin_exp_sub_cat1`
     FOREIGN KEY (`sub_category_id`)
     REFERENCES `finance_expense_sub_categories` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_finance_recurring_expenses_wh_tenants1`
     FOREIGN KEY (`tenant_id`)
     REFERENCES `wh_tenants` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------
@@ -1281,13 +1332,14 @@ CREATE TABLE IF NOT EXISTS `finance_bank_accounts` (
   `current_balance` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
   `status` VARCHAR(45) NOT NULL,
   `tenant_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   INDEX `fk_finance_bank_accounts_wh_tenants1_idx` (`tenant_id` ASC),
   CONSTRAINT `fk_finance_bank_accounts_wh_tenants1`
     FOREIGN KEY (`tenant_id`)
     REFERENCES `wh_tenants` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------
@@ -1302,13 +1354,14 @@ CREATE TABLE IF NOT EXISTS `finance_transactions` (
   `notes` TEXT NULL DEFAULT NULL,
   `transaction_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
   `tenant_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   INDEX `fk_finance_transactions_wh_tenants1_idx` (`tenant_id` ASC),
   CONSTRAINT `fk_finance_transactions_wh_tenants1`
     FOREIGN KEY (`tenant_id`)
     REFERENCES `wh_tenants` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================================================
@@ -1328,13 +1381,14 @@ CREATE TABLE IF NOT EXISTS `logistics_courier_partners` (
   `status` VARCHAR(45) NOT NULL,
   `created_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
   `tenant_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   INDEX `fk_logistics_courier_partners_wh_tenants1_idx` (`tenant_id` ASC),
   CONSTRAINT `fk_logistics_courier_partners_wh_tenants1`
     FOREIGN KEY (`tenant_id`)
     REFERENCES `wh_tenants` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------
@@ -1350,6 +1404,7 @@ CREATE TABLE IF NOT EXISTS `logistics_tracking_sync_logs` (
   `courier_id` INT NOT NULL,
   `order_id` INT NOT NULL,
   `tenant_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   INDEX `fk_logistics_tracking_sync_logs_logistics_courier_partners1_idx` (`courier_id` ASC),
   INDEX `fk_logistics_tracking_sync_logs_orders1_idx` (`order_id` ASC),
@@ -1357,18 +1412,18 @@ CREATE TABLE IF NOT EXISTS `logistics_tracking_sync_logs` (
   CONSTRAINT `fk_logistics_tracking_sync_logs_logistics_courier_partners1`
     FOREIGN KEY (`courier_id`)
     REFERENCES `logistics_courier_partners` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_logistics_tracking_sync_logs_orders1`
     FOREIGN KEY (`order_id`)
     REFERENCES `orders` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_logistics_tracking_sync_logs_wh_tenants1`
     FOREIGN KEY (`tenant_id`)
     REFERENCES `wh_tenants` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------
@@ -1383,19 +1438,20 @@ CREATE TABLE IF NOT EXISTS `logistics_pickup_requests` (
   `created_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
   `courier_id` INT NOT NULL,
   `tenant_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   INDEX `fk_logistics_pickup_requests_logistics_courier_partners1_idx` (`courier_id` ASC),
   INDEX `fk_logistics_pickup_requests_wh_tenants1_idx` (`tenant_id` ASC),
   CONSTRAINT `fk_logistics_pickup_requests_logistics_courier_partners1`
     FOREIGN KEY (`courier_id`)
     REFERENCES `logistics_courier_partners` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_logistics_pickup_requests_wh_tenants1`
     FOREIGN KEY (`tenant_id`)
     REFERENCES `wh_tenants` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------
@@ -1406,6 +1462,7 @@ CREATE TABLE IF NOT EXISTS `logistics_pickup_orders` (
   `pickup_request_id` INT NOT NULL,
   `order_id` INT NOT NULL,
   `tenant_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE INDEX `uk_logistics_pickup_orders_pickup_order` (`pickup_request_id` ASC, `order_id` ASC),
   INDEX `fk_logistics_pickup_orders_orders1_idx` (`order_id` ASC),
@@ -1413,18 +1470,18 @@ CREATE TABLE IF NOT EXISTS `logistics_pickup_orders` (
   CONSTRAINT `fk_logistics_pickup_orders_logistics_pickup_requests1`
     FOREIGN KEY (`pickup_request_id`)
     REFERENCES `logistics_pickup_requests` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_logistics_pickup_orders_orders1`
     FOREIGN KEY (`order_id`)
     REFERENCES `orders` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_logistics_pickup_orders_wh_tenants1`
     FOREIGN KEY (`tenant_id`)
     REFERENCES `wh_tenants` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================================================
@@ -1442,13 +1499,14 @@ CREATE TABLE IF NOT EXISTS `pos_outlets` (
   `status` VARCHAR(45) NOT NULL,
   `created_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
   `tenant_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   INDEX `fk_pos_outlets_wh_tenants1_idx` (`tenant_id` ASC),
   CONSTRAINT `fk_pos_outlets_wh_tenants1`
     FOREIGN KEY (`tenant_id`)
     REFERENCES `wh_tenants` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------
@@ -1462,19 +1520,20 @@ CREATE TABLE IF NOT EXISTS `pos_terminals` (
   `created_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
   `outlet_id` INT NOT NULL,
   `tenant_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   INDEX `fk_pos_terminals_pos_outlets1_idx` (`outlet_id` ASC),
   INDEX `fk_pos_terminals_wh_tenants1_idx` (`tenant_id` ASC),
   CONSTRAINT `fk_pos_terminals_pos_outlets1`
     FOREIGN KEY (`outlet_id`)
     REFERENCES `pos_outlets` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_pos_terminals_wh_tenants1`
     FOREIGN KEY (`tenant_id`)
     REFERENCES `wh_tenants` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------
@@ -1493,6 +1552,7 @@ CREATE TABLE IF NOT EXISTS `pos_sales` (
   `crm_customers_id` INT NULL DEFAULT NULL,
   `created_by` INT NOT NULL,
   `tenant_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE INDEX `uk_pos_sales_tenant_sale_no` (`tenant_id` ASC, `sale_no` ASC),
   INDEX `fk_pos_sales_pos_outlets1_idx` (`outlet_id` ASC),
@@ -1503,28 +1563,28 @@ CREATE TABLE IF NOT EXISTS `pos_sales` (
   CONSTRAINT `fk_pos_sales_pos_outlets1`
     FOREIGN KEY (`outlet_id`)
     REFERENCES `pos_outlets` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_pos_sales_pos_terminals1`
     FOREIGN KEY (`terminal_id`)
     REFERENCES `pos_terminals` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_pos_sales_crm_customers1`
     FOREIGN KEY (`crm_customers_id`)
     REFERENCES `crm_customers` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_pos_sales_users1`
     FOREIGN KEY (`created_by`)
     REFERENCES `users` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_pos_sales_wh_tenants1`
     FOREIGN KEY (`tenant_id`)
     REFERENCES `wh_tenants` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------
@@ -1540,6 +1600,7 @@ CREATE TABLE IF NOT EXISTS `pos_sale_items` (
   `pos_sale_id` INT NOT NULL,
   `product_id` INT NULL DEFAULT NULL,
   `tenant_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   INDEX `fk_pos_sale_items_pos_sales1_idx` (`pos_sale_id` ASC),
   INDEX `fk_pos_sale_items_inventory_products1_idx` (`product_id` ASC),
@@ -1547,18 +1608,18 @@ CREATE TABLE IF NOT EXISTS `pos_sale_items` (
   CONSTRAINT `fk_pos_sale_items_pos_sales1`
     FOREIGN KEY (`pos_sale_id`)
     REFERENCES `pos_sales` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_pos_sale_items_inventory_products1`
     FOREIGN KEY (`product_id`)
     REFERENCES `inventory_products` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_pos_sale_items_wh_tenants1`
     FOREIGN KEY (`tenant_id`)
     REFERENCES `wh_tenants` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------
@@ -1576,6 +1637,7 @@ CREATE TABLE IF NOT EXISTS `pos_cash_registers` (
   `opened_by` INT NOT NULL,
   `closed_by` INT NULL DEFAULT NULL,
   `tenant_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   INDEX `fk_pos_cash_registers_pos_outlets1_idx` (`outlet_id` ASC),
   INDEX `fk_pos_cash_registers_pos_terminals1_idx` (`terminal_id` ASC),
@@ -1585,28 +1647,28 @@ CREATE TABLE IF NOT EXISTS `pos_cash_registers` (
   CONSTRAINT `fk_pos_cash_registers_pos_outlets1`
     FOREIGN KEY (`outlet_id`)
     REFERENCES `pos_outlets` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_pos_cash_registers_pos_terminals1`
     FOREIGN KEY (`terminal_id`)
     REFERENCES `pos_terminals` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_pos_cash_registers_users1`
     FOREIGN KEY (`opened_by`)
     REFERENCES `users` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_pos_cash_registers_users2`
     FOREIGN KEY (`closed_by`)
     REFERENCES `users` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_pos_cash_registers_wh_tenants1`
     FOREIGN KEY (`tenant_id`)
     REFERENCES `wh_tenants` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------
@@ -1619,17 +1681,18 @@ CREATE TABLE IF NOT EXISTS `pos_refunds` (
   `refunded_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
   `pos_sale_id` INT NOT NULL,
   `tenant_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   INDEX `fk_pos_refunds_pos_sales1_idx` (`pos_sale_id` ASC),
   INDEX `fk_pos_refunds_wh_tenants1_idx` (`tenant_id` ASC),
   CONSTRAINT `fk_pos_refunds_pos_sales1`
     FOREIGN KEY (`pos_sale_id`)
     REFERENCES `pos_sales` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION,
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
   CONSTRAINT `fk_pos_refunds_wh_tenants1`
     FOREIGN KEY (`tenant_id`)
     REFERENCES `wh_tenants` (`id`)
-    ON DELETE NO ACTION
-    ON UPDATE NO ACTION
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

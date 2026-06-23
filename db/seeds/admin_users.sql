@@ -1,7 +1,5 @@
 -- Example WebHouse admin users (passwords encrypted with WARSI cipher)
--- REQUIRED: run migrations 002 and 003 BEFORE this seed.
---   002_user_sessions.sql
---   003_password_column_widen.sql  (password must be VARCHAR(255) or encrypted hash gets truncated!)
+-- REQUIRED: apply db/schema.sql first.
 -- Or run: cd server && npm run setup:db
 USE `webhouse_project_x`;
 

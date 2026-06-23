@@ -1,5 +1,4 @@
 import jwt from "jsonwebtoken";
-import crypto from "crypto";
 import { verifyPassword } from "../utils/cipher.js";
 
 const toUserPayload = (user) => ({
@@ -11,7 +10,7 @@ const toUserPayload = (user) => ({
   portal: "wh_admin",
 });
 
-export function registerAuthRoutes(app, db, { JWT_SECRET, JWT_EXPIRES_IN, verifyToken }) {
+export function registerAuthRoutes(app, db, { JWT_SECRET, JWT_EXPIRES_IN, JWT_REFRESH_EXPIRES_IN, verifyToken }) {
   app.post("/api/login", async (req, res) => {
     const { username, password } = req.body;
     if (!username || !password) {
@@ -34,23 +33,13 @@ export function registerAuthRoutes(app, db, { JWT_SECRET, JWT_EXPIRES_IN, verify
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
-    const sessionId = crypto.randomBytes(32).toString("hex");
-    const refreshToken = crypto.randomBytes(32).toString("hex");
-    const expiresAt = new Date();
-    expiresAt.setHours(expiresAt.getHours() + 12);
-
-    await db.execute(
-      `INSERT INTO user_sessions (session_id, admin_user_id, ip_address, user_agent, refresh_token, expires_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [sessionId, user.id, req.ip, req.get("user-agent"), refreshToken, expiresAt]
-    );
-
     await db.execute("UPDATE wh_admin_users SET last_login_at = NOW() WHERE id = ?", [user.id]);
 
-    const token = jwt.sign(
-      { id: user.id, role: "wh_admin", sessionId },
+    const token = jwt.sign({ id: user.id, role: "wh_admin" }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+    const refreshToken = jwt.sign(
+      { id: user.id, role: "wh_admin", type: "refresh" },
       JWT_SECRET,
-      { expiresIn: JWT_EXPIRES_IN }
+      { expiresIn: JWT_REFRESH_EXPIRES_IN }
     );
 
     res.json({ token, refreshToken, user: toUserPayload(user) });
@@ -60,28 +49,26 @@ export function registerAuthRoutes(app, db, { JWT_SECRET, JWT_EXPIRES_IN, verify
     const { refreshToken } = req.body;
     if (!refreshToken) return res.status(400).json({ message: "refreshToken is required" });
 
-    const [rows] = await db.execute(
-      `SELECT us.session_id, us.admin_user_id, us.expires_at, us.is_active
-       FROM user_sessions us
-       JOIN wh_admin_users u ON u.id = us.admin_user_id
-       WHERE us.refresh_token = ? LIMIT 1`,
-      [refreshToken]
-    );
-    const session = rows[0];
-    if (!session || !session.is_active || new Date(session.expires_at) < new Date()) {
+    try {
+      const decoded = jwt.verify(refreshToken, JWT_SECRET);
+      if (decoded.type !== "refresh" || decoded.role !== "wh_admin") {
+        return res.status(401).json({ message: "Invalid refresh token" });
+      }
+
+      const [rows] = await db.execute(
+        "SELECT id FROM wh_admin_users WHERE id = ? AND status = 'active' LIMIT 1",
+        [decoded.id]
+      );
+      if (!rows.length) return res.status(401).json({ message: "Invalid refresh token" });
+
+      const token = jwt.sign({ id: decoded.id, role: "wh_admin" }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+      res.json({ token });
+    } catch {
       return res.status(401).json({ message: "Invalid refresh token" });
     }
-
-    const token = jwt.sign(
-      { id: session.admin_user_id, role: "wh_admin", sessionId: session.session_id },
-      JWT_SECRET,
-      { expiresIn: JWT_EXPIRES_IN }
-    );
-    res.json({ token });
   });
 
-  app.post("/api/logout", verifyToken, async (req, res) => {
-    await db.execute("UPDATE user_sessions SET is_active = FALSE WHERE session_id = ?", [req.sessionId]);
+  app.post("/api/logout", verifyToken, async (_req, res) => {
     res.json({ ok: true });
   });
 
