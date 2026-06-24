@@ -25,11 +25,7 @@ coverage/
 .env.development
 .env.production
 
-# =========================
-# Logs
-# =========================
-logs/
-*.log
+
 
 # =========================
 # OS / Editor files
