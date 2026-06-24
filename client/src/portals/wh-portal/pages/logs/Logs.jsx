@@ -1,12 +1,16 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { PageHeader } from "../../../../components/PageHeader";
 import { Card } from "../../../../components/Card";
 import { DataTable } from "../../../../components/DataTable";
+import { TableToolbar } from "../../../../components/TableToolbar";
 import { DiffViewer } from "../../../../components/DiffViewer";
 import { FormField } from "../../../../components/FormField";
 import { useAuth } from "../../../../context/AuthContext";
 import { apiFetch, fetchAllTableRows, TABLE_PAGE_SIZE } from "../../../../api/client";
+import { applyToolbarFilters, EMPTY_TOOLBAR } from "../../../../utils/tableFilters";
 import { formatDateTime } from "../../../../utils/dateTime";
+
+const LOG_TOOLBAR_FILTERS = [{ key: "action", label: "Action" }];
 
 export default function Logs() {
   const { authFetch } = useAuth();
@@ -17,6 +21,20 @@ export default function Logs() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState(null);
+  const [toolbar, setToolbar] = useState({ ...EMPTY_TOOLBAR, action: "" });
+
+  const filteredRows = useMemo(
+    () =>
+      applyToolbarFilters(rows, toolbar, {
+        dateField: "created_at",
+        filters: LOG_TOOLBAR_FILTERS,
+      }),
+    [rows, toolbar]
+  );
+
+  useEffect(() => {
+    setPage(1);
+  }, [toolbar, mode, tenantId]);
 
   useEffect(() => {
     apiFetch("/tenants?page=1&limit=200", {}, authFetch)
@@ -113,17 +131,25 @@ export default function Logs() {
           </FormField>
         </Card>
       )}
-      <Card>
+      <Card className="wh-card--table">
         {mode === "tenant" && !tenantId ? (
           <p className="wh-muted">Select a tenant to view their activity logs.</p>
         ) : loading ? (
           <p className="wh-muted">Loading logs…</p>
         ) : (
           <>
+            <TableToolbar
+              rows={rows}
+              value={toolbar}
+              onChange={setToolbar}
+              dateField="created_at"
+              filters={LOG_TOOLBAR_FILTERS}
+              searchPlaceholder="Search logs…"
+            />
             <DataTable
               columns={mode === "wh" ? whColumns : tenantColumns}
-              rows={rows}
-              filterRows={rows}
+              rows={filteredRows}
+              filterRows={filteredRows}
               page={page}
               pageSize={TABLE_PAGE_SIZE}
               onPageChange={setPage}
@@ -131,7 +157,7 @@ export default function Logs() {
             />
             {rows.map((row) =>
               expanded === row.id ? (
-                <div key={`exp-${row.id}`} className="wh-card" style={{ marginTop: 12 }}>
+                <div key={`exp-${row.id}`} className="wh-card" style={{ margin: "12px 16px 16px" }}>
                   <DiffViewer oldValue={row.old_value} newValue={row.new_value} />
                 </div>
               ) : null

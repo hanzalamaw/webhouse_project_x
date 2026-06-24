@@ -1,14 +1,19 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { PageHeader } from "../../../../components/PageHeader";
 import { Card } from "../../../../components/Card";
 import { DataTable } from "../../../../components/DataTable";
+import { TableToolbar } from "../../../../components/TableToolbar";
 import { ConfirmDeleteModal } from "../../../../components/ConfirmDeleteModal";
 import { FormField } from "../../../../components/FormField";
 import { Button } from "../../../../components/Button";
+import { Modal } from "../../../../components/Modal";
 import { LoginPortalSelect } from "../../../../components/LoginPortalSelect";
 import { useAuth } from "../../../../context/AuthContext";
 import { apiFetch, fetchAllTableRows, TABLE_PAGE_SIZE } from "../../../../api/client";
+import { applyToolbarFilters, EMPTY_TOOLBAR } from "../../../../utils/tableFilters";
 import { formatPKR } from "../../../../utils/currency";
+
+const PLAN_TOOLBAR_FILTERS = [{ key: "login_portal", label: "Portal" }];
 
 export default function ManageSubscriptions() {
   const { authFetch } = useAuth();
@@ -21,6 +26,20 @@ export default function ManageSubscriptions() {
   const [form, setForm] = useState({ plan_name: "", plan_price: "", login_portal: "", module_ids: [] });
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
+  const [toolbar, setToolbar] = useState({ ...EMPTY_TOOLBAR, login_portal: "" });
+
+  const filteredRows = useMemo(
+    () =>
+      applyToolbarFilters(rows, toolbar, {
+        dateField: "created_at",
+        filters: PLAN_TOOLBAR_FILTERS,
+      }),
+    [rows, toolbar]
+  );
+
+  useEffect(() => {
+    setPage(1);
+  }, [toolbar]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -96,56 +115,68 @@ export default function ManageSubscriptions() {
   return (
     <div className="wh-page">
       <PageHeader title="Manage Subscriptions" description="Edit plans, ERP portal, pricing, and modules." />
-      <Card>
+      <Card className="wh-card--table">
         {loading ? (
           <p className="wh-muted">Loading…</p>
         ) : (
-          <DataTable
-            columns={columns}
-            rows={rows}
-            filterRows={rows}
-            page={page}
-            pageSize={TABLE_PAGE_SIZE}
-            onPageChange={setPage}
-          />
+          <>
+            <TableToolbar
+              rows={rows}
+              value={toolbar}
+              onChange={setToolbar}
+              dateField="created_at"
+              filters={PLAN_TOOLBAR_FILTERS}
+              searchPlaceholder="Search plans…"
+            />
+            <DataTable
+              columns={columns}
+              rows={filteredRows}
+              filterRows={filteredRows}
+              page={page}
+              pageSize={TABLE_PAGE_SIZE}
+              onPageChange={setPage}
+            />
+          </>
         )}
       </Card>
 
-      {editRow && (
-        <div className="wh-modal-overlay" onClick={() => setEditRow(null)}>
-          <div className="wh-modal wh-modal--wide" onClick={(e) => e.stopPropagation()}>
-            <h3 className="wh-modal__title">Edit Subscription</h3>
-            <div className="wh-form-grid">
-              <FormField id="pn" label="Plan Name" value={form.plan_name} onChange={(e) => setForm((f) => ({ ...f, plan_name: e.target.value }))} />
-              <FormField
-                id="pp"
-                label="Monthly Price (Rs.)"
-                type="number"
-                step="0.01"
-                value={form.plan_price}
-                onChange={(e) => setForm((f) => ({ ...f, plan_price: e.target.value }))}
-              />
-            </div>
-            <div className="wh-field">
-              <span className="wh-field__label">ERP Login Portal</span>
-              <LoginPortalSelect value={form.login_portal} onChange={(v) => setForm((f) => ({ ...f, login_portal: v }))} />
-            </div>
-            <p className="wh-field__label">Modules</p>
-            <div className="wh-checkbox-grid">
-              {allModules.map((m) => (
-                <label key={m.id} className="wh-checkbox-item">
-                  <input type="checkbox" checked={form.module_ids.includes(m.id)} onChange={() => toggleModule(m.id)} />
-                  {m.module_name}
-                </label>
-              ))}
-            </div>
-            <div className="wh-modal__actions">
-              <Button variant="secondary" onClick={() => setEditRow(null)}>Cancel</Button>
-              <Button onClick={saveEdit} disabled={!form.login_portal}>Save</Button>
-            </div>
-          </div>
+      <Modal
+        open={!!editRow}
+        onClose={() => setEditRow(null)}
+        title="Edit Subscription"
+        wide
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setEditRow(null)}>Cancel</Button>
+            <Button onClick={saveEdit} disabled={!form.login_portal}>Save</Button>
+          </>
+        }
+      >
+        <div className="wh-form-grid">
+          <FormField id="pn" label="Plan Name" value={form.plan_name} onChange={(e) => setForm((f) => ({ ...f, plan_name: e.target.value }))} />
+          <FormField
+            id="pp"
+            label="Monthly Price (Rs.)"
+            type="number"
+            step="0.01"
+            value={form.plan_price}
+            onChange={(e) => setForm((f) => ({ ...f, plan_price: e.target.value }))}
+          />
         </div>
-      )}
+        <div className="wh-field">
+          <span className="wh-field__label">ERP Login Portal</span>
+          <LoginPortalSelect value={form.login_portal} onChange={(v) => setForm((f) => ({ ...f, login_portal: v }))} />
+        </div>
+        <p className="wh-field__label">Modules</p>
+        <div className="wh-checkbox-grid">
+          {allModules.map((m) => (
+            <label key={m.id} className="wh-checkbox-item">
+              <input type="checkbox" checked={form.module_ids.includes(m.id)} onChange={() => toggleModule(m.id)} />
+              {m.module_name}
+            </label>
+          ))}
+        </div>
+      </Modal>
 
       <ConfirmDeleteModal
         open={!!deleteRow}

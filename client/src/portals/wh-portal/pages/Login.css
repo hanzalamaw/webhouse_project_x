@@ -55,7 +55,7 @@
 
 .login-forgot a {
   font-size: 14px;
-  color: var(--color-accent);
+  color: var(--color-primary);
   text-decoration: none;
   font-weight: 500;
 }
@@ -76,7 +76,7 @@
 }
 
 .login-register a {
-  color: var(--color-accent);
+  color: var(--color-primary);
   text-decoration: none;
   font-weight: 500;
 }

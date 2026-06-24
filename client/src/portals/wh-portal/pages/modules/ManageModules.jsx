@@ -1,12 +1,15 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { PageHeader } from "../../../../components/PageHeader";
 import { Card } from "../../../../components/Card";
 import { DataTable } from "../../../../components/DataTable";
+import { TableToolbar } from "../../../../components/TableToolbar";
 import { ConfirmDeleteModal } from "../../../../components/ConfirmDeleteModal";
 import { FormField } from "../../../../components/FormField";
 import { Button } from "../../../../components/Button";
+import { Modal } from "../../../../components/Modal";
 import { useAuth } from "../../../../context/AuthContext";
 import { apiFetch, fetchAllTableRows, TABLE_PAGE_SIZE } from "../../../../api/client";
+import { applyToolbarFilters, EMPTY_TOOLBAR } from "../../../../utils/tableFilters";
 import { formatDateTime } from "../../../../utils/dateTime";
 
 export default function ManageModules() {
@@ -23,6 +26,16 @@ export default function ManageModules() {
   const [creating, setCreating] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
+  const [toolbar, setToolbar] = useState({ ...EMPTY_TOOLBAR });
+
+  const filteredRows = useMemo(
+    () => applyToolbarFilters(rows, toolbar, { dateField: "created_at" }),
+    [rows, toolbar]
+  );
+
+  useEffect(() => {
+    setPage(1);
+  }, [toolbar]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -117,13 +130,20 @@ export default function ManageModules() {
           </Button>
         }
       />
-      <Card>
+      <Card className="wh-card--table">
         {loading ? <p className="wh-muted">Loading…</p> : (
           <>
+            <TableToolbar
+              rows={rows}
+              value={toolbar}
+              onChange={setToolbar}
+              dateField="created_at"
+              searchPlaceholder="Search modules…"
+            />
             <DataTable
               columns={columns}
-              rows={rows}
-              filterRows={rows}
+              rows={filteredRows}
+              filterRows={filteredRows}
               page={page}
               pageSize={TABLE_PAGE_SIZE}
               onPageChange={setPage}
@@ -132,42 +152,44 @@ export default function ManageModules() {
         )}
       </Card>
 
-      {showCreate && (
-        <div className="wh-modal-overlay" onClick={() => setShowCreate(false)}>
-          <div className="wh-modal" onClick={(e) => e.stopPropagation()}>
-            <h3 className="wh-modal__title">Add Module</h3>
-            <form className="wh-form" onSubmit={createModule}>
-              <FormField
-                id="new_module_name"
-                label="Module Name"
-                value={createName}
-                onChange={(e) => setCreateName(e.target.value)}
-                error={createError}
-                required
-              />
-              <div className="wh-modal__actions">
-                <Button type="button" variant="secondary" onClick={() => setShowCreate(false)}>Cancel</Button>
-                <Button type="submit" disabled={creating}>
-                  {creating ? "Saving…" : "Create Module"}
-                </Button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <Modal
+        open={showCreate}
+        onClose={() => setShowCreate(false)}
+        title="Add Module"
+        footer={
+          <>
+            <Button type="button" variant="secondary" onClick={() => setShowCreate(false)}>Cancel</Button>
+            <Button type="submit" form="create-module-form" disabled={creating}>
+              {creating ? "Saving…" : "Create Module"}
+            </Button>
+          </>
+        }
+      >
+        <form id="create-module-form" className="wh-form" onSubmit={createModule}>
+          <FormField
+            id="new_module_name"
+            label="Module Name"
+            value={createName}
+            onChange={(e) => setCreateName(e.target.value)}
+            error={createError}
+            required
+          />
+        </form>
+      </Modal>
 
-      {editRow && (
-        <div className="wh-modal-overlay" onClick={() => setEditRow(null)}>
-          <div className="wh-modal" onClick={(e) => e.stopPropagation()}>
-            <h3 className="wh-modal__title">Edit Module</h3>
-            <FormField id="edit_name" label="Module Name" value={editName} onChange={(e) => setEditName(e.target.value)} />
-            <div className="wh-modal__actions">
-              <Button variant="secondary" onClick={() => setEditRow(null)}>Cancel</Button>
-              <Button onClick={saveEdit}>Save</Button>
-            </div>
-          </div>
-        </div>
-      )}
+      <Modal
+        open={!!editRow}
+        onClose={() => setEditRow(null)}
+        title="Edit Module"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setEditRow(null)}>Cancel</Button>
+            <Button onClick={saveEdit}>Save</Button>
+          </>
+        }
+      >
+        <FormField id="edit_name" label="Module Name" value={editName} onChange={(e) => setEditName(e.target.value)} />
+      </Modal>
 
       <ConfirmDeleteModal
         open={!!deleteRow}

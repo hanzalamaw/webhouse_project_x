@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Button } from "./Button";
+import { Modal } from "./Modal";
 
 export function ConfirmDeleteModal({
   open,
@@ -17,8 +18,6 @@ export function ConfirmDeleteModal({
     if (!open) setInput("");
   }, [open]);
 
-  if (!open) return null;
-
   const handleClose = () => {
     setInput("");
     onClose();
@@ -32,33 +31,36 @@ export function ConfirmDeleteModal({
   };
 
   return (
-    <div className="wh-modal-overlay" onClick={handleClose}>
-      <div className="wh-modal" onClick={(e) => e.stopPropagation()}>
-        <h3 className="wh-modal__title">{title}</h3>
-        <p className="wh-modal__text">
-          Deleting <strong>{recordName}</strong> will also mark all related records as deleted
-          (soft delete). They are permanently removed after 7 days.
-        </p>
-        <p className="wh-modal__text">
-          Type <strong>{confirmPhrase}</strong> to confirm:
-        </p>
-        <input
-          className="wh-field__input"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder={confirmPhrase}
-          autoFocus
-        />
-        {error && <p className="wh-field__error" style={{ marginTop: 12 }}>{error}</p>}
-        <div className="wh-modal__actions">
+    <Modal
+      open={open}
+      onClose={handleClose}
+      title={title}
+      footer={
+        <>
           <Button type="button" variant="secondary" onClick={handleClose}>
             Cancel
           </Button>
           <Button type="button" variant="danger" disabled={!canDelete || loading} onClick={handleConfirm}>
             {loading ? "Deleting…" : "Delete"}
           </Button>
-        </div>
-      </div>
-    </div>
+        </>
+      }
+    >
+      <p className="wh-modal__text">
+        Deleting <strong>{recordName}</strong> will also mark all related records as deleted
+        (soft delete). They are permanently removed after 7 days.
+      </p>
+      <p className="wh-modal__text">
+        Type <strong>{confirmPhrase}</strong> to confirm:
+      </p>
+      <input
+        className="wh-field__input"
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
+        placeholder={confirmPhrase}
+        autoFocus
+      />
+      {error && <p className="wh-field__error" style={{ marginTop: 12 }}>{error}</p>}
+    </Modal>
   );
 }

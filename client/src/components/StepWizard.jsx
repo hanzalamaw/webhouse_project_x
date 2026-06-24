@@ -32,22 +32,36 @@ export function StepWizard({
     }
   };
 
+  const progressPct = steps.length > 1 ? (currentStep / (steps.length - 1)) * 100 : 0;
+
   return (
     <div className="wh-wizard">
+      <div className="wh-wizard__progress">
+        <div className="wh-wizard__progress-fill" style={{ width: `${progressPct}%` }} />
+      </div>
       <ol className="wh-wizard__steps">
         {steps.map((step, i) => {
           const reachable = canVisitStep(i) && i !== currentStep;
+          const done = i < currentStep;
           return (
           <li
             key={step.id}
-            className={`wh-wizard__step${i === currentStep ? " active" : ""}${i < currentStep ? " done" : ""}${reachable ? " reachable" : ""}`}
+            className={`wh-wizard__step${i === currentStep ? " active" : ""}${done ? " done" : ""}${reachable ? " reachable" : ""}`}
           >
             <button
               type="button"
               onClick={() => handleStepClick(i)}
               disabled={!canVisitStep(i)}
             >
-              <span className="wh-wizard__num">{i + 1}</span>
+              <span className="wh-wizard__num">
+                {done ? (
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                ) : (
+                  i + 1
+                )}
+              </span>
               <span className="wh-wizard__label">{step.label}</span>
             </button>
           </li>
@@ -55,7 +69,7 @@ export function StepWizard({
         })}
       </ol>
       {stepError && <p className="wh-field__error wh-wizard__error">{stepError}</p>}
-      <div className="wh-wizard__body">{steps[currentStep]?.content}</div>
+      <div className="wh-wizard__body" key={currentStep}>{steps[currentStep]?.content}</div>
       <div className="wh-wizard__nav">
         <Button type="button" variant="secondary" disabled={currentStep === 0} onClick={() => onStepChange(currentStep - 1)}>
           Back

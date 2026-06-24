@@ -17,18 +17,18 @@
   flex-direction: column;
   min-height: 100vh;
   min-width: 0;
-  margin-left: 240px;
+  margin-left: 220px;
   transition: margin-left 0.35s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .wh-layout-wrapper:has(.wh-sidebar.collapsed) .wh-layout-main {
-  margin-left: 72px;
+  margin-left: 64px;
 }
 
 .wh-layout-content {
   flex: 1;
   overflow: auto;
-  padding: clamp(16px, 2.5vw, 32px);
+  padding: 16px 20px;
   box-sizing: border-box;
   min-height: 0;
 }
@@ -39,6 +39,6 @@
   }
 
   .wh-layout-content {
-    padding-top: 72px;
+    padding-top: 56px;
   }
 }

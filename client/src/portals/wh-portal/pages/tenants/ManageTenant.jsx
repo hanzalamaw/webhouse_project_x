@@ -1,13 +1,22 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { PageHeader } from "../../../../components/PageHeader";
 import { Card } from "../../../../components/Card";
 import { DataTable } from "../../../../components/DataTable";
+import { TableToolbar } from "../../../../components/TableToolbar";
 import { ConfirmDeleteModal } from "../../../../components/ConfirmDeleteModal";
 import { Button } from "../../../../components/Button";
+import { Modal } from "../../../../components/Modal";
+import { StatusBadge } from "../../../../components/Badge";
 import { useAuth } from "../../../../context/AuthContext";
 import { apiFetch, fetchAllTableRows, TABLE_PAGE_SIZE } from "../../../../api/client";
+import { applyToolbarFilters, EMPTY_TOOLBAR } from "../../../../utils/tableFilters";
 import { formatDateTime } from "../../../../utils/dateTime";
+
+const TENANT_TOOLBAR_FILTERS = [
+  { key: "status", label: "Status" },
+  { key: "plan_name", label: "Plan" },
+];
 
 export default function ManageTenant() {
   const { authFetch } = useAuth();
@@ -22,6 +31,24 @@ export default function ManageTenant() {
   const [showPassword, setShowPassword] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
+  const [toolbar, setToolbar] = useState({
+    ...EMPTY_TOOLBAR,
+    status: "",
+    plan_name: "",
+  });
+
+  const filteredRows = useMemo(
+    () =>
+      applyToolbarFilters(rows, toolbar, {
+        dateField: "created_at",
+        filters: TENANT_TOOLBAR_FILTERS,
+      }),
+    [rows, toolbar]
+  );
+
+  useEffect(() => {
+    setPage(1);
+  }, [toolbar]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -76,7 +103,7 @@ export default function ManageTenant() {
     { key: "owner_email", label: "Email" },
     { key: "owner_phone", label: "Phone" },
     { key: "industry", label: "Industry" },
-    { key: "status", label: "Status" },
+    { key: "status", label: "Status", render: (r) => <StatusBadge status={r.status} /> },
     { key: "plan_name", label: "Plan", format: (_, r) => r.plan_name || "—" },
     {
       key: "limits",
@@ -104,55 +131,74 @@ export default function ManageTenant() {
   return (
     <div className="wh-page">
       <PageHeader title="Manage Tenant" description="Tenant directory and super-admin credentials." />
-      <Card>
+      <Card className="wh-card--table">
         {loading ? (
           <p className="wh-muted">Loading…</p>
         ) : (
-          <DataTable
-            columns={columns}
-            rows={rows}
-            filterRows={rows}
-            page={page}
-            pageSize={TABLE_PAGE_SIZE}
-            onPageChange={setPage}
-          />
+          <>
+            <TableToolbar
+              rows={rows}
+              value={toolbar}
+              onChange={setToolbar}
+              dateField="created_at"
+              filters={TENANT_TOOLBAR_FILTERS}
+              searchPlaceholder="Search tenants…"
+            />
+            <DataTable
+              columns={columns}
+              rows={filteredRows}
+              filterRows={filteredRows}
+              page={page}
+              pageSize={TABLE_PAGE_SIZE}
+              onPageChange={setPage}
+            />
+          </>
         )}
       </Card>
 
-      {credentialsRow && (
-        <div className="wh-modal-overlay" onClick={closeCredentials}>
-          <div className="wh-modal" onClick={(e) => e.stopPropagation()}>
-            <h3 className="wh-modal__title">Super Admin — {credentialsRow.company_name}</h3>
-            {credentialsLoading && <p className="wh-muted">Loading…</p>}
-            {!credentialsLoading && credentials?.error && (
-              <p className="wh-field__error">{credentials.error}</p>
-            )}
-            {!credentialsLoading && credentials && !credentials.error && (
-              <div className="wh-review-block__body">
-                <p><strong>Name:</strong> {credentials.name}</p>
-                <p><strong>Username:</strong> {credentials.username || credentials.email}</p>
-                <p><strong>Email:</strong> {credentials.email}</p>
-                <p>
-                  <strong>Password:</strong>{" "}
-                  {showPassword ? credentials.password || "—" : "••••••••"}
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    className="wh-btn--sm"
-                    style={{ marginLeft: 8 }}
-                    onClick={() => setShowPassword((v) => !v)}
-                  >
-                    {showPassword ? "Hide" : "Show"}
-                  </Button>
-                </p>
-              </div>
-            )}
-            <div className="wh-modal__actions">
-              <Button variant="secondary" onClick={closeCredentials}>Close</Button>
+      <Modal
+        open={!!credentialsRow}
+        onClose={closeCredentials}
+        title={`Super Admin — ${credentialsRow?.company_name || ""}`}
+        footer={
+          <Button variant="secondary" onClick={closeCredentials}>Close</Button>
+        }
+      >
+        {credentialsLoading && <p className="wh-muted">Loading…</p>}
+        {!credentialsLoading && credentials?.error && (
+          <p className="wh-field__error">{credentials.error}</p>
+        )}
+        {!credentialsLoading && credentials && !credentials.error && (
+          <div className="wh-modal__kv">
+            <div className="wh-modal__kv-row">
+              <span className="wh-modal__kv-label">Name</span>
+              <span className="wh-modal__kv-value">{credentials.name}</span>
             </div>
+            <div className="wh-modal__kv-row">
+              <span className="wh-modal__kv-label">Username</span>
+              <span className="wh-modal__kv-value">{credentials.username || credentials.email}</span>
+            </div>
+            <div className="wh-modal__kv-row">
+              <span className="wh-modal__kv-label">Email</span>
+              <span className="wh-modal__kv-value">{credentials.email}</span>
+            </div>
+            <div className="wh-modal__kv-row">
+              <span className="wh-modal__kv-label">Password</span>
+              <span className="wh-modal__kv-value">
+                {showPassword ? credentials.password || "—" : "••••••••"}
+              </span>
+            </div>
+            <Button
+              type="button"
+              variant="secondary"
+              className="wh-btn--sm"
+              onClick={() => setShowPassword((v) => !v)}
+            >
+              {showPassword ? "Hide password" : "Show password"}
+            </Button>
           </div>
-        </div>
-      )}
+        )}
+      </Modal>
 
       <ConfirmDeleteModal
         open={!!deleteRow}

@@ -21,7 +21,7 @@ export function FormField({
       {Component === "select" ? (
         <select
           id={id}
-          className="wh-field__input"
+          className={`wh-field__input${rest.readOnly ? " wh-field__input--readonly" : ""}`}
           value={value}
           onChange={onChange}
           {...rest}
@@ -31,7 +31,7 @@ export function FormField({
       ) : Component === "textarea" ? (
         <textarea
           id={id}
-          className="wh-field__input wh-field__textarea"
+          className={`wh-field__input wh-field__textarea${rest.readOnly ? " wh-field__input--readonly" : ""}`}
           value={value}
           onChange={onChange}
           placeholder={placeholder}
@@ -41,7 +41,7 @@ export function FormField({
         <input
           id={id}
           type={type}
-          className="wh-field__input"
+          className={`wh-field__input${rest.readOnly ? " wh-field__input--readonly" : ""}`}
           value={value}
           onChange={onChange}
           placeholder={placeholder}

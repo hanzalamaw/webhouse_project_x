@@ -3,13 +3,16 @@ import { PageHeader } from "../../../../components/PageHeader";
 import { Card } from "../../../../components/Card";
 import { StatCard } from "../../../../components/StatCard";
 import { DataTable } from "../../../../components/DataTable";
+import { TableToolbar } from "../../../../components/TableToolbar";
 import { FormField } from "../../../../components/FormField";
 import { Button } from "../../../../components/Button";
+import { Modal } from "../../../../components/Modal";
 import { useAuth } from "../../../../context/AuthContext";
 import { apiFetch, fetchAllTableRows, TABLE_PAGE_SIZE } from "../../../../api/client";
 import { formatPKR } from "../../../../utils/currency";
 import { formatDate, formatDateTime } from "../../../../utils/dateTime";
 import { addPaymentReceived, toInputDate } from "../../../../utils/billing";
+import { applyToolbarFilters, EMPTY_TOOLBAR } from "../../../../utils/tableFilters";
 
 function toDatetimeLocal(value) {
   if (!value) return "";
@@ -40,6 +43,16 @@ export default function Transaction() {
   const [form, setForm] = useState({ bank: "", cash: "", received_at: "" });
   const [formError, setFormError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [toolbar, setToolbar] = useState({ ...EMPTY_TOOLBAR });
+
+  const filteredRows = useMemo(
+    () => applyToolbarFilters(rows, toolbar, { dateField: "received_at" }),
+    [rows, toolbar]
+  );
+
+  useEffect(() => {
+    setPage(1);
+  }, [toolbar]);
 
   const loadSummary = useCallback(async () => {
     const data = await apiFetch("/transactions/summary", {}, authFetch);
@@ -159,77 +172,98 @@ export default function Transaction() {
           tone="success"
         />
       </div>
-      <Card>
-        <h3 className="wh-card__title">Payment History</h3>
+      <Card className="wh-card--table">
+        <div className="wh-card-table__head">
+          <h3 className="wh-card__title">Payment History</h3>
+        </div>
         {loading ? (
           <p className="wh-muted">Loading transactions…</p>
         ) : (
-          <DataTable
-            columns={columns}
-            rows={rows}
-            filterRows={rows}
-            page={page}
-            pageSize={TABLE_PAGE_SIZE}
-            onPageChange={setPage}
-            onRowClick={openEdit}
-            emptyMessage="No payment records yet."
-          />
+          <>
+            <TableToolbar
+              rows={rows}
+              value={toolbar}
+              onChange={setToolbar}
+              dateField="received_at"
+              searchPlaceholder="Search payments…"
+            />
+            <DataTable
+              columns={columns}
+              rows={filteredRows}
+              filterRows={filteredRows}
+              page={page}
+              pageSize={TABLE_PAGE_SIZE}
+              onPageChange={setPage}
+              onRowClick={openEdit}
+              emptyMessage="No payment records yet."
+            />
+          </>
         )}
       </Card>
 
-      {editRow && (
-        <div className="wh-modal-overlay" onClick={closeEdit}>
-          <div className="wh-modal wh-modal--wide" onClick={(e) => e.stopPropagation()}>
-            <h3 className="wh-modal__title">Edit Transaction — {editRow.company_name}</h3>
-            <div className="wh-form-grid">
-              <FormField id="tx_plan" label="Plan" value={editRow.plan_name || "—"} readOnly />
-              <FormField id="tx_cycle" label="Billing Cycle" value={editRow.billing_cycle || "—"} readOnly />
-              <FormField id="tx_start" label="Start Date" value={toInputDate(editRow.start_date)} readOnly />
-              <FormField id="tx_end" label="End Date" value={toInputDate(editRow.end_date)} readOnly />
-              <FormField id="tx_period" label="Period Total" value={formatPKR(periodTotal)} readOnly />
-              <FormField
-                id="tx_bank"
-                label="Bank (Rs.)"
-                type="number"
-                step="0.01"
-                min="0"
-                value={form.bank}
-                onChange={(e) => {
-                  setFormError("");
-                  setForm((f) => ({ ...f, bank: e.target.value }));
-                }}
-              />
-              <FormField
-                id="tx_cash"
-                label="Cash (Rs.)"
-                type="number"
-                step="0.01"
-                min="0"
-                value={form.cash}
-                onChange={(e) => {
-                  setFormError("");
-                  setForm((f) => ({ ...f, cash: e.target.value }));
-                }}
-              />
-              <FormField id="tx_total" label="Total Received (Rs.)" value={formatPKR(formTotal)} readOnly />
-              <FormField
-                id="tx_received"
-                label="Received At"
-                type="datetime-local"
-                value={form.received_at}
-                onChange={(e) => setForm((f) => ({ ...f, received_at: e.target.value }))}
-              />
-            </div>
-            {formError && <p className="wh-field__error">{formError}</p>}
-            <div className="wh-modal__actions">
-              <Button variant="secondary" onClick={closeEdit}>Cancel</Button>
-              <Button onClick={saveEdit} disabled={saving}>
-                {saving ? "Saving…" : "Save"}
-              </Button>
-            </div>
+      <Modal
+        open={!!editRow}
+        onClose={closeEdit}
+        title={`Edit Transaction — ${editRow?.company_name || ""}`}
+        wide
+        footer={
+          <>
+            <Button variant="secondary" onClick={closeEdit}>Cancel</Button>
+            <Button onClick={saveEdit} disabled={saving}>
+              {saving ? "Saving…" : "Save"}
+            </Button>
+          </>
+        }
+      >
+        <div className="wh-modal__section wh-modal__section--muted">
+          <h4 className="wh-modal__section-title">Subscription</h4>
+          <div className="wh-form-grid">
+            <FormField id="tx_plan" label="Plan" value={editRow?.plan_name || "—"} readOnly />
+            <FormField id="tx_cycle" label="Billing Cycle" value={editRow?.billing_cycle || "—"} readOnly />
+            <FormField id="tx_start" label="Start Date" value={toInputDate(editRow?.start_date)} readOnly />
+            <FormField id="tx_end" label="End Date" value={toInputDate(editRow?.end_date)} readOnly />
+            <FormField id="tx_period" label="Period Total" value={formatPKR(periodTotal)} readOnly />
           </div>
         </div>
-      )}
+        <div className="wh-modal__section">
+          <h4 className="wh-modal__section-title">Payment</h4>
+          <div className="wh-form-grid">
+            <FormField
+              id="tx_bank"
+              label="Bank (Rs.)"
+              type="number"
+              step="0.01"
+              min="0"
+              value={form.bank}
+              onChange={(e) => {
+                setFormError("");
+                setForm((f) => ({ ...f, bank: e.target.value }));
+              }}
+            />
+            <FormField
+              id="tx_cash"
+              label="Cash (Rs.)"
+              type="number"
+              step="0.01"
+              min="0"
+              value={form.cash}
+              onChange={(e) => {
+                setFormError("");
+                setForm((f) => ({ ...f, cash: e.target.value }));
+              }}
+            />
+            <FormField id="tx_total" label="Total Received (Rs.)" value={formatPKR(formTotal)} readOnly />
+            <FormField
+              id="tx_received"
+              label="Received At"
+              type="datetime-local"
+              value={form.received_at}
+              onChange={(e) => setForm((f) => ({ ...f, received_at: e.target.value }))}
+            />
+          </div>
+          {formError && <p className="wh-field__error">{formError}</p>}
+        </div>
+      </Modal>
     </div>
   );
 }

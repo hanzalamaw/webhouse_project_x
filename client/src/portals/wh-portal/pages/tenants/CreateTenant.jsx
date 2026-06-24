@@ -130,10 +130,10 @@ function MonthDayFields({ month, day, onChange, idPrefix }) {
     <div className="wh-month-day-row">
       <FormField
         id={`${idPrefix}_month`}
-        label="Month"
         as="select"
         value={month}
         onChange={(e) => onChange(Number(e.target.value), day)}
+        aria-label="Month"
       >
         {MONTHS.map((m) => (
           <option key={m.value} value={m.value}>{m.label}</option>
@@ -141,10 +141,10 @@ function MonthDayFields({ month, day, onChange, idPrefix }) {
       </FormField>
       <FormField
         id={`${idPrefix}_day`}
-        label="Day"
         as="select"
         value={day}
         onChange={(e) => onChange(month, Number(e.target.value))}
+        aria-label="Day"
       >
         {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((d) => (
           <option key={d} value={d}>{d}</option>

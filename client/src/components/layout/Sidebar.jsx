@@ -53,6 +53,14 @@ export default function Sidebar() {
   }, [isExpanded]);
 
   useEffect(() => {
+    const width = isMobile ? 0 : isExpanded ? 220 : 64;
+    document.documentElement.style.setProperty("--wh-sidebar-width", `${width}px`);
+    return () => {
+      document.documentElement.style.removeProperty("--wh-sidebar-width");
+    };
+  }, [isExpanded, isMobile]);
+
+  useEffect(() => {
     if (!mobileOpen) return;
     const handler = (e) => {
       if (drawerRef.current && !drawerRef.current.contains(e.target)) setMobileOpen(false);
