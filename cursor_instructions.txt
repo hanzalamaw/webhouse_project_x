@@ -109,3 +109,7 @@ Rules:
 ## 5. Full Width Design Pattern
 
 Every div in the design should take the whole width of the screen.
+
+## 6. Dont add suggestions
+
+## 7. make sure always make sql of new migration and update in schema as well. so we can run them to test

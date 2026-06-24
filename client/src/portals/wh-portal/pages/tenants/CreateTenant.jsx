@@ -721,10 +721,10 @@ export default function CreateTenant() {
             <SearchableSelect
               id="tz"
               label="Timezone"
-              value={draft.organization.timezone}
+              value={draft.organization.timezone || DEFAULT_TIMEZONE}
               onChange={(v) => {
                 setStepError("");
-                setDraft((d) => ({ ...d, organization: { ...d.organization, timezone: v } }));
+                setDraft((d) => ({ ...d, organization: { ...d.organization, timezone: v || DEFAULT_TIMEZONE } }));
               }}
               options={timezones}
               loading={refLoading}

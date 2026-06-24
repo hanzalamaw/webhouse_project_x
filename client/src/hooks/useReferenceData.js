@@ -8,14 +8,17 @@ const CURRENCY_URL =
 const TIMEZONE_URL =
   "https://raw.githubusercontent.com/dmfilipenko/timezones.json/master/timezones.json";
 
+const PAKISTAN_STANDARD_TIME = "Pakistan Standard Time";
+
 const TIMEZONE_LABELS = {
-  "Asia/Karachi": "Asia/Karachi — Pakistan Standard Time (PKT)",
+  [DEFAULT_TIMEZONE]: PAKISTAN_STANDARD_TIME,
 };
 
 let currencyCache = null;
 let timezoneCache = null;
 
 function timezoneLabel(tz) {
+  if (tz === DEFAULT_TIMEZONE) return PAKISTAN_STANDARD_TIME;
   return TIMEZONE_LABELS[tz] || tz.replace(/_/g, " ");
 }
 
@@ -51,12 +54,31 @@ async function loadTimezones() {
     .map((tz) => (typeof tz === "string" ? tz : tz.value || tz.text || ""))
     .filter(Boolean)
     .sort();
-  timezoneCache = list.map((tz) => ({ value: tz, label: timezoneLabel(tz) }));
+  timezoneCache = list.map((tz) => ({
+    value: tz,
+    label: timezoneLabel(tz),
+  }));
+  if (!timezoneCache.some((tz) => tz.value === DEFAULT_TIMEZONE)) {
+    timezoneCache.unshift({
+      value: DEFAULT_TIMEZONE,
+      label: PAKISTAN_STANDARD_TIME,
+    });
+  } else {
+    timezoneCache = timezoneCache.map((tz) =>
+      tz.value === DEFAULT_TIMEZONE ? { ...tz, label: PAKISTAN_STANDARD_TIME } : tz
+    );
+  }
+  const defaultIdx = timezoneCache.findIndex((tz) => tz.value === DEFAULT_TIMEZONE);
+  if (defaultIdx > 0) {
+    const [pakistan] = timezoneCache.splice(defaultIdx, 1);
+    timezoneCache.unshift(pakistan);
+  }
   return timezoneCache;
 }
 
 export function formatTimezoneDisplay(value) {
   if (!value) return "—";
+  if (value === DEFAULT_TIMEZONE) return PAKISTAN_STANDARD_TIME;
   return TIMEZONE_LABELS[value] || value;
 }
 
@@ -84,7 +106,7 @@ export function useReferenceData() {
         if (!cancelled) {
           setCurrencies([{ value: DEFAULT_CURRENCY, label: "PKR — Pakistan Rupee" }]);
           setTimezones([
-            { value: DEFAULT_TIMEZONE, label: TIMEZONE_LABELS[DEFAULT_TIMEZONE] },
+            { value: DEFAULT_TIMEZONE, label: PAKISTAN_STANDARD_TIME },
             { value: "UTC", label: "UTC" },
           ]);
         }

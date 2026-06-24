@@ -513,6 +513,14 @@ button {
   overflow-x: auto;
 }
 
+.wh-table__row--clickable {
+  cursor: pointer;
+}
+
+.wh-table__row--clickable:hover td {
+  background: var(--hover-bg, rgba(15, 23, 42, 0.04));
+}
+
 .wh-table-container {
   width: 100%;
 }

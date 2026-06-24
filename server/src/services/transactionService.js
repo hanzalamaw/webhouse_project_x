@@ -11,4 +11,8 @@ export const transactionService = {
     const { rows, total } = await transactionRepository.findAllPayments({ limit, offset });
     return paginatedResponse(rows, total, page, limit);
   },
+
+  async updatePayment(id, body) {
+    return transactionRepository.updatePayment(id, body);
+  },
 };

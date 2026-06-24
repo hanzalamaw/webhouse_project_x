@@ -75,10 +75,28 @@ export function StepWizard({
 }
 
 export function useWizardDraft(storageKey, initialState) {
+  const mergeDraft = (saved) => {
+    if (!saved || typeof saved !== "object") return initialState;
+    return {
+      ...initialState,
+      ...saved,
+      company: { ...initialState.company, ...saved.company },
+      limits: { ...initialState.limits, ...saved.limits },
+      billing: { ...initialState.billing, ...saved.billing },
+      payment: { ...initialState.payment, ...saved.payment },
+      organization: {
+        ...initialState.organization,
+        ...saved.organization,
+        timezone: saved.organization?.timezone || initialState.organization?.timezone,
+      },
+      super_admin: { ...initialState.super_admin, ...saved.super_admin },
+    };
+  };
+
   const [draft, setDraft] = useState(() => {
     try {
       const saved = localStorage.getItem(storageKey);
-      if (saved) return { ...initialState, ...JSON.parse(saved) };
+      if (saved) return mergeDraft(JSON.parse(saved));
     } catch {
       /* ignore */
     }

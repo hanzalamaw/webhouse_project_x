@@ -54,6 +54,7 @@ export function registerWhPortalRoutes(app, verifyToken, jwtConfig = {}) {
 
   app.get("/api/transactions/summary", auth, transactionController.summary);
   app.get("/api/transactions/payments", auth, transactionController.listPayments);
+  app.put("/api/transactions/payments/:id", auth, transactionController.updatePayment);
 
   app.get("/api/support-tickets", auth, supportTicketController.list);
   app.get("/api/support-tickets/:id", auth, supportTicketController.get);

@@ -16,4 +16,13 @@ export const transactionController = {
       res.status(500).json({ message: e.message });
     }
   },
+
+  async updatePayment(req, res) {
+    try {
+      const data = await transactionService.updatePayment(req.params.id, req.body);
+      res.json({ data });
+    } catch (e) {
+      res.status(e.status || 500).json({ message: e.message });
+    }
+  },
 };

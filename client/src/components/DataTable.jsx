@@ -318,6 +318,7 @@ export function DataTable({
   page,
   pageSize,
   onPageChange,
+  onRowClick,
 }) {
   const [excluded, setExcluded] = useState({});
   const [openFilter, setOpenFilter] = useState(null);
@@ -620,7 +621,7 @@ export function DataTable({
   return (
     <div className="wh-table-container">
       {filterPanel}
-      <div className="wh-table-wrap">
+      <div className={`wh-table-wrap${onRowClick ? " wh-table-wrap--clickable" : ""}`}>
         <table className="wh-table">
           <thead>
             <tr>
@@ -662,7 +663,11 @@ export function DataTable({
               </tr>
             ) : (
               displayRows.map((row) => (
-                <tr key={row[rowKey]}>
+                <tr
+                  key={row[rowKey]}
+                  className={onRowClick ? "wh-table__row--clickable" : undefined}
+                  onClick={onRowClick ? () => onRowClick(row) : undefined}
+                >
                   {columns.map((col) => (
                     <td key={col.key || col.label}>{renderCell(row, col)}</td>
                   ))}

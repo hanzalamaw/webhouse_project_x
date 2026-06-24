@@ -3,6 +3,7 @@ import { encrypt } from "../utils/cipher.js";
 import { cascadeSoftDeleteTenant } from "../utils/softDeleteCascade.js";
 
 const PERMISSION_ACTIONS = ["view", "create", "edit", "delete", "manage"];
+const DEFAULT_TIMEZONE = "Asia/Karachi";
 
 export const tenantRepository = {
   async findAll({ limit, offset }) {
@@ -241,7 +242,7 @@ export const tenantRepository = {
           [
             org.company_name,
             org.logo_url || null,
-            org.timezone || null,
+            org.timezone || DEFAULT_TIMEZONE,
             org.currency || null,
             org.language || null,
             org.fiscal_year_start || null,
@@ -257,7 +258,7 @@ export const tenantRepository = {
           [
             org.company_name,
             org.logo_url || null,
-            org.timezone || null,
+            org.timezone || DEFAULT_TIMEZONE,
             org.currency || null,
             org.language || null,
             org.fiscal_year_start || null,
@@ -373,7 +374,7 @@ export const tenantRepository = {
         [
           org.company_name,
           org.logo_url || null,
-          org.timezone || null,
+          org.timezone || DEFAULT_TIMEZONE,
           org.currency || null,
           org.language || null,
           org.fiscal_year_start || null,
