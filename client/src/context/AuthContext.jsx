@@ -1,5 +1,6 @@
 import { createContext, useState, useContext, useEffect, useCallback, useRef } from "react";
 import { API_BASE } from "../config/api";
+import { isTokenExpired } from "../utils/authToken";
 
 const AuthContext = createContext(null);
 
@@ -42,6 +43,20 @@ export const AuthProvider = ({ children }) => {
     window.location.href = getLoginPath(userSnapshot);
   }, [user]);
 
+  const ensureFreshTokens = useCallback((storedUser) => {
+    const token = localStorage.getItem("token");
+    const refreshToken = localStorage.getItem("refreshToken");
+    if (!token || !refreshToken) {
+      clearSessionAndLogout(storedUser);
+      return false;
+    }
+    if (isTokenExpired(refreshToken)) {
+      clearSessionAndLogout(storedUser);
+      return false;
+    }
+    return true;
+  }, [clearSessionAndLogout]);
+
   const authFetch = useCallback(async (url, options = {}) => {
     const epoch = sessionEpochRef.current;
     const token = localStorage.getItem("token");
@@ -52,7 +67,7 @@ export const AuthProvider = ({ children }) => {
 
     if (res.status === 401) {
       const refreshToken = localStorage.getItem("refreshToken");
-      if (!refreshToken) {
+      if (!refreshToken || isTokenExpired(refreshToken)) {
         clearSessionAndLogout();
         return res;
       }
@@ -90,6 +105,8 @@ export const AuthProvider = ({ children }) => {
     }
 
     const { user: storedUser, token } = session;
+    if (!ensureFreshTokens(storedUser)) return;
+
     setUser(storedUser);
 
     const mePath = storedUser.portal === "tenant" ? `${API_BASE}/tenant/me` : `${API_BASE}/me`;
@@ -104,7 +121,7 @@ export const AuthProvider = ({ children }) => {
 
       if (res.status === 401) {
         const refreshToken = localStorage.getItem("refreshToken");
-        if (!refreshToken) {
+        if (!refreshToken || isTokenExpired(refreshToken)) {
           clearSessionAndLogout(storedUser);
           return;
         }
@@ -150,10 +167,21 @@ export const AuthProvider = ({ children }) => {
         setLoading(false);
       }
     }
-  }, [clearSessionAndLogout]);
+  }, [clearSessionAndLogout, ensureFreshTokens]);
 
   useEffect(() => {
     validateStoredSession();
+
+    const onFocus = () => {
+      const session = readStoredSession();
+      if (!session) return;
+      if (!ensureFreshTokens(session.user)) return;
+      if (isTokenExpired(localStorage.getItem("token"))) {
+        validateStoredSession();
+      }
+    };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
     // Validate stored session once on app load only (login manages its own state).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

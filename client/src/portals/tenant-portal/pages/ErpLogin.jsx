@@ -59,8 +59,8 @@ export default function ErpLogin({ portal }) {
           </header>
           {error && <div className="login-error">{error}</div>}
           <form onSubmit={handleSubmit} noValidate>
-            <FormField id="username" label="Username" value={username} onChange={(e) => setUsername(e.target.value)} placeholder="you@company.com" autoComplete="username" />
-            <FormField id="password" label="Password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Your Password" autoComplete="current-password" />
+            <FormField id="username" label="Username" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" />
+            <FormField id="password" label="Password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
             <Button type="submit" className="login-submit" disabled={isSubmitting}>
               {isSubmitting ? "Signing in..." : "Sign in"}
             </Button>

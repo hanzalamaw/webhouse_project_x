@@ -10,7 +10,11 @@ export function StepWizard({
   stepError,
   submitLabel = "Submit",
   loading = false,
+  freeNavigation = false,
+  maxReachableStep,
 }) {
+  const furthestStep = maxReachableStep ?? currentStep;
+
   const handleContinue = () => {
     if (onValidateStep) {
       const err = onValidateStep(currentStep);
@@ -19,20 +23,36 @@ export function StepWizard({
     onStepChange(currentStep + 1);
   };
 
+  const canVisitStep = (index) => freeNavigation || index <= furthestStep;
+
+  const handleStepClick = (index) => {
+    if (index === currentStep) return;
+    if (canVisitStep(index)) {
+      onStepChange(index);
+    }
+  };
+
   return (
     <div className="wh-wizard">
       <ol className="wh-wizard__steps">
-        {steps.map((step, i) => (
+        {steps.map((step, i) => {
+          const reachable = canVisitStep(i) && i !== currentStep;
+          return (
           <li
             key={step.id}
-            className={`wh-wizard__step${i === currentStep ? " active" : ""}${i < currentStep ? " done" : ""}`}
+            className={`wh-wizard__step${i === currentStep ? " active" : ""}${i < currentStep ? " done" : ""}${reachable ? " reachable" : ""}`}
           >
-            <button type="button" onClick={() => i < currentStep && onStepChange(i)} disabled={i > currentStep}>
+            <button
+              type="button"
+              onClick={() => handleStepClick(i)}
+              disabled={!canVisitStep(i)}
+            >
               <span className="wh-wizard__num">{i + 1}</span>
               <span className="wh-wizard__label">{step.label}</span>
             </button>
           </li>
-        ))}
+          );
+        })}
       </ol>
       {stepError && <p className="wh-field__error wh-wizard__error">{stepError}</p>}
       <div className="wh-wizard__body">{steps[currentStep]?.content}</div>

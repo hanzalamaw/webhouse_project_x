@@ -17,7 +17,37 @@ export const tenantService = {
     const tenant = await tenantRepository.findById(id);
     if (!tenant) return null;
     const modules = await tenantRepository.getTenantModules(id);
-    return { ...tenant, modules };
+    const organization = await tenantRepository.getOrganizationSettings(id);
+    const payment = await tenantRepository.getLatestPayment(id);
+    const super_admin = await tenantRepository.getSuperAdminUser(id);
+    return { ...tenant, modules, organization, payment, super_admin };
+  },
+
+  async updateFull(id, payload, audit) {
+    const old = await this.getById(id);
+    if (!old) return null;
+
+    const plan = await subscriptionRepository.findById(payload.subscription_plan_id);
+    if (!plan) throw new Error("Subscription plan not found");
+
+    const loginPortal = plan.login_portal;
+    if (!loginPortal || !VALID_PORTALS.includes(loginPortal)) {
+      throw new Error("Subscription plan has no valid ERP login portal");
+    }
+
+    await tenantRepository.updateFull(id, {
+      ...payload,
+      login_portal: loginPortal,
+    });
+    const updated = await this.getById(id);
+    await logWhAudit({
+      adminUserId: audit.adminUserId,
+      action: "tenant_update_full",
+      oldValue: old,
+      newValue: updated,
+      ipAddress: audit.ip,
+    });
+    return updated;
   },
 
   async createFull(payload, audit) {
@@ -76,6 +106,7 @@ export const tenantService = {
       company_name: tenant.company_name,
       name: user.name,
       email: user.email,
+      username: user.username || user.email,
       password,
     };
   },

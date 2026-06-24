@@ -2,20 +2,19 @@ import { useState, useEffect, useCallback } from "react";
 import { PageHeader } from "../../../../components/PageHeader";
 import { Card } from "../../../../components/Card";
 import { DataTable } from "../../../../components/DataTable";
-import { Pagination } from "../../../../components/Pagination";
 import { ConfirmDeleteModal } from "../../../../components/ConfirmDeleteModal";
 import { FormField } from "../../../../components/FormField";
 import { Button } from "../../../../components/Button";
 import { LoginPortalSelect } from "../../../../components/LoginPortalSelect";
 import { useAuth } from "../../../../context/AuthContext";
-import { apiFetch } from "../../../../api/client";
+import { apiFetch, fetchAllTableRows, TABLE_PAGE_SIZE } from "../../../../api/client";
 import { formatPKR } from "../../../../utils/currency";
 
 export default function ManageSubscriptions() {
   const { authFetch } = useAuth();
   const [rows, setRows] = useState([]);
-  const [pagination, setPagination] = useState({ page: 1, totalPages: 1, total: 0 });
   const [page, setPage] = useState(1);
+  const [loading, setLoading] = useState(true);
   const [editRow, setEditRow] = useState(null);
   const [deleteRow, setDeleteRow] = useState(null);
   const [allModules, setAllModules] = useState([]);
@@ -24,10 +23,16 @@ export default function ManageSubscriptions() {
   const [deleteError, setDeleteError] = useState("");
 
   const load = useCallback(async () => {
-    const res = await apiFetch(`/subscriptions?page=${page}&limit=10`, {}, authFetch);
-    setRows(res.data);
-    setPagination(res.pagination);
-  }, [authFetch, page]);
+    setLoading(true);
+    try {
+      const data = await fetchAllTableRows("/subscriptions", authFetch);
+      setRows(data);
+    } catch {
+      setRows([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [authFetch]);
 
   useEffect(() => {
     load().catch(() => {});
@@ -69,15 +74,16 @@ export default function ManageSubscriptions() {
 
   const columns = [
     { key: "plan_name", label: "Plan" },
-    { key: "plan_price", label: "Monthly Price", render: (r) => formatPKR(r.plan_price) },
+    { key: "plan_price", label: "Monthly Price", format: (_, r) => formatPKR(r.plan_price) },
     {
       key: "login_portal",
       label: "ERP Portal",
-      render: (r) => (r.login_portal ? r.login_portal.toUpperCase() : "—"),
+      format: (v) => (v ? String(v).toUpperCase() : "—"),
     },
     { key: "module_count", label: "Modules" },
     {
       label: "Actions",
+      filter: false,
       render: (row) => (
         <div className="wh-action-btns">
           <Button variant="secondary" className="wh-btn--sm" onClick={() => openEdit(row)}>Edit</Button>
@@ -91,8 +97,18 @@ export default function ManageSubscriptions() {
     <div className="wh-page">
       <PageHeader title="Manage Subscriptions" description="Edit plans, ERP portal, pricing, and modules." />
       <Card>
-        <DataTable columns={columns} rows={rows} />
-        <Pagination pagination={pagination} onPageChange={setPage} />
+        {loading ? (
+          <p className="wh-muted">Loading…</p>
+        ) : (
+          <DataTable
+            columns={columns}
+            rows={rows}
+            filterRows={rows}
+            page={page}
+            pageSize={TABLE_PAGE_SIZE}
+            onPageChange={setPage}
+          />
+        )}
       </Card>
 
       {editRow && (
@@ -113,7 +129,6 @@ export default function ManageSubscriptions() {
             <div className="wh-field">
               <span className="wh-field__label">ERP Login Portal</span>
               <LoginPortalSelect value={form.login_portal} onChange={(v) => setForm((f) => ({ ...f, login_portal: v }))} />
-              <p className="wh-muted">Changing this updates ERP portal for all tenants on this plan.</p>
             </div>
             <p className="wh-field__label">Modules</p>
             <div className="wh-checkbox-grid">

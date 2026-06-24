@@ -3,6 +3,10 @@ import { subscriptionController } from "../controllers/subscriptionController.js
 import { logController } from "../controllers/logController.js";
 import { sessionController } from "../controllers/sessionController.js";
 import { tenantController } from "../controllers/tenantController.js";
+import { transactionController } from "../controllers/transactionController.js";
+import { supportTicketController } from "../controllers/supportTicketController.js";
+import { createImpersonationService } from "../services/impersonationService.js";
+import { createImpersonationController } from "../controllers/impersonationController.js";
 
 export function requireWhAdmin(req, res, next) {
   if (req.userRole !== "wh_admin") {
@@ -11,8 +15,14 @@ export function requireWhAdmin(req, res, next) {
   next();
 }
 
-export function registerWhPortalRoutes(app, verifyToken) {
+export function registerWhPortalRoutes(app, verifyToken, jwtConfig = {}) {
   const auth = [verifyToken, requireWhAdmin];
+  const impersonationService = createImpersonationService({
+    jwtSecret: jwtConfig.jwtSecret,
+    jwtExpiresIn: jwtConfig.jwtExpiresIn,
+    jwtRefreshExpiresIn: jwtConfig.jwtRefreshExpiresIn,
+  });
+  const impersonationController = createImpersonationController(impersonationService);
 
   app.get("/api/modules", auth, moduleController.list);
   app.get("/api/modules/all", auth, moduleController.listAll);
@@ -38,6 +48,18 @@ export function registerWhPortalRoutes(app, verifyToken) {
   app.get("/api/tenants/:id", auth, tenantController.get);
   app.post("/api/tenants", auth, tenantController.create);
   app.put("/api/tenants/:id", auth, tenantController.update);
+  app.put("/api/tenants/:id/full", auth, tenantController.updateFull);
   app.get("/api/tenants/:id/credentials", auth, tenantController.getCredentials);
   app.delete("/api/tenants/:id", auth, tenantController.remove);
+
+  app.get("/api/transactions/summary", auth, transactionController.summary);
+  app.get("/api/transactions/payments", auth, transactionController.listPayments);
+
+  app.get("/api/support-tickets", auth, supportTicketController.list);
+  app.get("/api/support-tickets/:id", auth, supportTicketController.get);
+  app.post("/api/support-tickets", auth, supportTicketController.create);
+  app.put("/api/support-tickets/:id", auth, supportTicketController.update);
+  app.delete("/api/support-tickets/:id", auth, supportTicketController.remove);
+
+  app.post("/api/impersonate", auth, impersonationController.start);
 }

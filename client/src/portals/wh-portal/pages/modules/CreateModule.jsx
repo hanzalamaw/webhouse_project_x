@@ -105,7 +105,6 @@ export default function CreateModule() {
             label="Module Name"
             value={moduleName}
             onChange={(e) => setModuleName(e.target.value)}
-            placeholder="Inventory"
             error={error}
             required
           />

@@ -205,16 +205,16 @@ export default function Sidebar() {
 
   return (
     <aside className={`wh-sidebar${isExpanded ? " expanded" : " collapsed"}`}>
+      <button
+        type="button"
+        className="wh-toggle-btn"
+        onClick={() => setIsExpanded(!isExpanded)}
+        aria-label={isExpanded ? "Collapse sidebar" : "Expand sidebar"}
+      >
+        <ChevronIcon direction={isExpanded ? "left" : "right"} />
+      </button>
       <div className="wh-sidebar-top">
         {profileBlock}
-        <button
-          type="button"
-          className="wh-toggle-btn"
-          onClick={() => setIsExpanded(!isExpanded)}
-          aria-label={isExpanded ? "Collapse sidebar" : "Expand sidebar"}
-        >
-          <ChevronIcon direction={isExpanded ? "left" : "right"} />
-        </button>
       </div>
       <nav className="wh-sidebar-nav">
         <ul className="wh-nav-list">{MENU_ITEMS.map((item) => renderNavItem(item))}</ul>

@@ -48,6 +48,18 @@ export const tenantController = {
     }
   },
 
+  async updateFull(req, res) {
+    try {
+      const id = tryParseEntityId(req.params.id);
+      if (!id) return res.status(400).json({ message: "Invalid tenant id" });
+      const row = await tenantService.updateFull(id, req.body, auditCtx(req));
+      if (!row) return res.status(404).json({ message: "Tenant not found" });
+      res.json(row);
+    } catch (e) {
+      res.status(400).json({ message: e.message });
+    }
+  },
+
   async getCredentials(req, res) {
     try {
       const id = tryParseEntityId(req.params.id);

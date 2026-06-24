@@ -144,8 +144,6 @@ const Login = () => {
 
               onChange={(e) => setUsername(e.target.value)}
 
-              placeholder="w.admin"
-
               autoComplete="username"
 
             />
@@ -163,8 +161,6 @@ const Login = () => {
               value={password}
 
               onChange={(e) => setPassword(e.target.value)}
-
-              placeholder="Your Password"
 
               autoComplete="current-password"
 

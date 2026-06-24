@@ -2,11 +2,11 @@ import { useState, useEffect, useCallback } from "react";
 import { PageHeader } from "../../../../components/PageHeader";
 import { Card } from "../../../../components/Card";
 import { DataTable } from "../../../../components/DataTable";
-import { Pagination } from "../../../../components/Pagination";
 import { DiffViewer } from "../../../../components/DiffViewer";
 import { FormField } from "../../../../components/FormField";
 import { useAuth } from "../../../../context/AuthContext";
-import { apiFetch } from "../../../../api/client";
+import { apiFetch, fetchAllTableRows, TABLE_PAGE_SIZE } from "../../../../api/client";
+import { formatDateTime } from "../../../../utils/dateTime";
 
 export default function Logs() {
   const { authFetch } = useAuth();
@@ -14,8 +14,8 @@ export default function Logs() {
   const [tenants, setTenants] = useState([]);
   const [tenantId, setTenantId] = useState("");
   const [rows, setRows] = useState([]);
-  const [pagination, setPagination] = useState({ page: 1, totalPages: 1, total: 0 });
   const [page, setPage] = useState(1);
+  const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState(null);
 
   useEffect(() => {
@@ -25,19 +25,24 @@ export default function Logs() {
   }, [authFetch]);
 
   const load = useCallback(async () => {
-    if (mode === "tenant" && !tenantId) {//dance
+    if (mode === "tenant" && !tenantId) {
       setRows([]);
-      setPagination({ page: 1, totalPages: 1, total: 0 });
       return;
     }
-    const path =
-      mode === "wh"
-        ? `/logs/wh?page=${page}&limit=10`
-        : `/logs/tenant?page=${page}&limit=10&tenant_id=${tenantId}`;
-    const res = await apiFetch(path, {}, authFetch);
-    setRows(res.data);
-    setPagination(res.pagination);
-  }, [authFetch, mode, page, tenantId]);
+    setLoading(true);
+    try {
+      const path =
+        mode === "wh"
+          ? "/logs/wh"
+          : `/logs/tenant?tenant_id=${tenantId}`;
+      const data = await fetchAllTableRows(path, authFetch);
+      setRows(data);
+    } catch {
+      setRows([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [authFetch, mode, tenantId]);
 
   useEffect(() => {
     load().catch(() => setRows([]));
@@ -49,12 +54,13 @@ export default function Logs() {
   }, [mode, tenantId]);
 
   const whColumns = [
-    { key: "created_at", label: "Time" },
+    { key: "created_at", label: "Time", format: formatDateTime },
     { key: "action", label: "Action" },
     { key: "admin_name", label: "Admin" },
     { key: "ip_address", label: "IP" },
     {
       label: "Details",
+      filter: false,
       render: (row) => (
         <button type="button" className="wh-btn wh-btn--secondary wh-btn--sm" onClick={() => setExpanded(expanded === row.id ? null : row.id)}>
           {expanded === row.id ? "Hide" : "View diff"}
@@ -64,13 +70,14 @@ export default function Logs() {
   ];
 
   const tenantColumns = [
-    { key: "created_at", label: "Time" },
+    { key: "created_at", label: "Time", format: formatDateTime },
     { key: "action", label: "Action" },
     { key: "user_name", label: "User" },
     { key: "module_name", label: "Module" },
     { key: "ip_address", label: "IP" },
     {
       label: "Details",
+      filter: false,
       render: (row) => (
         <button type="button" className="wh-btn wh-btn--secondary wh-btn--sm" onClick={() => setExpanded(expanded === row.id ? null : row.id)}>
           {expanded === row.id ? "Hide" : "View diff"}
@@ -109,11 +116,17 @@ export default function Logs() {
       <Card>
         {mode === "tenant" && !tenantId ? (
           <p className="wh-muted">Select a tenant to view their activity logs.</p>
+        ) : loading ? (
+          <p className="wh-muted">Loading logs…</p>
         ) : (
           <>
             <DataTable
               columns={mode === "wh" ? whColumns : tenantColumns}
               rows={rows}
+              filterRows={rows}
+              page={page}
+              pageSize={TABLE_PAGE_SIZE}
+              onPageChange={setPage}
               emptyMessage="No logs for this selection."
             />
             {rows.map((row) =>
@@ -123,7 +136,6 @@ export default function Logs() {
                 </div>
               ) : null
             )}
-            <Pagination pagination={pagination} onPageChange={setPage} />
           </>
         )}
       </Card>

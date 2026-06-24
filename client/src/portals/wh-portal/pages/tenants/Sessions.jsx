@@ -2,10 +2,10 @@ import { useState, useEffect, useCallback } from "react";
 import { PageHeader } from "../../../../components/PageHeader";
 import { Card } from "../../../../components/Card";
 import { DataTable } from "../../../../components/DataTable";
-import { Pagination } from "../../../../components/Pagination";
 import { Button } from "../../../../components/Button";
 import { useAuth } from "../../../../context/AuthContext";
-import { apiFetch } from "../../../../api/client";
+import { apiFetch, fetchAllTableRows, TABLE_PAGE_SIZE } from "../../../../api/client";
+import { formatDateTime } from "../../../../utils/dateTime";
 
 function isLiveSession(row) {
   return Number(row.is_active) === 1 && !row.logout_at;
@@ -14,7 +14,6 @@ function isLiveSession(row) {
 export default function Sessions() {
   const { authFetch } = useAuth();
   const [rows, setRows] = useState([]);
-  const [pagination, setPagination] = useState({ page: 1, totalPages: 1, total: 0 });
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -25,16 +24,15 @@ export default function Sessions() {
     setLoading(true);
     setError("");
     try {
-      const res = await apiFetch(`/sessions?page=${page}&limit=10&active=true`, {}, authFetch);
-      setRows(res.data || []);
-      setPagination(res.pagination || { page: 1, totalPages: 1, total: 0 });
+      const data = await fetchAllTableRows("/sessions?active=true", authFetch);
+      setRows(data);
     } catch (err) {
       setError(err.message || "Failed to load sessions");
       setRows([]);
     } finally {
       setLoading(false);
     }
-  }, [authFetch, page]);
+  }, [authFetch]);
 
   useEffect(() => {
     load();
@@ -60,15 +58,16 @@ export default function Sessions() {
     { key: "user_name", label: "User" },
     { key: "user_email", label: "Email" },
     { key: "ip_address", label: "IP" },
-    { key: "device_info", label: "Device", render: (r) => r.device_info || "—" },
-    { key: "login_at", label: "Login At" },
+    { key: "device_info", label: "Device", format: (v) => v || "—" },
+    { key: "login_at", label: "Login At", format: formatDateTime },
     {
       key: "is_active",
       label: "Status",
-      render: (r) => (isLiveSession(r) ? "Live" : "Ended"),
+      format: (_, r) => (isLiveSession(r) ? "Live" : "Ended"),
     },
     {
       label: "Actions",
+      filter: false,
       render: (row) =>
         isLiveSession(row) ? (
           <Button
@@ -98,8 +97,15 @@ export default function Sessions() {
           <p className="wh-muted">Loading sessions…</p>
         ) : (
           <>
-            <DataTable columns={columns} rows={rows} emptyMessage="No live sessions." />
-            <Pagination pagination={pagination} onPageChange={setPage} />
+            <DataTable
+              columns={columns}
+              rows={rows}
+              filterRows={rows}
+              page={page}
+              pageSize={TABLE_PAGE_SIZE}
+              onPageChange={setPage}
+              emptyMessage="No live sessions."
+            />
           </>
         )}
       </Card>

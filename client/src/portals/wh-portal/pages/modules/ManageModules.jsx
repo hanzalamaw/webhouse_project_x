@@ -2,37 +2,39 @@ import { useState, useEffect, useCallback } from "react";
 import { PageHeader } from "../../../../components/PageHeader";
 import { Card } from "../../../../components/Card";
 import { DataTable } from "../../../../components/DataTable";
-import { Pagination } from "../../../../components/Pagination";
 import { ConfirmDeleteModal } from "../../../../components/ConfirmDeleteModal";
 import { FormField } from "../../../../components/FormField";
 import { Button } from "../../../../components/Button";
 import { useAuth } from "../../../../context/AuthContext";
-import { apiFetch } from "../../../../api/client";
+import { apiFetch, fetchAllTableRows, TABLE_PAGE_SIZE } from "../../../../api/client";
+import { formatDateTime } from "../../../../utils/dateTime";
 
 export default function ManageModules() {
   const { authFetch } = useAuth();
   const [rows, setRows] = useState([]);
-  const [pagination, setPagination] = useState({ page: 1, totalPages: 1, total: 0 });
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [editRow, setEditRow] = useState(null);
   const [deleteRow, setDeleteRow] = useState(null);
+  const [showCreate, setShowCreate] = useState(false);
   const [editName, setEditName] = useState("");
+  const [createName, setCreateName] = useState("");
+  const [createError, setCreateError] = useState("");
+  const [creating, setCreating] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await apiFetch(`/modules?page=${page}&limit=10`, {}, authFetch);
-      setRows(res.data);
-      setPagination(res.pagination);
+      const data = await fetchAllTableRows("/modules", authFetch);
+      setRows(data);
     } catch {
       setRows([]);
     } finally {
       setLoading(false);
     }
-  }, [authFetch, page]);
+  }, [authFetch]);
 
   useEffect(() => {
     load();
@@ -45,6 +47,30 @@ export default function ManageModules() {
     }, authFetch);
     setEditRow(null);
     load();
+  };
+
+  const createModule = async (e) => {
+    e.preventDefault();
+    setCreateError("");
+    if (!createName.trim()) {
+      setCreateError("Module name is required.");
+      return;
+    }
+    setCreating(true);
+    try {
+      await apiFetch(
+        "/modules",
+        { method: "POST", body: JSON.stringify({ module_name: createName.trim() }) },
+        authFetch
+      );
+      setShowCreate(false);
+      setCreateName("");
+      await load();
+    } catch (err) {
+      setCreateError(err.message);
+    } finally {
+      setCreating(false);
+    }
   };
 
   const confirmDelete = async () => {
@@ -63,9 +89,10 @@ export default function ManageModules() {
 
   const columns = [
     { key: "module_name", label: "Module" },
-    { key: "created_at", label: "Created" },
+    { key: "created_at", label: "Created", format: formatDateTime },
     {
       label: "Actions",
+      filter: false,
       render: (row) => (
         <div className="wh-action-btns">
           <Button variant="secondary" className="wh-btn--sm" onClick={() => { setEditRow(row); setEditName(row.module_name); }}>
@@ -81,15 +108,53 @@ export default function ManageModules() {
 
   return (
     <div className="wh-page">
-      <PageHeader title="Manage Modules" description="View, edit, and remove platform modules." />
+      <PageHeader
+        title="Modules"
+        description="View, create, edit, and remove platform modules."
+        actions={
+          <Button onClick={() => { setShowCreate(true); setCreateError(""); setCreateName(""); }}>
+            Add Module
+          </Button>
+        }
+      />
       <Card>
         {loading ? <p className="wh-muted">Loading…</p> : (
           <>
-            <DataTable columns={columns} rows={rows} />
-            <Pagination pagination={pagination} onPageChange={setPage} />
+            <DataTable
+              columns={columns}
+              rows={rows}
+              filterRows={rows}
+              page={page}
+              pageSize={TABLE_PAGE_SIZE}
+              onPageChange={setPage}
+            />
           </>
         )}
       </Card>
+
+      {showCreate && (
+        <div className="wh-modal-overlay" onClick={() => setShowCreate(false)}>
+          <div className="wh-modal" onClick={(e) => e.stopPropagation()}>
+            <h3 className="wh-modal__title">Add Module</h3>
+            <form className="wh-form" onSubmit={createModule}>
+              <FormField
+                id="new_module_name"
+                label="Module Name"
+                value={createName}
+                onChange={(e) => setCreateName(e.target.value)}
+                error={createError}
+                required
+              />
+              <div className="wh-modal__actions">
+                <Button type="button" variant="secondary" onClick={() => setShowCreate(false)}>Cancel</Button>
+                <Button type="submit" disabled={creating}>
+                  {creating ? "Saving…" : "Create Module"}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {editRow && (
         <div className="wh-modal-overlay" onClick={() => setEditRow(null)}>

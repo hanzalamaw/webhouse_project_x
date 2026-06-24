@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams, useParams } from "react-router-dom";
 import { PageHeader } from "../../../../components/PageHeader";
 import { Card } from "../../../../components/Card";
 import { FormField } from "../../../../components/FormField";
@@ -21,19 +21,140 @@ import {
   calcRenewalDate,
   calcFiscalYearEnd,
   addPaymentReceived,
+  fiscalToStorage,
+  fiscalFromStorage,
+  formatFiscalDisplay,
+  toInputDate,
+  DEFAULT_FISCAL_START_MONTH,
+  DEFAULT_FISCAL_START_DAY,
+  DEFAULT_FISCAL_END_MONTH,
+  DEFAULT_FISCAL_END_DAY,
 } from "../../../../utils/billing";
 
-const INITIAL = {
-  step: 0,
-  company: { company_name: "", owner_name: "", owner_email: "", owner_phone: "", industry: "", status: "active" },
-  subscription_plan_id: "",
-  module_ids: [],
-  limits: { max_users: 10, max_warehouses: 1, max_stores: 1, max_orders_per_month: 1000 },
-  billing: { billing_cycle: "monthly", start_date: "", renewal_date: "", status: "active", total_amount: 0, amount_due: 0 },
-  payment: { bank: 0, cash: 0, total_received: 0, received_at: "" },
-  organization: { company_name: "", logo_url: "", timezone: DEFAULT_TIMEZONE, currency: DEFAULT_CURRENCY, language: "en", fiscal_year_start: "", fiscal_year_end: "" },
-  super_admin: { username: "", password: "", name: "" },
-};
+const MONTHS = [
+  { value: 1, label: "January" },
+  { value: 2, label: "February" },
+  { value: 3, label: "March" },
+  { value: 4, label: "April" },
+  { value: 5, label: "May" },
+  { value: 6, label: "June" },
+  { value: 7, label: "July" },
+  { value: 8, label: "August" },
+  { value: 9, label: "September" },
+  { value: 10, label: "October" },
+  { value: 11, label: "November" },
+  { value: 12, label: "December" },
+];
+
+function buildInitial() {
+  return {
+    step: 0,
+    maxStep: 0,
+    tenant_id: null,
+    company: { company_name: "", owner_name: "", owner_email: "", owner_phone: "", industry: "", status: "active" },
+    subscription_plan_id: "",
+    module_ids: [],
+    limits: { max_users: 10, max_warehouses: 1, max_stores: 1, max_orders_per_month: 1000 },
+    billing: { billing_cycle: "monthly", start_date: "", renewal_date: "", status: "active", total_amount: 0, amount_due: 0 },
+    payment: { bank: 0, cash: 0, total_received: 0, received_at: "" },
+    organization: {
+      company_name: "",
+      logo_url: "",
+      timezone: DEFAULT_TIMEZONE,
+      currency: DEFAULT_CURRENCY,
+      language: "en",
+      fiscal_year_start: fiscalToStorage(DEFAULT_FISCAL_START_MONTH, DEFAULT_FISCAL_START_DAY),
+      fiscal_year_end: fiscalToStorage(DEFAULT_FISCAL_END_MONTH, DEFAULT_FISCAL_END_DAY),
+    },
+    super_admin: { username: "", email: "", password: "", name: "" },
+  };
+}
+
+function mapTenantToDraft(t) {
+  const moduleIds = (t.modules || []).filter((m) => Number(m.is_enabled) !== 0).map((m) => m.module_id);
+  return {
+    step: 0,
+    maxStep: 8,
+    tenant_id: t.id,
+    company: {
+      company_name: t.company_name || "",
+      owner_name: t.owner_name || "",
+      owner_email: t.owner_email || "",
+      owner_phone: t.owner_phone || "",
+      industry: t.industry || "",
+      status: t.status || "active",
+    },
+    subscription_plan_id: String(t.subscription_plan_id || ""),
+    module_ids: moduleIds,
+    limits: {
+      max_users: t.max_users ?? 10,
+      max_warehouses: t.max_warehouses ?? 1,
+      max_stores: t.max_stores ?? 1,
+      max_orders_per_month: t.max_orders_per_month ?? 1000,
+    },
+    billing: {
+      billing_cycle: t.billing_cycle || "monthly",
+      start_date: toInputDate(t.start_date),
+      renewal_date: toInputDate(t.renewal_date),
+      status: t.subscription_status || "active",
+      total_amount: t.total_amount ?? 0,
+      amount_due: t.amount_due ?? 0,
+    },
+    payment: {
+      bank: t.payment?.bank ?? 0,
+      cash: t.payment?.cash ?? 0,
+      total_received: t.payment?.total_received ?? 0,
+      received_at: toInputDate(t.payment?.received_at),
+    },
+    organization: {
+      company_name: t.organization?.company_name || t.company_name || "",
+      logo_url: t.organization?.logo_url || "",
+      timezone: t.organization?.timezone || DEFAULT_TIMEZONE,
+      currency: t.organization?.currency || DEFAULT_CURRENCY,
+      language: t.organization?.language || "en",
+      fiscal_year_start: t.organization?.fiscal_year_start || fiscalToStorage(1, 1),
+      fiscal_year_end: t.organization?.fiscal_year_end || fiscalToStorage(12, 31),
+    },
+    super_admin: {
+      username: t.super_admin?.username || "",
+      email: t.super_admin?.email || "",
+      password: "",
+      name: t.super_admin?.name || "",
+    },
+  };
+}
+
+function MonthDayFields({ month, day, onChange, idPrefix }) {
+  const daysInMonth = new Date(2000, month, 0).getDate();
+  return (
+    <div className="wh-month-day-row">
+      <FormField
+        id={`${idPrefix}_month`}
+        label="Month"
+        as="select"
+        value={month}
+        onChange={(e) => onChange(Number(e.target.value), day)}
+      >
+        {MONTHS.map((m) => (
+          <option key={m.value} value={m.value}>{m.label}</option>
+        ))}
+      </FormField>
+      <FormField
+        id={`${idPrefix}_day`}
+        label="Day"
+        as="select"
+        value={day}
+        onChange={(e) => onChange(month, Number(e.target.value))}
+      >
+        {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((d) => (
+          <option key={d} value={d}>{d}</option>
+        ))}
+      </FormField>
+    </div>
+  );
+}
+
+const INITIAL = buildInitial();
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -58,15 +179,29 @@ function ReviewRow({ label, value }) {
   );
 }
 
-function moduleCreateUrl() {
+function moduleCreateUrl(isEdit, tenantId) {
+  if (isEdit) {
+    return `/webhouse-portal/modules/create?returnTo=${encodeURIComponent(`/webhouse-portal/tenants/edit/${tenantId}`)}`;
+  }
   return "/webhouse-portal/modules/create?resume=create-tenant";
+}
+
+function planCreateUrl(isEdit, tenantId) {
+  if (isEdit) {
+    return `/webhouse-portal/subscriptions/create?returnTo=${encodeURIComponent(`/webhouse-portal/tenants/edit/${tenantId}`)}`;
+  }
+  return "/webhouse-portal/subscriptions/create?resume=create-tenant";
 }
 
 export default function CreateTenant() {
   const { authFetch } = useAuth();
   const navigate = useNavigate();
+  const { tenantId: routeTenantId } = useParams();
+  const isEdit = Boolean(routeTenantId);
+  const draftKey = isEdit ? `wh_edit_tenant_draft_${routeTenantId}` : WIZARD_DRAFT_KEY;
   const [searchParams, setSearchParams] = useSearchParams();
-  const [draft, setDraft, clearDraft] = useWizardDraft(WIZARD_DRAFT_KEY, INITIAL);
+  const [draft, setDraft, clearDraft] = useWizardDraft(draftKey, buildInitial());
+  const [hydrated, setHydrated] = useState(!isEdit);
   const [plans, setPlans] = useState([]);
   const [planModules, setPlanModules] = useState([]);
   const [extraModules, setExtraModules] = useState([]);
@@ -74,6 +209,14 @@ export default function CreateTenant() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const { currencies, timezones, loading: refLoading } = useReferenceData();
+
+  useEffect(() => {
+    setDraft((d) => {
+      const max = d.maxStep ?? 0;
+      if (d.step <= max) return d;
+      return { ...d, maxStep: d.step };
+    });
+  }, [draft.step, setDraft]);
 
   const selectedPlan = useMemo(
     () => plans.find((p) => String(p.id) === String(draft.subscription_plan_id)),
@@ -131,6 +274,19 @@ export default function CreateTenant() {
   }, [loadPlans]);
 
   useEffect(() => {
+    if (!isEdit || hydrated) return;
+    (async () => {
+      try {
+        const tenant = await apiFetch(`/tenants/${routeTenantId}`, {}, authFetch);
+        setDraft(mapTenantToDraft(tenant));
+        setHydrated(true);
+      } catch (err) {
+        setError(err.message || "Failed to load tenant");
+      }
+    })();
+  }, [isEdit, hydrated, routeTenantId, authFetch, setDraft]);
+
+  useEffect(() => {
     if (searchParams.get("resumed") !== "1") return;
 
     const planId = searchParams.get("planId");
@@ -139,11 +295,20 @@ export default function CreateTenant() {
     (async () => {
       await loadPlans().catch(() => {});
       if (planId) {
-        setDraft((d) => ({ ...d, subscription_plan_id: planId, step: Math.max(d.step, 1) }));
+        setDraft((d) => ({
+          ...d,
+          subscription_plan_id: planId,
+          step: Math.max(d.step, 1),
+          maxStep: Math.max(d.maxStep ?? 0, 1),
+        }));
         await loadPlanModules(planId, false);
       }
       if (moduleId) {
-        setDraft((d) => ({ ...d, step: Math.max(d.step, 2) }));
+        setDraft((d) => ({
+          ...d,
+          step: Math.max(d.step, 2),
+          maxStep: Math.max(d.maxStep ?? 0, 2),
+        }));
         await addModuleById(Number(moduleId));
       }
     })();
@@ -170,12 +335,12 @@ export default function CreateTenant() {
 
   useEffect(() => {
     if (!draft.billing.start_date) return;
-    const renewal = calcRenewalDate(draft.billing.start_date);
+    const renewal = calcRenewalDate(draft.billing.start_date, draft.billing.billing_cycle);
     setDraft((d) => ({
       ...d,
       billing: { ...d.billing, renewal_date: renewal },
     }));
-  }, [draft.billing.start_date, setDraft]);
+  }, [draft.billing.start_date, draft.billing.billing_cycle, setDraft]);
 
   useEffect(() => {
     const received = addPaymentReceived(draft.payment.bank, draft.payment.cash);
@@ -194,6 +359,14 @@ export default function CreateTenant() {
     return [...map.values()].sort((a, b) => a.module_name.localeCompare(b.module_name));
   }, [planModules, extraModules]);
 
+  const handleCancel = () => {
+    clearDraft();
+    setExtraModules([]);
+    setStepError("");
+    setError("");
+    navigate("/webhouse-portal/tenants/manage");
+  };
+
   const handleReset = () => {
     if (!window.confirm("Clear this walkthrough and start from the beginning?")) return;
     clearDraft();
@@ -201,6 +374,7 @@ export default function CreateTenant() {
     setStepError("");
     setError("");
     setSearchParams({}, { replace: true });
+    if (isEdit) setHydrated(false);
   };
 
   const setStep = (step) => {
@@ -217,7 +391,14 @@ export default function CreateTenant() {
   const updateBillingCycle = (e) => {
     setStepError("");
     const cycle = e.target.value;
-    setDraft((d) => ({ ...d, billing: { ...d.billing, billing_cycle: cycle } }));
+    setDraft((d) => ({
+      ...d,
+      billing: {
+        ...d.billing,
+        billing_cycle: cycle,
+        renewal_date: calcRenewalDate(d.billing.start_date, cycle),
+      },
+    }));
   };
 
   const updateBillingStart = (e) => {
@@ -228,14 +409,14 @@ export default function CreateTenant() {
       billing: {
         ...d.billing,
         start_date: start,
-        renewal_date: calcRenewalDate(start),
+        renewal_date: calcRenewalDate(start, d.billing.billing_cycle),
       },
     }));
   };
 
-  const updateFiscalStart = (e) => {
+  const setFiscalStart = (month, day) => {
     setStepError("");
-    const start = e.target.value;
+    const start = fiscalToStorage(month, day);
     setDraft((d) => ({
       ...d,
       organization: {
@@ -243,6 +424,14 @@ export default function CreateTenant() {
         fiscal_year_start: start,
         fiscal_year_end: calcFiscalYearEnd(start),
       },
+    }));
+  };
+
+  const setFiscalEnd = (month, day) => {
+    setStepError("");
+    setDraft((d) => ({
+      ...d,
+      organization: { ...d.organization, fiscal_year_end: fiscalToStorage(month, day) },
     }));
   };
 
@@ -301,9 +490,12 @@ export default function CreateTenant() {
       }
       case 7:
         if (!sa.name.trim()) return "Super admin display name is required.";
-        if (!sa.username.trim()) return "Super admin username (email) is required.";
-        if (!EMAIL_RE.test(sa.username.trim())) return "Enter a valid super admin email.";
-        if (!sa.password || sa.password.length < 6) return "Password is required (min 6 characters).";
+        if (!sa.username.trim()) return "Super admin username is required.";
+        if (/\s/.test(sa.username)) return "Username cannot contain spaces.";
+        if (!sa.email.trim()) return "Super admin email is required.";
+        if (!EMAIL_RE.test(sa.email.trim())) return "Enter a valid super admin email.";
+        if (!isEdit && (!sa.password || sa.password.length < 6)) return "Password is required (min 6 characters).";
+        if (isEdit && sa.password && sa.password.length < 6) return "Password must be at least 6 characters if changing.";
         break;
       default:
         break;
@@ -356,9 +548,18 @@ export default function CreateTenant() {
           ...draft.organization,
           company_name: draft.organization.company_name || draft.company.company_name,
         },
-        super_admin: draft.super_admin,
+        super_admin: {
+          name: draft.super_admin.name,
+          username: draft.super_admin.username.trim().toLowerCase(),
+          email: draft.super_admin.email.trim(),
+          ...(draft.super_admin.password ? { password: draft.super_admin.password } : {}),
+        },
       };
-      await apiFetch("/tenants", { method: "POST", body: JSON.stringify(payload) }, authFetch);
+      if (isEdit) {
+        await apiFetch(`/tenants/${routeTenantId}/full`, { method: "PUT", body: JSON.stringify(payload) }, authFetch);
+      } else {
+        await apiFetch("/tenants", { method: "POST", body: JSON.stringify(payload) }, authFetch);
+      }
       clearDraft();
       navigate("/webhouse-portal/tenants/manage");
     } catch (err) {
@@ -413,14 +614,14 @@ export default function CreateTenant() {
             ))}
           </FormField>
           {selectedPlan && (
-            <p className="wh-muted">
+            <p>
               ERP portal (from plan): <strong>{selectedPlan.login_portal?.toUpperCase() || "not set"}</strong>
             </p>
           )}
           <Button
             type="button"
             variant="secondary"
-            onClick={() => navigate("/webhouse-portal/subscriptions/create?resume=create-tenant")}
+            onClick={() => navigate(planCreateUrl(isEdit, routeTenantId))}
           >
             Create new plan
           </Button>
@@ -432,11 +633,7 @@ export default function CreateTenant() {
       label: "Modules",
       content: (
         <>
-          {!draft.subscription_plan_id ? (
-            <p className="wh-muted">Select a subscription plan in the previous step first.</p>
-          ) : displayModules.length === 0 ? (
-            <p className="wh-muted">No modules on this plan yet. Create one below.</p>
-          ) : (
+          {!draft.subscription_plan_id ? null : displayModules.length === 0 ? null : (
             <div className="wh-checkbox-grid">
               {displayModules.map((m) => (
                 <label key={m.id} className="wh-checkbox-item">
@@ -447,13 +644,13 @@ export default function CreateTenant() {
                   />
                   {m.module_name}
                   {!planModules.some((pm) => pm.id === m.id) && (
-                    <span className="wh-muted" style={{ marginLeft: 6, fontSize: 12 }}>(new)</span>
+                    <span style={{ marginLeft: 6, fontSize: 12 }}>(new)</span>
                   )}
                 </label>
               ))}
             </div>
           )}
-          <Button type="button" variant="secondary" style={{ marginTop: 12 }} onClick={() => navigate(moduleCreateUrl())}>
+          <Button type="button" variant="secondary" style={{ marginTop: 12 }} onClick={() => navigate(moduleCreateUrl(isEdit, routeTenantId))}>
             Create new module
           </Button>
         </>
@@ -476,9 +673,6 @@ export default function CreateTenant() {
       label: "Billing",
       content: (
         <>
-          <p className="wh-muted" style={{ marginBottom: 12 }}>
-            Plan price is monthly. Yearly billing multiplies by 12. Renewal date is the same calendar date next year (editable).
-          </p>
           <div className="wh-form-grid">
             <FormField id="bc" label="Billing Cycle" as="select" value={draft.billing.billing_cycle} onChange={updateBillingCycle}>
               {BILLING_CYCLES.map((b) => (
@@ -507,7 +701,6 @@ export default function CreateTenant() {
           <FormField id="cash" label="Cash (Rs.)" type="number" step="0.01" min="0" value={draft.payment.cash} onChange={update("payment", "cash")} />
           <FormField id="tr" label="Total Received (Rs.)" type="number" step="0.01" min="0" value={draft.payment.total_received} readOnly />
           <FormField id="ra" label="Received At" type="date" value={draft.payment.received_at} onChange={update("payment", "received_at")} />
-          <p className="wh-muted">Total received = bank + cash. Amount due updates automatically. Leave at 0 if no payment yet.</p>
         </div>
       ),
     },
@@ -516,16 +709,12 @@ export default function CreateTenant() {
       label: "Organization",
       content: (
         <>
-          <p className="wh-muted" style={{ marginBottom: 12 }}>
-            Fiscal year end auto-fills to one day before the same date next year (editable).
-          </p>
           <div className="wh-form-grid">
             <FormField
               id="ocn"
               label="Company Name"
               value={draft.organization.company_name}
               onChange={update("organization", "company_name")}
-              placeholder={draft.company.company_name}
               required
             />
             <FormField id="logo" label="Logo URL" value={draft.organization.logo_url} onChange={update("organization", "logo_url")} />
@@ -538,7 +727,6 @@ export default function CreateTenant() {
                 setDraft((d) => ({ ...d, organization: { ...d.organization, timezone: v } }));
               }}
               options={timezones}
-              placeholder="Search timezone…"
               loading={refLoading}
             />
             <SearchableSelect
@@ -550,14 +738,27 @@ export default function CreateTenant() {
                 setDraft((d) => ({ ...d, organization: { ...d.organization, currency: v } }));
               }}
               options={currencies}
-              placeholder="Search currency…"
               loading={refLoading}
             />
             <FormField id="lang" label="Language" as="select" value={draft.organization.language} onChange={update("organization", "language")}>
               <option value="en">English</option>
             </FormField>
-            <FormField id="fys" label="Fiscal Year Start" type="date" value={draft.organization.fiscal_year_start} onChange={updateFiscalStart} />
-            <FormField id="fye" label="Fiscal Year End" type="date" value={draft.organization.fiscal_year_end} onChange={update("organization", "fiscal_year_end")} />
+            <div className="wh-field">
+              <span className="wh-field__label">Fiscal Year Start</span>
+              <MonthDayFields
+                idPrefix="fys"
+                {...fiscalFromStorage(draft.organization.fiscal_year_start)}
+                onChange={setFiscalStart}
+              />
+            </div>
+            <div className="wh-field">
+              <span className="wh-field__label">Fiscal Year End</span>
+              <MonthDayFields
+                idPrefix="fye"
+                {...fiscalFromStorage(draft.organization.fiscal_year_end)}
+                onChange={setFiscalEnd}
+              />
+            </div>
           </div>
         </>
       ),
@@ -568,8 +769,16 @@ export default function CreateTenant() {
       content: (
         <div className="wh-form-grid">
           <FormField id="sa_name" label="Display Name" value={draft.super_admin.name} onChange={update("super_admin", "name")} required />
-          <FormField id="sa_user" label="Username (email)" type="email" value={draft.super_admin.username} onChange={update("super_admin", "username")} required />
-          <FormField id="sa_pass" label="Password" type="password" value={draft.super_admin.password} onChange={update("super_admin", "password")} required />
+          <FormField id="sa_user" label="Username" value={draft.super_admin.username} onChange={update("super_admin", "username")} required />
+          <FormField id="sa_email" label="Email" type="email" value={draft.super_admin.email} onChange={update("super_admin", "email")} required />
+          <FormField
+            id="sa_pass"
+            label={isEdit ? "New Password (optional)" : "Password"}
+            type="password"
+            value={draft.super_admin.password}
+            onChange={update("super_admin", "password")}
+            required={!isEdit}
+          />
         </div>
       ),
     },
@@ -578,9 +787,6 @@ export default function CreateTenant() {
       label: "Review",
       content: (
         <div className="wh-review">
-          <p className="wh-review__intro">
-            Confirm each section below before creating the tenant. Use <strong>Back</strong> to change anything.
-          </p>
           <div className="wh-review-stack">
           <ReviewBlock step={1} title="Company">
             <ReviewRow label="Company" value={draft.company.company_name} />
@@ -632,12 +838,13 @@ export default function CreateTenant() {
             <ReviewRow label="Timezone" value={formatTimezoneDisplay(draft.organization.timezone)} />
             <ReviewRow label="Currency" value={formatCurrencyDisplay(draft.organization.currency, currencies)} />
             <ReviewRow label="Language" value={draft.organization.language === "en" ? "English" : draft.organization.language || "—"} />
-            <ReviewRow label="Fiscal year start" value={draft.organization.fiscal_year_start || "—"} />
-            <ReviewRow label="Fiscal year end" value={draft.organization.fiscal_year_end || "—"} />
+            <ReviewRow label="Fiscal year start" value={formatFiscalDisplay(draft.organization.fiscal_year_start)} />
+            <ReviewRow label="Fiscal year end" value={formatFiscalDisplay(draft.organization.fiscal_year_end)} />
           </ReviewBlock>
           <ReviewBlock step={8} title="Super Admin">
             <ReviewRow label="Name" value={draft.super_admin.name} />
-            <ReviewRow label="Email" value={draft.super_admin.username} />
+            <ReviewRow label="Username" value={draft.super_admin.username} />
+            <ReviewRow label="Email" value={draft.super_admin.email} />
             <ReviewRow label="Password" value={draft.super_admin.password ? "••••••••" : "—"} />
           </ReviewBlock>
           </div>
@@ -649,15 +856,24 @@ export default function CreateTenant() {
   return (
     <div className="wh-page">
       <PageHeader
-        title="Create Tenant"
-        description="Step-by-step onboarding for new client accounts."
+        title={isEdit ? "Edit Tenant" : "Create Tenant"}
+        description={isEdit ? "Step-by-step walkthrough to update this client account." : "Step-by-step onboarding for new client accounts."}
         actions={
-          <Button type="button" variant="secondary" onClick={handleReset}>
-            Reset &amp; start over
-          </Button>
+          <div className="wh-page-header__actions">
+            <Button type="button" variant="secondary" onClick={handleCancel}>
+              Cancel
+            </Button>
+            <Button type="button" variant="secondary" onClick={handleReset}>
+              Reset &amp; start over
+            </Button>
+          </div>
         }
       />
       <Card>
+        {!hydrated ? (
+          <p className="wh-muted">Loading tenant…</p>
+        ) : (
+          <>
         {error && <p className="wh-field__error">{error}</p>}
         <StepWizard
           steps={steps}
@@ -666,9 +882,13 @@ export default function CreateTenant() {
           onValidateStep={handleValidateStep}
           stepError={stepError}
           onSubmit={submit}
-          submitLabel="Create Tenant"
+          submitLabel={isEdit ? "Update Tenant" : "Create Tenant"}
           loading={loading}
+          freeNavigation={isEdit}
+          maxReachableStep={isEdit ? steps.length - 1 : (draft.maxStep ?? draft.step)}
         />
+          </>
+        )}
       </Card>
     </div>
   );

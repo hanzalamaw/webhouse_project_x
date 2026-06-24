@@ -43,12 +43,9 @@ export const MENU_ITEMS = [
   },
   {
     id: "module",
-    label: "Module",
+    label: "Modules",
+    path: `${BASE}/modules`,
     icon: ModuleIcon,
-    children: [
-      { id: "mod-create", label: "Create", path: `${BASE}/modules/create` },
-      { id: "mod-manage", label: "Manage", path: `${BASE}/modules/manage` },
-    ],
   },
   {
     id: "support",

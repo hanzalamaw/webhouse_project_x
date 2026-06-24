@@ -10,17 +10,15 @@
   display: flex;
   flex-direction: column;
   transition: width 0.35s cubic-bezier(0.4, 0, 0.2, 1);
-  overflow-x: hidden;
-  overflow-y: hidden;
+  overflow: visible;
 }
 
 .wh-sidebar.expanded { width: 240px; }
-.wh-sidebar.collapsed { width: 72px; overflow-x: hidden; overflow-y: hidden; }
+.wh-sidebar.collapsed { width: 72px; }
 
 .wh-sidebar-top {
   position: relative;
   padding: 20px 12px 12px;
-  overflow: hidden;
   flex-shrink: 0;
   min-width: 0;
 }
@@ -71,8 +69,8 @@
 .wh-toggle-btn {
   position: absolute;
   right: -14px;
-  top: 50%;
-  transform: translateY(-50%);
+  top: 36px;
+  transform: none;
   width: 28px;
   height: 28px;
   border-radius: 50%;
@@ -84,7 +82,7 @@
   justify-content: center;
   cursor: pointer;
   padding: 0;
-  z-index: 1010;
+  z-index: 1002;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
   transition: background 0.2s ease, box-shadow 0.2s ease;
 }

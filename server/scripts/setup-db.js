@@ -35,6 +35,23 @@ try {
   console.log("Applying full schema (db/schema.sql)...");
   await runSqlFile("schema.sql");
 
+  console.log("Applying migrations...");
+  try {
+    await db.query("ALTER TABLE users ADD COLUMN username VARCHAR(100) NULL AFTER email");
+    console.log("OK: added users.username column");
+  } catch (e) {
+    if (!String(e.message).includes("Duplicate column")) throw e;
+  }
+  await db.query("UPDATE users SET username = email WHERE username IS NULL OR username = ''");
+  try {
+    await db.query(
+      "CREATE UNIQUE INDEX uk_users_tenant_username ON users (tenant_id, username)"
+    );
+    console.log("OK: users.username unique index");
+  } catch (e) {
+    if (!String(e.message).includes("Duplicate")) throw e;
+  }
+
   const admins = [
     ["John Admin", "w.admin", "admin123"],
     ["Sarah Ops", "w.sarah", "password1"],

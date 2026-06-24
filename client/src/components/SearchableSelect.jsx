@@ -6,7 +6,7 @@ export function SearchableSelect({
   value,
   onChange,
   options = [],
-  placeholder = "Search…",
+  placeholder = "",
   loading = false,
   disabled = false,
   emptyMessage = "No matches",

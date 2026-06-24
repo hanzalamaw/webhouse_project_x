@@ -11,6 +11,7 @@ import Transaction from "./portals/wh-portal/pages/tenants/Transaction";
 import CreateTicket from "./portals/wh-portal/pages/support/CreateTicket";
 import ManageTickets from "./portals/wh-portal/pages/support/ManageTickets";
 import Impersonation from "./portals/wh-portal/pages/Impersonation";
+import ImpersonationHandoff from "./portals/wh-portal/pages/ImpersonationHandoff";
 import CreateModule from "./portals/wh-portal/pages/modules/CreateModule";
 import ManageModules from "./portals/wh-portal/pages/modules/ManageModules";
 import CreateSubscription from "./portals/wh-portal/pages/subscriptions/CreateSubscription";
@@ -59,6 +60,7 @@ function AppRoutes() {
       <Route path="/" element={<Navigate to="/webhouse-portal" replace />} />
       <Route path="/login" element={<Navigate to="/webhouse-portal" replace />} />
       <Route path="/webhouse-portal" element={<WhLoginGate />} />
+      <Route path="/webhouse-portal/impersonate/session" element={<ImpersonationHandoff />} />
       <Route path="/erp1" element={<ErpLogin portal="erp1" />} />
       <Route path="/erp2" element={<ErpLogin portal="erp2" />} />
       <Route path="/erp3" element={<ErpLogin portal="erp3" />} />
@@ -73,10 +75,12 @@ function AppRoutes() {
         <Route path="/webhouse-portal/dashboard" element={<Dashboard />} />
         <Route path="/webhouse-portal/subscriptions/create" element={<CreateSubscription />} />
         <Route path="/webhouse-portal/subscriptions/manage" element={<ManageSubscriptions />} />
+        <Route path="/webhouse-portal/modules" element={<ManageModules />} />
+        <Route path="/webhouse-portal/modules/manage" element={<Navigate to="/webhouse-portal/modules" replace />} />
         <Route path="/webhouse-portal/modules/create" element={<CreateModule />} />
-        <Route path="/webhouse-portal/modules/manage" element={<ManageModules />} />
         <Route path="/webhouse-portal/logs" element={<Logs />} />
         <Route path="/webhouse-portal/tenants/create" element={<CreateTenant />} />
+        <Route path="/webhouse-portal/tenants/edit/:tenantId" element={<CreateTenant />} />
         <Route path="/webhouse-portal/tenants/manage" element={<ManageTenant />} />
         <Route path="/webhouse-portal/tenants/sessions" element={<Sessions />} />
         <Route path="/webhouse-portal/tenants/transactions" element={<Transaction />} />

@@ -16,7 +16,7 @@ const toTenantUserPayload = (user, tenant) => ({
   id: user.id,
   name: user.name,
   email: user.email,
-  username: user.email,
+  username: user.username || user.email,
   status: user.status,
   portal: "tenant",
   tenant_id: tenant.id,
@@ -60,7 +60,7 @@ async function tenantLogin(
     `SELECT u.*, t.id AS tid, t.company_name, t.login_portal, t.status AS tenant_status
      FROM users u
      JOIN wh_tenants t ON t.id = u.tenant_id AND t.deleted_at IS NULL
-     WHERE LOWER(u.email) = ? AND u.status = 'active' AND u.deleted_at IS NULL
+     WHERE LOWER(u.username) = ? AND u.status = 'active' AND u.deleted_at IS NULL
      LIMIT 1`,
     [normalized]
   );
@@ -81,7 +81,7 @@ async function tenantLogin(
   });
 
   const tenant = { id: row.tid, company_name: row.company_name, login_portal: row.login_portal };
-  const user = { id: row.id, name: row.name, email: row.email, status: row.status };
+  const user = { id: row.id, name: row.name, email: row.email, username: row.username, status: row.status };
 
   const token = jwt.sign(
     { id: user.id, role: "tenant", tenantId: tenant.id, sessionId },

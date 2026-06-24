@@ -30,7 +30,11 @@ const startServer = async () => {
 
   registerAuthRoutes(app, db, { JWT_SECRET, JWT_EXPIRES_IN, JWT_REFRESH_EXPIRES_IN, verifyToken });
   registerDashboardRoutes(app, db, verifyToken);
-  registerWhPortalRoutes(app, verifyToken);
+  registerWhPortalRoutes(app, verifyToken, {
+    jwtSecret: JWT_SECRET,
+    jwtExpiresIn: JWT_EXPIRES_IN,
+    jwtRefreshExpiresIn: JWT_REFRESH_EXPIRES_IN,
+  });
 
   app.get("/", (req, res) => {
     res.send("API running");

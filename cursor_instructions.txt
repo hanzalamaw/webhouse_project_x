@@ -90,3 +90,22 @@ ProxySQL
 ├── Read Replica 2
 
 No application code changes should be required when moving to ProxySQL or read replicas.
+
+---
+
+## 4. Table Column Filter Pattern
+
+While making any table, every column name should work like an Excel sheet column.
+
+Rules:
+
+* Every column should clearly show the list of all data available in that column.
+* Every column should have clear filter options.
+* Every column should have checkboxes to filter out specific data.
+* When data is filtered from one column, all other columns should update and show only the data related to that filtered result.
+
+---
+
+## 5. Full Width Design Pattern
+
+Every div in the design should take the whole width of the screen.

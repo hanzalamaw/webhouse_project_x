@@ -92,7 +92,7 @@ export const tenantRepository = {
 
   async getSuperAdminUser(tenantId) {
     const [rows] = await readDb.query(
-      `SELECT u.id, u.name, u.email, u.password
+      `SELECT u.id, u.name, u.email, u.username, u.password
        FROM users u
        INNER JOIN roles r ON r.id = u.role_id AND r.deleted_at IS NULL
        WHERE u.tenant_id = ? AND u.deleted_at IS NULL AND r.role_name = 'Super Admin'
@@ -104,6 +104,196 @@ export const tenantRepository = {
 
   async softDelete(id) {
     return cascadeSoftDeleteTenant(id);
+  },
+
+  async getOrganizationSettings(tenantId) {
+    const [rows] = await readDb.query(
+      `SELECT company_name, logo_url, timezone, currency, language, fiscal_year_start, fiscal_year_end
+       FROM organization_settings
+       WHERE tenant_id = ? AND deleted_at IS NULL LIMIT 1`,
+      [tenantId]
+    );
+    return rows[0] || null;
+  },
+
+  async getLatestPayment(tenantId) {
+    const [rows] = await readDb.query(
+      `SELECT id, bank, cash, total_received, received_at
+       FROM wh_tenant_payments
+       WHERE tenant_id = ? AND deleted_at IS NULL
+       ORDER BY id DESC LIMIT 1`,
+      [tenantId]
+    );
+    return rows[0] || null;
+  },
+
+  async updateSuperAdmin(id, { name, email, username, password }) {
+    const user = await this.getSuperAdminUser(id);
+    if (!user) return;
+    if (password) {
+      const hashed = encrypt(password);
+      await writeDb.query(
+        `UPDATE users SET name = ?, email = ?, username = ?, password = ? WHERE id = ? AND deleted_at IS NULL`,
+        [name, email, username, hashed, user.id]
+      );
+    } else {
+      await writeDb.query(
+        `UPDATE users SET name = ?, email = ?, username = ? WHERE id = ? AND deleted_at IS NULL`,
+        [name, email, username, user.id]
+      );
+    }
+  },
+
+  async updateFull(tenantId, payload) {
+    const pool = (await import("../database/db.js")).getPool();
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+
+      await connection.execute(
+        `UPDATE wh_tenants SET company_name = ?, owner_name = ?, owner_email = ?,
+         owner_phone = ?, industry = ?, status = ?, login_portal = ?
+         WHERE id = ? AND deleted_at IS NULL`,
+        [
+          payload.company.company_name,
+          payload.company.owner_name,
+          payload.company.owner_email,
+          payload.company.owner_phone,
+          payload.company.industry,
+          payload.company.status || "active",
+          payload.login_portal,
+          tenantId,
+        ]
+      );
+
+      await connection.execute(
+        `UPDATE wh_tenant_limits SET max_users = ?, max_warehouses = ?, max_stores = ?, max_orders_per_month = ?
+         WHERE tenant_id = ? AND deleted_at IS NULL`,
+        [
+          payload.limits.max_users,
+          payload.limits.max_warehouses,
+          payload.limits.max_stores,
+          payload.limits.max_orders_per_month,
+          tenantId,
+        ]
+      );
+
+      await connection.execute(
+        `UPDATE wh_tenant_subscriptions SET billing_cycle = ?, start_date = ?, renewal_date = ?,
+         status = ?, total_amount = ?, amount_due = ?, subscription_plan_id = ?
+         WHERE tenant_id = ? AND deleted_at IS NULL`,
+        [
+          payload.billing.billing_cycle,
+          payload.billing.start_date,
+          payload.billing.renewal_date,
+          payload.billing.status || "active",
+          payload.billing.total_amount,
+          payload.billing.amount_due,
+          payload.subscription_plan_id,
+          tenantId,
+        ]
+      );
+
+      const [payRows] = await connection.execute(
+        `SELECT id FROM wh_tenant_payments WHERE tenant_id = ? AND deleted_at IS NULL ORDER BY id DESC LIMIT 1`,
+        [tenantId]
+      );
+      const bank = payload.payment?.bank ?? 0;
+      const cash = payload.payment?.cash ?? 0;
+      const totalReceived = payload.payment?.total_received ?? bank + cash;
+      if (payRows.length) {
+        await connection.execute(
+          `UPDATE wh_tenant_payments SET bank = ?, cash = ?, total_received = ?, received_at = ?
+           WHERE id = ? AND deleted_at IS NULL`,
+          [bank, cash, totalReceived, payload.payment?.received_at || null, payRows[0].id]
+        );
+      } else {
+        await connection.execute(
+          `INSERT INTO wh_tenant_payments (bank, cash, total_received, received_at, tenant_id)
+           VALUES (?, ?, ?, ?, ?)`,
+          [bank, cash, totalReceived, payload.payment?.received_at || null, tenantId]
+        );
+      }
+
+      await connection.execute(
+        `UPDATE wh_tenant_modules SET deleted_at = NOW() WHERE tenant_id = ? AND deleted_at IS NULL`,
+        [tenantId]
+      );
+      for (const moduleId of payload.module_ids) {
+        await connection.execute(
+          `INSERT INTO wh_tenant_modules (is_enabled, enabled_at, module_id, tenant_id)
+           VALUES (1, NOW(), ?, ?)
+           ON DUPLICATE KEY UPDATE is_enabled = 1, enabled_at = NOW(), disabled_at = NULL, deleted_at = NULL`,
+          [moduleId, tenantId]
+        );
+      }
+
+      const org = payload.organization;
+      const [orgRows] = await connection.execute(
+        `SELECT id FROM organization_settings WHERE tenant_id = ? AND deleted_at IS NULL LIMIT 1`,
+        [tenantId]
+      );
+      if (orgRows.length) {
+        await connection.execute(
+          `UPDATE organization_settings SET company_name = ?, logo_url = ?, timezone = ?, currency = ?,
+           language = ?, fiscal_year_start = ?, fiscal_year_end = ?
+           WHERE tenant_id = ? AND deleted_at IS NULL`,
+          [
+            org.company_name,
+            org.logo_url || null,
+            org.timezone || null,
+            org.currency || null,
+            org.language || null,
+            org.fiscal_year_start || null,
+            org.fiscal_year_end || null,
+            tenantId,
+          ]
+        );
+      } else {
+        await connection.execute(
+          `INSERT INTO organization_settings
+           (company_name, logo_url, timezone, currency, language, fiscal_year_start, fiscal_year_end, tenant_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            org.company_name,
+            org.logo_url || null,
+            org.timezone || null,
+            org.currency || null,
+            org.language || null,
+            org.fiscal_year_start || null,
+            org.fiscal_year_end || null,
+            tenantId,
+          ]
+        );
+      }
+
+      if (payload.super_admin?.username) {
+        const user = await this.getSuperAdminUser(tenantId);
+        const sa = payload.super_admin;
+        if (user) {
+          if (sa.password) {
+            const hashed = encrypt(sa.password);
+            await connection.execute(
+              `UPDATE users SET name = ?, email = ?, username = ?, password = ? WHERE id = ? AND deleted_at IS NULL`,
+              [sa.name || sa.username, sa.email, sa.username, hashed, user.id]
+            );
+          } else {
+            await connection.execute(
+              `UPDATE users SET name = ?, email = ?, username = ? WHERE id = ? AND deleted_at IS NULL`,
+              [sa.name || sa.username, sa.email, sa.username, user.id]
+            );
+          }
+        }
+      }
+
+      await connection.commit();
+      return tenantId;
+    } catch (e) {
+      await connection.rollback();
+      throw e;
+    } finally {
+      connection.release();
+    }
   },
 
   async createFull(payload) {
@@ -211,11 +401,12 @@ export const tenantRepository = {
 
       const hashedPassword = encrypt(payload.super_admin.password);
       await connection.execute(
-        `INSERT INTO users (tenant_id, name, email, password, phone, status, role_id)
-         VALUES (?, ?, ?, ?, ?, 'active', ?)`,
+        `INSERT INTO users (tenant_id, name, email, username, password, phone, status, role_id)
+         VALUES (?, ?, ?, ?, ?, ?, 'active', ?)`,
         [
           tenantId,
           payload.super_admin.name || payload.super_admin.username,
+          payload.super_admin.email,
           payload.super_admin.username,
           hashedPassword,
           payload.super_admin.phone || null,

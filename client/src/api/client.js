@@ -27,3 +27,11 @@ export const SUBSCRIPTION_STATUS = ["active", "cancelled", "expired", "pending"]
 export const BILLING_CYCLES = ["monthly", "yearly"];
 
 export const WIZARD_DRAFT_KEY = "wh_create_tenant_draft";
+
+export const TABLE_PAGE_SIZE = 10;
+
+export async function fetchAllTableRows(path, authFetch) {
+  const base = path.includes("?") ? `${path}&` : `${path}?`;
+  const res = await apiFetch(`${base}page=1&limit=10000&all=1`, {}, authFetch);
+  return res.data || [];
+}

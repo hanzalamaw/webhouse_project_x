@@ -277,6 +277,7 @@ CREATE TABLE IF NOT EXISTS `users` (
   `tenant_id` INT NOT NULL,
   `name` VARCHAR(100) NOT NULL,
   `email` VARCHAR(100) NOT NULL,
+  `username` VARCHAR(100) NOT NULL,
   `password` VARCHAR(255) NOT NULL,
   `phone` VARCHAR(45) NULL DEFAULT NULL,
   `status` VARCHAR(45) NOT NULL,
@@ -287,6 +288,7 @@ CREATE TABLE IF NOT EXISTS `users` (
   `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE INDEX `uk_users_tenant_email` (`tenant_id` ASC, `email` ASC),
+  UNIQUE INDEX `uk_users_tenant_username` (`tenant_id` ASC, `username` ASC),
   INDEX `fk_users_wh_tenants1_idx` (`tenant_id` ASC),
   INDEX `fk_users_roles1_idx` (`role_id` ASC),
   CONSTRAINT `fk_users_wh_tenants1`

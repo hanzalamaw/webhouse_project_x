@@ -19,10 +19,12 @@ export default function CreateSubscription() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const resume = searchParams.get("resume");
+  const returnTo = searchParams.get("returnTo");
   const returnPath =
-    resume === "create-tenant"
+    returnTo ||
+    (resume === "create-tenant"
       ? "/webhouse-portal/subscriptions/create?resume=create-tenant"
-      : null;
+      : null);
 
   const [planName, setPlanName] = useState("");
   const [planPrice, setPlanPrice] = useState("");
@@ -91,7 +93,12 @@ export default function CreateSubscription() {
         },
         authFetch
       );
-      if (resume === "create-tenant") {
+      if (returnTo) {
+        const url = new URL(returnTo, window.location.origin);
+        url.searchParams.set("resumed", "1");
+        url.searchParams.set("planId", String(created.id));
+        navigate(`${url.pathname}${url.search}`, { replace: true });
+      } else if (resume === "create-tenant") {
         navigate(`/webhouse-portal/tenants/create?resumed=1&planId=${created.id}`, { replace: true });
       } else {
         setPlanName("");
@@ -129,9 +136,7 @@ export default function CreateSubscription() {
             <LoginPortalSelect value={loginPortal} onChange={setLoginPortal} />
           </div>
           <p className="wh-field__label">Included Modules</p>
-          {modules.length === 0 ? (
-            <p className="wh-muted">No modules yet. Create one below.</p>
-          ) : (
+          {modules.length === 0 ? null : (
             <div className="wh-checkbox-grid">
               {modules.map((m) => (
                 <label key={m.id} className="wh-checkbox-item">
