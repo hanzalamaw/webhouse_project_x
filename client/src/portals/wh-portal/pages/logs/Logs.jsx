@@ -4,9 +4,9 @@ import { Card } from "../../../../components/Card";
 import { DataTable } from "../../../../components/DataTable";
 import { TableToolbar } from "../../../../components/TableToolbar";
 import { DiffViewer } from "../../../../components/DiffViewer";
-import { FormField } from "../../../../components/FormField";
+import { TenantSelect } from "../../../../components/TenantSelect";
 import { useAuth } from "../../../../context/AuthContext";
-import { apiFetch, fetchAllTableRows, TABLE_PAGE_SIZE } from "../../../../api/client";
+import { fetchAllTableRows, TABLE_PAGE_SIZE } from "../../../../api/client";
 import { applyToolbarFilters, EMPTY_TOOLBAR } from "../../../../utils/tableFilters";
 import { formatDateTime } from "../../../../utils/dateTime";
 
@@ -15,7 +15,6 @@ const LOG_TOOLBAR_FILTERS = [{ key: "action", label: "Action" }];
 export default function Logs() {
   const { authFetch } = useAuth();
   const [mode, setMode] = useState("wh");
-  const [tenants, setTenants] = useState([]);
   const [tenantId, setTenantId] = useState("");
   const [rows, setRows] = useState([]);
   const [page, setPage] = useState(1);
@@ -35,12 +34,6 @@ export default function Logs() {
   useEffect(() => {
     setPage(1);
   }, [toolbar, mode, tenantId]);
-
-  useEffect(() => {
-    apiFetch("/tenants?page=1&limit=200", {}, authFetch)
-      .then((r) => setTenants(r.data || []))
-      .catch(() => {});
-  }, [authFetch]);
 
   const load = useCallback(async () => {
     if (mode === "tenant" && !tenantId) {
@@ -70,6 +63,8 @@ export default function Logs() {
     setPage(1);
     setExpanded(null);
   }, [mode, tenantId]);
+
+  const expandedRow = rows.find((row) => row.id === expanded);
 
   const whColumns = [
     { key: "created_at", label: "Time", format: formatDateTime },
@@ -117,18 +112,12 @@ export default function Logs() {
       </div>
       {mode === "tenant" && (
         <Card style={{ marginBottom: 16 }}>
-          <FormField
+          <TenantSelect
             id="tenant_log_pick"
             label="Select Tenant"
-            as="select"
             value={tenantId}
-            onChange={(e) => setTenantId(e.target.value)}
-          >
-            <option value="">Choose a tenant…</option>
-            {tenants.map((t) => (
-              <option key={t.id} value={t.id}>{t.company_name}</option>
-            ))}
-          </FormField>
+            onChange={setTenantId}
+          />
         </Card>
       )}
       <Card className="wh-card--table">
@@ -155,12 +144,10 @@ export default function Logs() {
               onPageChange={setPage}
               emptyMessage="No logs for this selection."
             />
-            {rows.map((row) =>
-              expanded === row.id ? (
-                <div key={`exp-${row.id}`} className="wh-card" style={{ margin: "12px 16px 16px" }}>
-                  <DiffViewer oldValue={row.old_value} newValue={row.new_value} />
-                </div>
-              ) : null
+            {expandedRow && (
+              <div className="wh-card wh-log-diff" style={{ margin: "12px 16px 16px" }}>
+                <DiffViewer oldValue={expandedRow.old_value} newValue={expandedRow.new_value} />
+              </div>
             )}
           </>
         )}

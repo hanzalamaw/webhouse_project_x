@@ -17,7 +17,7 @@ export default function ErpLogin({ portal }) {
   const navigate = useNavigate();
 
   if (user?.portal === "tenant") {
-    navigate("/app/dashboard", { replace: true });
+    navigate("/app", { replace: true });
     return null;
   }
 
@@ -38,7 +38,7 @@ export default function ErpLogin({ portal }) {
       const data = await response.json();
       if (response.ok) {
         login(data.user, data.token, data.refreshToken ?? null);
-        navigate("/app/dashboard");
+        navigate("/app");
       } else {
         setError(data.message || "Invalid credentials");
       }

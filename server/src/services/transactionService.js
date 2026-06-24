@@ -12,7 +12,20 @@ export const transactionService = {
     return paginatedResponse(rows, total, page, limit);
   },
 
+  async listPaymentsByTenant(tenantId) {
+    const data = await transactionRepository.findPaymentsByTenant(tenantId);
+    return { data };
+  },
+
+  async createPayment(tenantId, body) {
+    return transactionRepository.createPayment(tenantId, body);
+  },
+
   async updatePayment(id, body) {
     return transactionRepository.updatePayment(id, body);
+  },
+
+  async deletePayment(id) {
+    return transactionRepository.deletePayment(id);
   },
 };

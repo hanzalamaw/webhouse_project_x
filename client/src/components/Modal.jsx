@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { createPortal } from "react-dom";
 
-export function Modal({ open, onClose, title, wide, children, footer }) {
+export function Modal({ open, onClose, title, wide, className = "", children, footer }) {
   useEffect(() => {
     if (!open) return;
     const prev = document.body.style.overflow;
@@ -16,7 +16,7 @@ export function Modal({ open, onClose, title, wide, children, footer }) {
   return createPortal(
     <div className="wh-modal-overlay" onClick={onClose}>
       <div
-        className={`wh-modal${wide ? " wh-modal--wide" : ""}`}
+        className={`wh-modal${wide ? " wh-modal--wide" : ""}${className ? ` ${className}` : ""}`}
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"

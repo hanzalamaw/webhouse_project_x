@@ -7,6 +7,7 @@ import { TableToolbar } from "../../../../components/TableToolbar";
 import { FormField } from "../../../../components/FormField";
 import { Button } from "../../../../components/Button";
 import { Modal } from "../../../../components/Modal";
+import { ConfirmDeleteModal } from "../../../../components/ConfirmDeleteModal";
 import { useAuth } from "../../../../context/AuthContext";
 import { apiFetch, fetchAllTableRows, TABLE_PAGE_SIZE } from "../../../../api/client";
 import { formatPKR } from "../../../../utils/currency";
@@ -14,23 +15,23 @@ import { formatDate, formatDateTime } from "../../../../utils/dateTime";
 import { addPaymentReceived, toInputDate } from "../../../../utils/billing";
 import { applyToolbarFilters, EMPTY_TOOLBAR } from "../../../../utils/tableFilters";
 
-function toDatetimeLocal(value) {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  const d = String(date.getDate()).padStart(2, "0");
-  const h = String(date.getHours()).padStart(2, "0");
-  const min = String(date.getMinutes()).padStart(2, "0");
-  return `${y}-${m}-${d}T${h}:${min}`;
+function SummaryGrid({ items }) {
+  return (
+    <div className="wh-tx-summary-grid">
+      {items.map(({ label, value, accent }) => (
+        <div key={label} className="wh-tx-summary-item">
+          <span className="wh-tx-summary-item__label">{label}</span>
+          <span className={`wh-tx-summary-item__value${accent ? " wh-tx-summary-item__value--accent" : ""}`}>
+            {value}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
 }
 
-function fromDatetimeLocal(value) {
-  if (!value) return null;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  return date.toISOString();
+function sumField(payments, field) {
+  return payments.reduce((sum, p) => sum + Number(p[field] || 0), 0);
 }
 
 export default function Transaction() {
@@ -39,16 +40,52 @@ export default function Transaction() {
   const [rows, setRows] = useState([]);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
-  const [editRow, setEditRow] = useState(null);
-  const [form, setForm] = useState({ bank: "", cash: "", received_at: "" });
-  const [formError, setFormError] = useState("");
-  const [saving, setSaving] = useState(false);
+  const [addModalOpen, setAddModalOpen] = useState(false);
+  const [tenantPayments, setTenantPayments] = useState([]);
+  const [tenantPaymentsLoading, setTenantPaymentsLoading] = useState(false);
+  const [contextRow, setContextRow] = useState(null);
+  const [addForm, setAddForm] = useState({ bank: "", cash: "" });
+  const [addError, setAddError] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [fixPayment, setFixPayment] = useState(null);
+  const [fixForm, setFixForm] = useState({ bank: "", cash: "" });
+  const [fixError, setFixError] = useState("");
+  const [fixing, setFixing] = useState(false);
+  const [deletePayment, setDeletePayment] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
   const [toolbar, setToolbar] = useState({ ...EMPTY_TOOLBAR });
 
   const filteredRows = useMemo(
     () => applyToolbarFilters(rows, toolbar, { dateField: "received_at" }),
     [rows, toolbar]
   );
+
+  const periodTotal = contextRow?.period_total ?? 0;
+  const tenantPaidCurrent = useMemo(
+    () => sumField(tenantPayments, "total_received"),
+    [tenantPayments]
+  );
+  const tenantBankCurrent = useMemo(() => sumField(tenantPayments, "bank"), [tenantPayments]);
+  const tenantCashCurrent = useMemo(() => sumField(tenantPayments, "cash"), [tenantPayments]);
+  const currentPending = Math.max(0, Number((periodTotal - tenantPaidCurrent).toFixed(2)));
+
+  const addBank = Number(addForm.bank) || 0;
+  const addCash = Number(addForm.cash) || 0;
+  const addTotal = addPaymentReceived(addForm.bank, addForm.cash);
+  const newTenantPaid = tenantPaidCurrent + addTotal;
+  const newPending = Math.max(0, Number((periodTotal - newTenantPaid).toFixed(2)));
+  const maxAddAllowed = Math.max(0, Number((periodTotal - tenantPaidCurrent).toFixed(2)));
+
+  const fixOtherPaid = useMemo(() => {
+    if (!fixPayment) return 0;
+    return tenantPayments
+      .filter((p) => p.id !== fixPayment.id)
+      .reduce((sum, p) => sum + Number(p.total_received || 0), 0);
+  }, [tenantPayments, fixPayment]);
+
+  const fixTotal = addPaymentReceived(fixForm.bank, fixForm.cash);
+  const fixMaxAllowed = Math.max(0, Number((periodTotal - fixOtherPaid).toFixed(2)));
 
   useEffect(() => {
     setPage(1);
@@ -64,6 +101,21 @@ export default function Transaction() {
     setRows(data);
   }, [authFetch]);
 
+  const loadTenantPayments = useCallback(
+    async (tenantId) => {
+      setTenantPaymentsLoading(true);
+      try {
+        const res = await apiFetch(`/transactions/tenant/${tenantId}/payments`, {}, authFetch);
+        setTenantPayments(res.data || []);
+      } catch {
+        setTenantPayments([]);
+      } finally {
+        setTenantPaymentsLoading(false);
+      }
+    },
+    [authFetch]
+  );
+
   const reload = useCallback(async () => {
     await Promise.all([loadSummary(), loadPayments()]);
   }, [loadSummary, loadPayments]);
@@ -73,70 +125,128 @@ export default function Transaction() {
     reload().catch(() => {}).finally(() => setLoading(false));
   }, [reload]);
 
-  const openEdit = (row) => {
-    setEditRow(row);
-    setForm({
-      bank: String(row.bank ?? 0),
-      cash: String(row.cash ?? 0),
-      received_at: toDatetimeLocal(row.received_at),
+  const openAddModal = async (row) => {
+    setContextRow(row);
+    setAddModalOpen(true);
+    setAddForm({ bank: "", cash: "" });
+    setAddError("");
+    await loadTenantPayments(row.tenant_id);
+  };
+
+  const closeAddModal = () => {
+    setAddModalOpen(false);
+    setContextRow(null);
+    setTenantPayments([]);
+    setAddForm({ bank: "", cash: "" });
+    setAddError("");
+  };
+
+  const openFixModal = (payment) => {
+    setFixPayment(payment);
+    setFixForm({
+      bank: String(payment.bank ?? 0),
+      cash: String(payment.cash ?? 0),
     });
-    setFormError("");
+    setFixError("");
   };
 
-  const closeEdit = () => {
-    setEditRow(null);
-    setFormError("");
+  const closeFixModal = () => {
+    setFixPayment(null);
+    setFixForm({ bank: "", cash: "" });
+    setFixError("");
   };
 
-  const periodTotal = editRow?.period_total ?? 0;
-  const otherPaid = useMemo(() => {
-    if (!editRow) return 0;
-    return rows
-      .filter((r) => r.tenant_id === editRow.tenant_id && r.id !== editRow.id)
-      .reduce((sum, r) => sum + Number(r.total_received || 0), 0);
-  }, [editRow, rows]);
-
-  const formTotal = addPaymentReceived(form.bank, form.cash);
-  const maxAllowed = Math.max(0, Number((periodTotal - otherPaid).toFixed(2)));
-
-  const validateForm = () => {
-    const bank = Number(form.bank);
-    const cash = Number(form.cash);
-    if (Number.isNaN(bank) || bank < 0) return "Bank amount cannot be negative.";
-    if (Number.isNaN(cash) || cash < 0) return "Cash amount cannot be negative.";
-    if (formTotal > maxAllowed + 0.001) {
-      return `Total received cannot exceed ${formatPKR(maxAllowed)} for this subscription period.`;
+  const validateAdd = () => {
+    if (Number.isNaN(addBank) || addBank < 0) return "Bank amount cannot be negative.";
+    if (Number.isNaN(addCash) || addCash < 0) return "Cash amount cannot be negative.";
+    if (addBank === 0 && addCash === 0) return "Enter an amount to add.";
+    if (addTotal > maxAddAllowed + 0.001) {
+      return `Total cannot exceed ${formatPKR(maxAddAllowed)} remaining for this period.`;
     }
     return "";
   };
 
-  const saveEdit = async () => {
-    const err = validateForm();
+  const validateFix = () => {
+    const bank = Number(fixForm.bank);
+    const cash = Number(fixForm.cash);
+    if (Number.isNaN(bank) || bank < 0) return "Bank amount cannot be negative.";
+    if (Number.isNaN(cash) || cash < 0) return "Cash amount cannot be negative.";
+    if (fixTotal > fixMaxAllowed + 0.001) {
+      return `Total cannot exceed ${formatPKR(fixMaxAllowed)} for this subscription period.`;
+    }
+    return "";
+  };
+
+  const submitAdd = async () => {
+    const err = validateAdd();
     if (err) {
-      setFormError(err);
+      setAddError(err);
       return;
     }
-    setSaving(true);
-    setFormError("");
+    setAdding(true);
+    setAddError("");
     try {
       await apiFetch(
-        `/transactions/payments/${editRow.id}`,
+        `/transactions/tenant/${contextRow.tenant_id}/payments`,
+        {
+          method: "POST",
+          body: JSON.stringify({ bank: addBank, cash: addCash }),
+        },
+        authFetch
+      );
+      setAddForm({ bank: "", cash: "" });
+      await loadTenantPayments(contextRow.tenant_id);
+      await reload();
+    } catch (e) {
+      setAddError(e.message || "Failed to add transaction");
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  const submitFix = async () => {
+    const err = validateFix();
+    if (err) {
+      setFixError(err);
+      return;
+    }
+    setFixing(true);
+    setFixError("");
+    try {
+      await apiFetch(
+        `/transactions/payments/${fixPayment.id}`,
         {
           method: "PUT",
           body: JSON.stringify({
-            bank: Number(form.bank) || 0,
-            cash: Number(form.cash) || 0,
-            received_at: fromDatetimeLocal(form.received_at),
+            bank: Number(fixForm.bank) || 0,
+            cash: Number(fixForm.cash) || 0,
           }),
         },
         authFetch
       );
-      closeEdit();
+      closeFixModal();
+      await loadTenantPayments(contextRow.tenant_id);
       await reload();
     } catch (e) {
-      setFormError(e.message || "Failed to update transaction");
+      setFixError(e.message || "Failed to update payment");
     } finally {
-      setSaving(false);
+      setFixing(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!deletePayment || !contextRow) return;
+    setDeleting(true);
+    setDeleteError("");
+    try {
+      await apiFetch(`/transactions/payments/${deletePayment.id}`, { method: "DELETE" }, authFetch);
+      setDeletePayment(null);
+      await loadTenantPayments(contextRow.tenant_id);
+      await reload();
+    } catch (e) {
+      setDeleteError(e.message || "Failed to delete payment");
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -151,8 +261,9 @@ export default function Transaction() {
     { key: "amount_due", label: "Due", format: (_, r) => formatPKR(r.amount_due) },
     { key: "bank", label: "Bank", format: (_, r) => formatPKR(r.bank) },
     { key: "cash", label: "Cash", format: (_, r) => formatPKR(r.cash) },
-    { key: "received_at", label: "Received At", filterType: "date", format: formatDateTime },
   ];
+
+  const meta = contextRow;
 
   return (
     <div className="wh-page">
@@ -194,7 +305,7 @@ export default function Transaction() {
               page={page}
               pageSize={TABLE_PAGE_SIZE}
               onPageChange={setPage}
-              onRowClick={openEdit}
+              onRowClick={openAddModal}
               emptyMessage="No payment records yet."
             />
           </>
@@ -202,68 +313,199 @@ export default function Transaction() {
       </Card>
 
       <Modal
-        open={!!editRow}
-        onClose={closeEdit}
-        title={`Edit Transaction — ${editRow?.company_name || ""}`}
-        wide
+        open={addModalOpen}
+        onClose={closeAddModal}
+        title={`Add Transaction — ${meta?.company_name || ""}`}
+        className="wh-modal--transaction wh-modal--transaction-xl"
         footer={
           <>
-            <Button variant="secondary" onClick={closeEdit}>Cancel</Button>
-            <Button onClick={saveEdit} disabled={saving}>
-              {saving ? "Saving…" : "Save"}
+            {addError && <p className="wh-field__error">{addError}</p>}
+            <Button variant="secondary" onClick={closeAddModal}>Close</Button>
+            <Button onClick={submitAdd} disabled={adding}>
+              {adding ? "Saving…" : "Submit"}
             </Button>
           </>
         }
       >
-        <div className="wh-modal__section wh-modal__section--muted">
-          <h4 className="wh-modal__section-title">Subscription</h4>
+        <div className="wh-tx-panel">
+          <h4 className="wh-tx-panel__title">Previous (current state)</h4>
+          <SummaryGrid
+            items={[
+              { label: "Tenant", value: meta?.company_name || "—" },
+              { label: "Plan", value: meta?.plan_name || "—" },
+              { label: "Billing cycle", value: meta?.billing_cycle || "—" },
+              { label: "Start date", value: toInputDate(meta?.start_date) || "—" },
+              { label: "End date", value: toInputDate(meta?.end_date) || "—" },
+              { label: "Period total", value: formatPKR(periodTotal), accent: true },
+              { label: "Current bank", value: formatPKR(tenantBankCurrent) },
+              { label: "Current cash", value: formatPKR(tenantCashCurrent) },
+              { label: "Current received", value: formatPKR(tenantPaidCurrent) },
+              { label: "Current pending", value: formatPKR(currentPending) },
+            ]}
+          />
+        </div>
+
+        <div className="wh-tx-inputs">
           <div className="wh-form-grid">
-            <FormField id="tx_plan" label="Plan" value={editRow?.plan_name || "—"} readOnly />
-            <FormField id="tx_cycle" label="Billing Cycle" value={editRow?.billing_cycle || "—"} readOnly />
-            <FormField id="tx_start" label="Start Date" value={toInputDate(editRow?.start_date)} readOnly />
-            <FormField id="tx_end" label="End Date" value={toInputDate(editRow?.end_date)} readOnly />
-            <FormField id="tx_period" label="Period Total" value={formatPKR(periodTotal)} readOnly />
+            <FormField
+              id="tx_add_bank"
+              label="Add bank (Rs.)"
+              type="number"
+              step="0.01"
+              min="0"
+              value={addForm.bank}
+              onChange={(e) => {
+                setAddError("");
+                setAddForm((f) => ({ ...f, bank: e.target.value }));
+              }}
+            />
+            <FormField
+              id="tx_add_cash"
+              label="Add cash (Rs.)"
+              type="number"
+              step="0.01"
+              min="0"
+              value={addForm.cash}
+              onChange={(e) => {
+                setAddError("");
+                setAddForm((f) => ({ ...f, cash: e.target.value }));
+              }}
+            />
           </div>
         </div>
-        <div className="wh-modal__section">
-          <h4 className="wh-modal__section-title">Payment</h4>
-          <div className="wh-form-grid">
-            <FormField
-              id="tx_bank"
-              label="Bank (Rs.)"
-              type="number"
-              step="0.01"
-              min="0"
-              value={form.bank}
-              onChange={(e) => {
-                setFormError("");
-                setForm((f) => ({ ...f, bank: e.target.value }));
-              }}
-            />
-            <FormField
-              id="tx_cash"
-              label="Cash (Rs.)"
-              type="number"
-              step="0.01"
-              min="0"
-              value={form.cash}
-              onChange={(e) => {
-                setFormError("");
-                setForm((f) => ({ ...f, cash: e.target.value }));
-              }}
-            />
-            <FormField id="tx_total" label="Total Received (Rs.)" value={formatPKR(formTotal)} readOnly />
-            <FormField
-              id="tx_received"
-              label="Received At"
-              type="datetime-local"
-              value={form.received_at}
-              onChange={(e) => setForm((f) => ({ ...f, received_at: e.target.value }))}
-            />
-          </div>
-          {formError && <p className="wh-field__error">{formError}</p>}
+
+        <div className="wh-tx-panel wh-tx-panel--summary">
+          <SummaryGrid
+            items={[
+              { label: "New bank total", value: formatPKR(tenantBankCurrent + addBank) },
+              { label: "New cash total", value: formatPKR(tenantCashCurrent + addCash) },
+              { label: "New received total", value: formatPKR(newTenantPaid) },
+              { label: "New pending", value: formatPKR(newPending), accent: true },
+            ]}
+          />
+        </div>
+
+        <div className="wh-tx-history">
+          <h4 className="wh-tx-panel__title">Received payments</h4>
+          {tenantPaymentsLoading ? (
+            <p className="wh-muted">Loading payments…</p>
+          ) : (
+            <div className="wh-tx-payments-wrap">
+              <table className="wh-tx-payments-table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>ID</th>
+                    <th>Bank</th>
+                    <th>Cash</th>
+                    <th>Total</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {!tenantPayments.length ? (
+                    <tr>
+                      <td colSpan={6} className="wh-table-empty">No payments for this tenant.</td>
+                    </tr>
+                  ) : (
+                    tenantPayments.map((p) => (
+                      <tr key={p.id}>
+                        <td>{p.received_at ? formatDateTime(p.received_at) : "—"}</td>
+                        <td>{p.id}</td>
+                        <td>{formatPKR(p.bank)}</td>
+                        <td>{formatPKR(p.cash)}</td>
+                        <td>{formatPKR(p.total_received)}</td>
+                        <td>
+                          <div className="wh-action-btns">
+                            <Button
+                              variant="secondary"
+                              className="wh-btn--sm"
+                              onClick={() => openFixModal(p)}
+                            >
+                              Edit
+                            </Button>
+                            <Button
+                              variant="danger"
+                              className="wh-btn--sm"
+                              onClick={() => setDeletePayment(p)}
+                            >
+                              Delete
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </Modal>
+
+      <Modal
+        open={!!fixPayment}
+        onClose={closeFixModal}
+        title={`Edit Payment #${fixPayment?.id || ""}`}
+        className="wh-modal--transaction"
+        footer={
+          <>
+            {fixError && <p className="wh-field__error">{fixError}</p>}
+            <Button variant="secondary" onClick={closeFixModal}>Cancel</Button>
+            <Button onClick={submitFix} disabled={fixing}>
+              {fixing ? "Saving…" : "Save"}
+            </Button>
+          </>
+        }
+      >
+        <p className="wh-modal__text">
+          Correct the bank and cash amounts for this payment entry.
+          {fixPayment?.received_at && (
+            <> Recorded on {formatDateTime(fixPayment.received_at)}.</>
+          )}
+        </p>
+        <div className="wh-form-grid">
+          <FormField
+            id="tx_fix_bank"
+            label="Bank (Rs.)"
+            type="number"
+            step="0.01"
+            min="0"
+            value={fixForm.bank}
+            onChange={(e) => {
+              setFixError("");
+              setFixForm((f) => ({ ...f, bank: e.target.value }));
+            }}
+          />
+          <FormField
+            id="tx_fix_cash"
+            label="Cash (Rs.)"
+            type="number"
+            step="0.01"
+            min="0"
+            value={fixForm.cash}
+            onChange={(e) => {
+              setFixError("");
+              setFixForm((f) => ({ ...f, cash: e.target.value }));
+            }}
+          />
+          <FormField id="tx_fix_total" label="Total (Rs.)" value={formatPKR(fixTotal)} readOnly />
+        </div>
+      </Modal>
+
+      <ConfirmDeleteModal
+        open={!!deletePayment}
+        onClose={() => {
+          setDeletePayment(null);
+          setDeleteError("");
+        }}
+        title="Delete payment"
+        recordName={`payment #${deletePayment?.id || ""}`}
+        confirmPhrase="DELETE"
+        loading={deleting}
+        error={deleteError}
+        onConfirm={handleDelete}
+      />
     </div>
   );
 }

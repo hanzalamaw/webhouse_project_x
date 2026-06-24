@@ -23,6 +23,7 @@ export const createVerifyToken = (JWT_SECRET) => {
       req.userRole = decoded.role;
       req.sessionId = decoded.sessionId ?? null;
       req.tenantId = decoded.tenantId ?? null;
+      req.impersonatedBy = decoded.impersonatedBy ?? null;
       next();
     } catch {
       return res.status(401).json({ message: "Invalid token" });

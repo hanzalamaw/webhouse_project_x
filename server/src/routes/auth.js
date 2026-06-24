@@ -2,6 +2,7 @@ import jwt from "jsonwebtoken";
 import crypto from "crypto";
 import { verifyPassword } from "../utils/cipher.js";
 import { sessionRepository } from "../repositories/sessionRepository.js";
+import { tenantRepository } from "../repositories/tenantRepository.js";
 
 const toWhUserPayload = (user) => ({
   id: user.id,
@@ -187,11 +188,14 @@ export function registerAuthRoutes(app, db, { JWT_SECRET, JWT_EXPIRES_IN, JWT_RE
         if (!decoded.sessionId || !(await assertTenantSessionActive(decoded.sessionId))) {
           return res.status(401).json({ message: "Session terminated" });
         }
-        const token = jwt.sign(
-          { id: decoded.id, role: "tenant", tenantId: decoded.tenantId, sessionId: decoded.sessionId },
-          JWT_SECRET,
-          { expiresIn: JWT_EXPIRES_IN }
-        );
+        const tokenPayload = {
+          id: decoded.id,
+          role: "tenant",
+          tenantId: decoded.tenantId,
+          sessionId: decoded.sessionId,
+        };
+        if (decoded.impersonatedBy) tokenPayload.impersonatedBy = decoded.impersonatedBy;
+        const token = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
         return res.json({ token });
       }
 
@@ -229,12 +233,21 @@ export function registerAuthRoutes(app, db, { JWT_SECRET, JWT_EXPIRES_IN, JWT_RE
     );
     if (!rows.length) return res.status(404).json({ message: "User not found" });
     const row = rows[0];
-    res.json({
-      user: toTenantUserPayload(row, {
-        id: row.tenant_id,
-        company_name: row.company_name,
-        login_portal: row.login_portal,
-      }),
+    const userPayload = toTenantUserPayload(row, {
+      id: row.tenant_id,
+      company_name: row.company_name,
+      login_portal: row.login_portal,
     });
+    if (req.impersonatedBy) {
+      userPayload.impersonating = true;
+      userPayload.impersonated_by = req.impersonatedBy;
+    }
+    res.json({ user: userPayload });
+  });
+
+  app.get("/api/tenant/modules", verifyToken, requireActiveTenantSession, async (req, res) => {
+    if (req.userRole !== "tenant") return res.status(403).json({ message: "Forbidden" });
+    const modules = await tenantRepository.getTenantModules(req.tenantId);
+    res.json({ data: modules.filter((m) => m.is_enabled) });
   });
 }

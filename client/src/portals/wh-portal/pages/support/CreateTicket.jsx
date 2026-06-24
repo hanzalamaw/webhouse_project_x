@@ -1,24 +1,18 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { PageHeader } from "../../../../components/PageHeader";
 import { Card } from "../../../../components/Card";
 import { FormField } from "../../../../components/FormField";
 import { Button } from "../../../../components/Button";
+import { TenantSelect } from "../../../../components/TenantSelect";
 import { useAuth } from "../../../../context/AuthContext";
 import { apiFetch } from "../../../../api/client";
 
 export default function CreateTicket() {
   const { authFetch } = useAuth();
-  const [tenants, setTenants] = useState([]);
   const [form, setForm] = useState({ tenant_id: "", subject: "", description: "" });
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    apiFetch("/tenants?page=1&limit=200", {}, authFetch)
-      .then((r) => setTenants(r.data || []))
-      .catch(() => {});
-  }, [authFetch]);
 
   const update = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
 
@@ -70,12 +64,12 @@ export default function CreateTicket() {
       />
       <Card>
         <form className="wh-form" onSubmit={handleSubmit}>
-          <FormField id="tenant" label="Tenant" as="select" value={form.tenant_id} onChange={update("tenant_id")} required>
-            <option value="">Choose a tenant…</option>
-            {tenants.map((t) => (
-              <option key={t.id} value={t.id}>{t.company_name}</option>
-            ))}
-          </FormField>
+          <TenantSelect
+            id="ticket_tenant"
+            label="Tenant"
+            value={form.tenant_id}
+            onChange={(v) => setForm((f) => ({ ...f, tenant_id: v }))}
+          />
           <FormField id="subject" label="Subject" value={form.subject} onChange={update("subject")} required />
           <FormField
             id="description"

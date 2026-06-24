@@ -230,43 +230,30 @@ export const tenantRepository = {
       }
 
       const org = payload.organization;
-      const [orgRows] = await connection.execute(
-        `SELECT id FROM organization_settings WHERE tenant_id = ? AND deleted_at IS NULL LIMIT 1`,
-        [tenantId]
+      await connection.execute(
+        `INSERT INTO organization_settings
+         (company_name, logo_url, timezone, currency, language, fiscal_year_start, fiscal_year_end, tenant_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+           company_name = VALUES(company_name),
+           logo_url = VALUES(logo_url),
+           timezone = VALUES(timezone),
+           currency = VALUES(currency),
+           language = VALUES(language),
+           fiscal_year_start = VALUES(fiscal_year_start),
+           fiscal_year_end = VALUES(fiscal_year_end),
+           deleted_at = NULL`,
+        [
+          org.company_name,
+          org.logo_url || null,
+          org.timezone || DEFAULT_TIMEZONE,
+          org.currency || null,
+          org.language || null,
+          org.fiscal_year_start || null,
+          org.fiscal_year_end || null,
+          tenantId,
+        ]
       );
-      if (orgRows.length) {
-        await connection.execute(
-          `UPDATE organization_settings SET company_name = ?, logo_url = ?, timezone = ?, currency = ?,
-           language = ?, fiscal_year_start = ?, fiscal_year_end = ?
-           WHERE tenant_id = ? AND deleted_at IS NULL`,
-          [
-            org.company_name,
-            org.logo_url || null,
-            org.timezone || DEFAULT_TIMEZONE,
-            org.currency || null,
-            org.language || null,
-            org.fiscal_year_start || null,
-            org.fiscal_year_end || null,
-            tenantId,
-          ]
-        );
-      } else {
-        await connection.execute(
-          `INSERT INTO organization_settings
-           (company_name, logo_url, timezone, currency, language, fiscal_year_start, fiscal_year_end, tenant_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            org.company_name,
-            org.logo_url || null,
-            org.timezone || DEFAULT_TIMEZONE,
-            org.currency || null,
-            org.language || null,
-            org.fiscal_year_start || null,
-            org.fiscal_year_end || null,
-            tenantId,
-          ]
-        );
-      }
 
       if (payload.super_admin?.username) {
         const user = await this.getSuperAdminUser(tenantId);

@@ -33,7 +33,7 @@ export default function ImpersonationHandoff() {
         return;
       }
       login(data.user, data.token, data.refreshToken ?? null);
-      navigate("/app/dashboard", { replace: true });
+      navigate("/app", { replace: true });
     } catch {
       setError("Could not start impersonation session.");
     }

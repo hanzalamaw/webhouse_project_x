@@ -1,13 +1,13 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { useTheme } from "../../context/ThemeContext";
-import { MENU_ITEMS, FOOTER_ITEMS } from "../../portals/wh-portal/navConfig";
-import { ChevronIcon, HamburgerIcon } from "../icons";
+import { getTenantMenuItems, TENANT_FOOTER_ITEMS, ChevronIcon } from "../../portals/tenant-portal/navConfig";
+import { HamburgerIcon } from "../icons";
 import { Toggle } from "../Toggle";
 import "./Sidebar.css";
 
-const SIDEBAR_EXPANDED_KEY = "wh_sidebar_expanded";
+const SIDEBAR_EXPANDED_KEY = "tenant_sidebar_expanded";
 
 function readSidebarExpanded() {
   try {
@@ -18,6 +18,7 @@ function readSidebarExpanded() {
 }
 
 function isPathActive(pathname, path) {
+  if (path === "/app") return pathname === "/app";
   return pathname === path || pathname.startsWith(`${path}/`);
 }
 
@@ -26,7 +27,7 @@ function isGroupActive(pathname, item) {
   return item.children?.some((c) => isPathActive(pathname, c.path));
 }
 
-export default function Sidebar() {
+export default function TenantSidebar({ moduleId }) {
   const [isExpanded, setIsExpanded] = useState(readSidebarExpanded);
   const [openGroups, setOpenGroups] = useState({});
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -36,6 +37,9 @@ export default function Sidebar() {
   const location = useLocation();
   const { user, logout } = useAuth();
   const { darkMode, toggleDarkMode } = useTheme();
+
+  const menuItems = useMemo(() => getTenantMenuItems(moduleId), [moduleId]);
+  const logoutRedirect = `/${user?.login_portal || "erp1"}`;
 
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768);
@@ -82,7 +86,7 @@ export default function Sidebar() {
 
   const handleLogout = async () => {
     await logout();
-    navigate("/webhouse-portal");
+    navigate(logoutRedirect);
   };
 
   const handleNavigate = (path) => {
@@ -156,12 +160,12 @@ export default function Sidebar() {
   const profileBlock = (
     <div className="wh-sidebar-profile">
       <div className="wh-profile-avatar">
-        <span>{(user?.name || "A").charAt(0).toUpperCase()}</span>
+        <span>{(user?.name || "U").charAt(0).toUpperCase()}</span>
       </div>
       {(isExpanded || isMobile) && (
         <div className="wh-profile-info">
-          <span className="wh-profile-name">{(user?.name || "ADMIN").toUpperCase()}</span>
-          <span className="wh-profile-role">WEBHOUSE ADMIN</span>
+          <span className="wh-profile-name">{(user?.name || "USER").toUpperCase()}</span>
+          <span className="wh-profile-role">{(user?.tenant_name || "WORKSPACE").toUpperCase()}</span>
         </div>
       )}
     </div>
@@ -170,18 +174,18 @@ export default function Sidebar() {
   const footerBlock = (
     <div className="wh-sidebar-footer">
       <button type="button" className="wh-footer-link wh-footer-link--danger" onClick={handleLogout}>
-        <FOOTER_ITEMS.logout.icon />
-        {(isExpanded || isMobile) && <span>{FOOTER_ITEMS.logout.label}</span>}
+        <TENANT_FOOTER_ITEMS.logout.icon />
+        {(isExpanded || isMobile) && <span>{TENANT_FOOTER_ITEMS.logout.label}</span>}
       </button>
       {(isExpanded || isMobile) ? (
         <div className="wh-footer-toggle">
-          <FOOTER_ITEMS.nightMode.icon />
-          <span>{FOOTER_ITEMS.nightMode.label}</span>
+          <TENANT_FOOTER_ITEMS.nightMode.icon />
+          <span>{TENANT_FOOTER_ITEMS.nightMode.label}</span>
           <Toggle checked={darkMode} onChange={toggleDarkMode} />
         </div>
       ) : (
         <button type="button" className="wh-footer-link" onClick={toggleDarkMode} title="Night Mode">
-          <FOOTER_ITEMS.nightMode.icon />
+          <TENANT_FOOTER_ITEMS.nightMode.icon />
         </button>
       )}
     </div>
@@ -199,7 +203,7 @@ export default function Sidebar() {
         <aside ref={drawerRef} className={`wh-mobile-drawer${mobileOpen ? " open" : ""}`}>
           {profileBlock}
           <nav className="wh-sidebar-nav">
-            <ul className="wh-nav-list">{MENU_ITEMS.map((item) => renderNavItem(item))}</ul>
+            <ul className="wh-nav-list">{menuItems.map((item) => renderNavItem(item))}</ul>
           </nav>
           {footerBlock}
         </aside>
@@ -217,11 +221,9 @@ export default function Sidebar() {
       >
         <ChevronIcon direction={isExpanded ? "left" : "right"} />
       </button>
-      <div className="wh-sidebar-top">
-        {profileBlock}
-      </div>
+      <div className="wh-sidebar-top">{profileBlock}</div>
       <nav className="wh-sidebar-nav">
-        <ul className="wh-nav-list">{MENU_ITEMS.map((item) => renderNavItem(item))}</ul>
+        <ul className="wh-nav-list">{menuItems.map((item) => renderNavItem(item))}</ul>
       </nav>
       {footerBlock}
     </aside>

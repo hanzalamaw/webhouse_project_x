@@ -3,7 +3,6 @@ import {
   TenantsIcon,
   SupportIcon,
   ImpersonateIcon,
-  HelpIcon,
   LogoutIcon,
   MoonIcon,
   ChevronIcon,
@@ -71,7 +70,6 @@ export const MENU_ITEMS = [
 ];
 
 export const FOOTER_ITEMS = {
-  help: { label: "Help Center", icon: HelpIcon },
   logout: { label: "Log Out", icon: LogoutIcon },
   nightMode: { label: "Night Mode", icon: MoonIcon },
 };

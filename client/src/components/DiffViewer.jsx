@@ -12,12 +12,21 @@ function flattenObject(obj, prefix = "") {
   return out;
 }
 
-export function DiffViewer({ oldValue, newValue }) {
+export function DiffViewer({ oldValue, newValue, onlyChanged = true }) {
   const oldFlat = flattenObject(oldValue);
   const newFlat = flattenObject(newValue);
   const keys = [...new Set([...Object.keys(oldFlat), ...Object.keys(newFlat)])].sort();
 
-  if (!keys.length) {
+  const rows = keys
+    .map((key) => {
+      const oldV = oldFlat[key];
+      const newV = newFlat[key];
+      const changed = JSON.stringify(oldV) !== JSON.stringify(newV);
+      return { key, oldV, newV, changed };
+    })
+    .filter((row) => !onlyChanged || row.changed);
+
+  if (!rows.length) {
     return <p className="wh-muted">No changes recorded.</p>;
   }
 
@@ -25,21 +34,16 @@ export function DiffViewer({ oldValue, newValue }) {
     <div className="wh-diff">
       <div className="wh-diff__header">
         <span>Field</span>
-        <span>Old</span>
-        <span>New</span>
+        <span className="wh-diff__col--old">Previous</span>
+        <span className="wh-diff__col--new">Updated</span>
       </div>
-      {keys.map((key) => {
-        const oldV = oldFlat[key];
-        const newV = newFlat[key];
-        const changed = JSON.stringify(oldV) !== JSON.stringify(newV);
-        return (
-          <div key={key} className={`wh-diff__row${changed ? " wh-diff__row--changed" : ""}`}>
-            <span className="wh-diff__key">{key}</span>
-            <span className="wh-diff__val wh-diff__val--old">{formatVal(oldV)}</span>
-            <span className="wh-diff__val wh-diff__val--new">{formatVal(newV)}</span>
-          </div>
-        );
-      })}
+      {rows.map(({ key, oldV, newV, changed }) => (
+        <div key={key} className={`wh-diff__row${changed ? " wh-diff__row--changed" : ""}`}>
+          <span className="wh-diff__key">{key}</span>
+          <span className="wh-diff__val wh-diff__val--old">{formatVal(oldV)}</span>
+          <span className="wh-diff__val wh-diff__val--new">{formatVal(newV)}</span>
+        </div>
+      ))}
     </div>
   );
 }

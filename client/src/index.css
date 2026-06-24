@@ -1331,7 +1331,17 @@ button {
 }
 
 .wh-diff__row--changed {
-  background: color-mix(in srgb, var(--color-warning) 6%, var(--card-bg));
+  background: var(--card-bg);
+}
+
+.wh-diff__col--old,
+.wh-diff__header .wh-diff__col--old {
+  color: var(--color-danger);
+}
+
+.wh-diff__col--new,
+.wh-diff__header .wh-diff__col--new {
+  color: var(--color-success);
 }
 
 .wh-diff__key {
@@ -1341,12 +1351,165 @@ button {
 
 .wh-diff__val--old {
   color: var(--color-danger);
+  background: var(--danger-soft-bg);
+  border: 1px solid var(--danger-soft-border);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
   word-break: break-word;
 }
 
 .wh-diff__val--new {
   color: var(--color-success);
+  background: var(--success-soft-bg);
+  border: 1px solid var(--success-soft-border);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
   word-break: break-word;
+}
+
+.wh-modal--transaction {
+  max-width: min(580px, 96vw);
+}
+
+.wh-modal--transaction-xl {
+  max-width: min(580px, 96vw);
+  max-height: min(90vh, 820px);
+}
+
+.wh-modal--transaction .wh-modal__header {
+  background: var(--accent-soft-bg);
+  border-bottom-color: var(--accent-soft-border);
+}
+
+.wh-modal--transaction .wh-modal__title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wh-modal--transaction .wh-form-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+}
+
+.wh-modal--transaction .wh-field__label {
+  white-space: nowrap;
+}
+
+.wh-tx-panel {
+  padding: 14px 16px;
+  margin-bottom: 16px;
+  border-radius: var(--radius-md);
+  background: var(--surface-bg);
+  border: 1px solid var(--border-color);
+  overflow-x: auto;
+}
+
+.wh-tx-panel--summary {
+  margin-bottom: 18px;
+}
+
+.wh-tx-panel__title {
+  margin: 0 0 12px;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.wh-tx-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 16px;
+}
+
+.wh-tx-summary-item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.wh-tx-summary-item__label {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+}
+
+.wh-tx-summary-item__value {
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--text-primary);
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wh-tx-summary-item__value--accent {
+  color: var(--color-accent);
+}
+
+.wh-tx-inputs {
+  margin-bottom: 16px;
+}
+
+.wh-tx-inputs .wh-form-grid {
+  margin-bottom: 0;
+}
+
+.wh-tx-history {
+  margin-top: 4px;
+}
+
+.wh-tx-payments-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+}
+
+.wh-tx-payments-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.wh-tx-payments-table th {
+  padding: 10px 12px;
+  text-align: left;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--surface-bg);
+  border-bottom: 1px solid var(--border-color);
+  white-space: nowrap;
+}
+
+.wh-tx-payments-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-primary);
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.wh-tx-payments-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.wh-tx-payments-table__row--active td {
+  background: var(--accent-soft-bg);
+}
+
+.wh-modal--transaction .wh-modal__text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wh-tx-payments-table .wh-action-btns {
+  flex-wrap: nowrap;
 }
 
 /* Wizard */

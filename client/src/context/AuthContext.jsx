@@ -1,6 +1,17 @@
 import { createContext, useState, useContext, useEffect, useCallback, useRef } from "react";
 import { API_BASE } from "../config/api";
 import { isTokenExpired } from "../utils/authToken";
+import {
+  readStoredSession,
+  persistSession,
+  clearStoredSession,
+  getActiveToken,
+  getActiveRefreshToken,
+  updateActiveToken,
+  updateActiveUser,
+  mergeTenantUserFromApi,
+  readImpersonationSession,
+} from "./authSession";
 
 const AuthContext = createContext(null);
 
@@ -10,17 +21,6 @@ function getLoginPath(user) {
     return `/${portal}`;
   }
   return "/webhouse-portal";
-}
-
-function readStoredSession() {
-  try {
-    const savedUser = localStorage.getItem("user");
-    const token = localStorage.getItem("token");
-    if (!savedUser || !token) return null;
-    return { user: JSON.parse(savedUser), token };
-  } catch {
-    return null;
-  }
 }
 
 export const AuthProvider = ({ children }) => {
@@ -36,16 +36,14 @@ export const AuthProvider = ({ children }) => {
   const clearSessionAndLogout = useCallback((portalOrUser) => {
     bumpSessionEpoch();
     const userSnapshot = portalOrUser?.portal ? portalOrUser : user;
-    localStorage.removeItem("token");
-    localStorage.removeItem("refreshToken");
-    localStorage.removeItem("user");
+    clearStoredSession(userSnapshot);
     setUser(null);
     window.location.href = getLoginPath(userSnapshot);
   }, [user]);
 
   const ensureFreshTokens = useCallback((storedUser) => {
-    const token = localStorage.getItem("token");
-    const refreshToken = localStorage.getItem("refreshToken");
+    const token = getActiveToken();
+    const refreshToken = getActiveRefreshToken();
     if (!token || !refreshToken) {
       clearSessionAndLogout(storedUser);
       return false;
@@ -59,14 +57,14 @@ export const AuthProvider = ({ children }) => {
 
   const authFetch = useCallback(async (url, options = {}) => {
     const epoch = sessionEpochRef.current;
-    const token = localStorage.getItem("token");
+    const token = getActiveToken();
     const headers = { ...options.headers, ...(token ? { Authorization: `Bearer ${token}` } : {}) };
     let res = await fetch(url, { ...options, headers });
 
     if (epoch !== sessionEpochRef.current) return res;
 
     if (res.status === 401) {
-      const refreshToken = localStorage.getItem("refreshToken");
+      const refreshToken = getActiveRefreshToken();
       if (!refreshToken || isTokenExpired(refreshToken)) {
         clearSessionAndLogout();
         return res;
@@ -86,7 +84,7 @@ export const AuthProvider = ({ children }) => {
         clearSessionAndLogout();
         return res;
       }
-      localStorage.setItem("token", data.token);
+      updateActiveToken(data.token);
       res = await fetch(url, {
         ...options,
         headers: { ...options.headers, Authorization: `Bearer ${data.token}` },
@@ -120,7 +118,7 @@ export const AuthProvider = ({ children }) => {
       if (epoch !== sessionEpochRef.current) return;
 
       if (res.status === 401) {
-        const refreshToken = localStorage.getItem("refreshToken");
+        const refreshToken = getActiveRefreshToken();
         if (!refreshToken || isTokenExpired(refreshToken)) {
           clearSessionAndLogout(storedUser);
           return;
@@ -140,13 +138,13 @@ export const AuthProvider = ({ children }) => {
           clearSessionAndLogout(storedUser);
           return;
         }
-        localStorage.setItem("token", data.token);
+        updateActiveToken(data.token);
         res = await tryMe(data.token);
         if (epoch !== sessionEpochRef.current) return;
       }
 
       if (!res.ok) {
-        if (localStorage.getItem("token") === token) {
+        if (getActiveToken() === token) {
           clearSessionAndLogout(storedUser);
         }
         return;
@@ -155,11 +153,12 @@ export const AuthProvider = ({ children }) => {
       const data = await res.json();
       if (epoch !== sessionEpochRef.current) return;
       if (data?.user) {
-        setUser(data.user);
-        localStorage.setItem("user", JSON.stringify(data.user));
+        const merged = mergeTenantUserFromApi(data.user, storedUser);
+        setUser(merged);
+        updateActiveUser(merged);
       }
     } catch {
-      if (epoch === sessionEpochRef.current && localStorage.getItem("token") === token) {
+      if (epoch === sessionEpochRef.current && getActiveToken() === token) {
         clearSessionAndLogout(storedUser);
       }
     } finally {
@@ -176,7 +175,7 @@ export const AuthProvider = ({ children }) => {
       const session = readStoredSession();
       if (!session) return;
       if (!ensureFreshTokens(session.user)) return;
-      if (isTokenExpired(localStorage.getItem("token"))) {
+      if (isTokenExpired(getActiveToken())) {
         validateStoredSession();
       }
     };
@@ -188,15 +187,15 @@ export const AuthProvider = ({ children }) => {
 
   const login = (userData, token, refreshToken = null) => {
     bumpSessionEpoch();
-    localStorage.setItem("token", token);
-    localStorage.setItem("user", JSON.stringify(userData));
-    if (refreshToken != null) localStorage.setItem("refreshToken", refreshToken);
+    persistSession(userData, token, refreshToken);
     setUser(userData);
     setLoading(false);
   };
 
   const logout = async () => {
-    const token = localStorage.getItem("token");
+    const impersonation = readImpersonationSession();
+    const activeUser = impersonation?.user ?? user;
+    const token = getActiveToken();
     bumpSessionEpoch();
     try {
       await fetch(`${API_BASE}/logout`, {
@@ -209,11 +208,23 @@ export const AuthProvider = ({ children }) => {
     } catch (error) {
       console.error("Logout API call failed:", error);
     }
+
+    if (impersonation) {
+      clearStoredSession({ impersonating: true });
+      setUser(null);
+      if (window.opener && !window.opener.closed) {
+        window.close();
+        return;
+      }
+      window.location.href = "/webhouse-portal";
+      return;
+    }
+
     localStorage.removeItem("token");
     localStorage.removeItem("refreshToken");
     localStorage.removeItem("user");
     setUser(null);
-    window.location.href = getLoginPath(user);
+    window.location.href = getLoginPath(activeUser);
   };
 
   return (

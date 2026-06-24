@@ -18,13 +18,15 @@ import CreateSubscription from "./portals/wh-portal/pages/subscriptions/CreateSu
 import ManageSubscriptions from "./portals/wh-portal/pages/subscriptions/ManageSubscriptions";
 import Logs from "./portals/wh-portal/pages/logs/Logs";
 import ErpLogin from "./portals/tenant-portal/pages/ErpLogin";
-import TenantDashboard from "./portals/tenant-portal/pages/TenantDashboard";
+import ModuleHub from "./portals/tenant-portal/pages/ModuleHub";
+import ModulePlaceholder from "./portals/tenant-portal/pages/ModulePlaceholder";
+import TenantLayout from "./components/layout/TenantLayout";
 
 const WhProtectedRoute = ({ children }) => {
   const { user, loading } = useAuth();
   const location = useLocation();
   if (loading) return null;
-  if (user?.portal === "tenant") return <Navigate to="/app/dashboard" replace />;
+  if (user?.portal === "tenant") return <Navigate to="/app" replace />;
   if (!user || user.portal !== "wh_admin") {
     const redirect = encodeURIComponent(location.pathname || "/webhouse-portal/dashboard");
     return <Navigate to={`/webhouse-portal?redirect=${redirect}`} replace />;
@@ -96,7 +98,20 @@ function AppRoutes() {
           </TenantProtectedRoute>
         }
       >
-        <Route path="/app/dashboard" element={<TenantDashboard />} />
+        <Route path="/app" element={<ModuleHub />} />
+        <Route path="/app/m/:moduleId" element={<TenantLayout />}>
+          <Route index element={<Navigate to="dashboard" replace />} />
+          <Route path="dashboard" element={<ModulePlaceholder title="Dashboard" />} />
+          <Route path="user-management" element={<ModulePlaceholder title="User Management" />} />
+          <Route path="roles-management" element={<ModulePlaceholder title="Roles Management" />} />
+          <Route path="permissions-management" element={<ModulePlaceholder title="Permissions Management" />} />
+          <Route path="audit-logs" element={<ModulePlaceholder title="Audit Logs" />} />
+          <Route path="sessions" element={<ModulePlaceholder title="Sessions" />} />
+          <Route path="organization-settings" element={<ModulePlaceholder title="Organization Settings" />} />
+          <Route path="plan-subscription" element={<ModulePlaceholder title="Plan & Subscription" />} />
+          <Route path="activity-alerts" element={<ModulePlaceholder title="Activity Alerts" />} />
+          <Route path="help-center" element={<ModulePlaceholder title="Help Center" />} />
+        </Route>
       </Route>
 
       <Route path="*" element={<Navigate to="/webhouse-portal" replace />} />
