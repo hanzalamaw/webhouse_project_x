@@ -47,6 +47,7 @@ export const subscriptionService = {
     if (loginPortal && loginPortal !== old.login_portal) {
       await tenantRepository.syncLoginPortalForPlan(id, loginPortal);
     }
+    await tenantRepository.syncModulesForPlanTenants(id);
     const updated = await this.getById(id);
     await logWhAudit({
       adminUserId: audit.adminUserId,

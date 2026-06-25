@@ -21,6 +21,11 @@ import ErpLogin from "./portals/tenant-portal/pages/ErpLogin";
 import ModuleHub from "./portals/tenant-portal/pages/ModuleHub";
 import ModulePlaceholder from "./portals/tenant-portal/pages/ModulePlaceholder";
 import TenantLayout from "./components/layout/TenantLayout";
+import TenantModuleGuard from "./components/TenantModuleGuard";
+import {
+  TENANT_MODULE_DEFINITIONS,
+  MODULE_SECTION_ROUTES,
+} from "./portals/tenant-portal/modules/registry";
 
 const WhProtectedRoute = ({ children }) => {
   const { user, loading } = useAuth();
@@ -99,19 +104,35 @@ function AppRoutes() {
         }
       >
         <Route path="/app" element={<ModuleHub />} />
-        <Route path="/app/m/:moduleId" element={<TenantLayout />}>
-          <Route index element={<Navigate to="dashboard" replace />} />
-          <Route path="dashboard" element={<ModulePlaceholder title="Dashboard" />} />
-          <Route path="user-management" element={<ModulePlaceholder title="User Management" />} />
-          <Route path="roles-management" element={<ModulePlaceholder title="Roles Management" />} />
-          <Route path="permissions-management" element={<ModulePlaceholder title="Permissions Management" />} />
-          <Route path="audit-logs" element={<ModulePlaceholder title="Audit Logs" />} />
-          <Route path="sessions" element={<ModulePlaceholder title="Sessions" />} />
-          <Route path="organization-settings" element={<ModulePlaceholder title="Organization Settings" />} />
-          <Route path="plan-subscription" element={<ModulePlaceholder title="Plan & Subscription" />} />
-          <Route path="activity-alerts" element={<ModulePlaceholder title="Activity Alerts" />} />
-          <Route path="help-center" element={<ModulePlaceholder title="Help Center" />} />
-        </Route>
+        {TENANT_MODULE_DEFINITIONS.map((mod) => {
+          const Dashboard = mod.Dashboard;
+          return (
+            <Route
+              key={mod.slug}
+              path={`/app/m/${mod.slug}`}
+              element={
+                <TenantModuleGuard moduleSlug={mod.slug}>
+                  <TenantLayout />
+                </TenantModuleGuard>
+              }
+            >
+              <Route index element={<Navigate to="dashboard" replace />} />
+              <Route path="dashboard" element={<Dashboard />} />
+              {MODULE_SECTION_ROUTES.map((section) => (
+                <Route
+                  key={section.path}
+                  path={section.path}
+                  element={
+                    <ModulePlaceholder
+                      title={`${mod.name} — ${section.title}`}
+                      description="This section will be built soon."
+                    />
+                  }
+                />
+              ))}
+            </Route>
+          );
+        })}
       </Route>
 
       <Route path="*" element={<Navigate to="/webhouse-portal" replace />} />

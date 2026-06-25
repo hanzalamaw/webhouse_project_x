@@ -6,7 +6,7 @@
 --
 -- Prereqs: schema + login_portal on wh_tenants (004) + WH admins seeded
 --
--- Tenant logins (password for all: tenant123)
+-- Tenant logins (password for all: tenan 123)
 --   admin@acme.com      → /erp1
 --   admin@betastore.com → /erp2
 --   admin@gammacorp.com → /erp3
@@ -24,23 +24,41 @@ DELETE FROM `wh_subscription_plans`
 WHERE `plan_name` IN ('Starter', 'Professional', 'Enterprise');
 
 DELETE FROM `modules`
-WHERE `module_name` IN ('Inventory', 'CRM', 'Orders', 'POS', 'Logistics');
+WHERE `module_name` IN (
+  'Inventory',
+  'CRM',
+  'Orders',
+  'POS',
+  'Logistics',
+  'Admin',
+  'Logistics Partners Management',
+  'Order Management',
+  'E-Commerce Integration',
+  'Finance & Accounting',
+  'Inventory & Procurement'
+);
 
 -- -----------------------------------------------------------------------------
--- Modules
+-- Modules (canonical tenant portal names)
 -- -----------------------------------------------------------------------------
 INSERT INTO `modules` (`module_name`) VALUES
-  ('Inventory'),
-  ('CRM'),
-  ('Orders'),
+  ('Admin'),
+  ('Logistics Partners Management'),
+  ('Order Management'),
   ('POS'),
-  ('Logistics');
+  ('CRM'),
+  ('E-Commerce Integration'),
+  ('Finance & Accounting'),
+  ('Inventory & Procurement');
 
-SET @mod_inventory  = (SELECT `id` FROM `modules` WHERE `module_name` = 'Inventory' AND `deleted_at` IS NULL ORDER BY `id` LIMIT 1);
-SET @mod_crm        = (SELECT `id` FROM `modules` WHERE `module_name` = 'CRM'       AND `deleted_at` IS NULL ORDER BY `id` LIMIT 1);
-SET @mod_orders     = (SELECT `id` FROM `modules` WHERE `module_name` = 'Orders'    AND `deleted_at` IS NULL ORDER BY `id` LIMIT 1);
-SET @mod_pos        = (SELECT `id` FROM `modules` WHERE `module_name` = 'POS'       AND `deleted_at` IS NULL ORDER BY `id` LIMIT 1);
-SET @mod_logistics  = (SELECT `id` FROM `modules` WHERE `module_name` = 'Logistics' AND `deleted_at` IS NULL ORDER BY `id` LIMIT 1);
+SET @mod_admin      = (SELECT `id` FROM `modules` WHERE `module_name` = 'Admin'                         AND `deleted_at` IS NULL ORDER BY `id` LIMIT 1);
+SET @mod_logistics  = (SELECT `id` FROM `modules` WHERE `module_name` = 'Logistics Partners Management' AND `deleted_at` IS NULL ORDER BY `id` LIMIT 1);
+SET @mod_orders     = (SELECT `id` FROM `modules` WHERE `module_name` = 'Order Management'              AND `deleted_at` IS NULL ORDER BY `id` LIMIT 1);
+SET @mod_pos        = (SELECT `id` FROM `modules` WHERE `module_name` = 'POS'                          AND `deleted_at` IS NULL ORDER BY `id` LIMIT 1);
+SET @mod_crm        = (SELECT `id` FROM `modules` WHERE `module_name` = 'CRM'                          AND `deleted_at` IS NULL ORDER BY `id` LIMIT 1);
+SET @mod_ecommerce  = (SELECT `id` FROM `modules` WHERE `module_name` = 'E-Commerce Integration'       AND `deleted_at` IS NULL ORDER BY `id` LIMIT 1);
+SET @mod_finance    = (SELECT `id` FROM `modules` WHERE `module_name` = 'Finance & Accounting'         AND `deleted_at` IS NULL ORDER BY `id` LIMIT 1);
+SET @mod_inventory  = (SELECT `id` FROM `modules` WHERE `module_name` = 'Inventory & Procurement'      AND `deleted_at` IS NULL ORDER BY `id` LIMIT 1);
 
 -- -----------------------------------------------------------------------------
 -- Subscription plans

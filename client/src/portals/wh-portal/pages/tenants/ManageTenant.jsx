@@ -18,6 +18,11 @@ const TENANT_TOOLBAR_FILTERS = [
   { key: "plan_name", label: "Plan" },
 ];
 
+function limitUsage(used, max) {
+  if (max == null) return "—";
+  return `${used ?? 0}/${max}`;
+}
+
 export default function ManageTenant() {
   const { authFetch } = useAuth();
   const navigate = useNavigate();
@@ -106,13 +111,28 @@ export default function ManageTenant() {
     { key: "status", label: "Status", render: (r) => <StatusBadge status={r.status} /> },
     { key: "plan_name", label: "Plan", format: (_, r) => r.plan_name || "—" },
     {
-      key: "limits",
-      label: "Limits",
+      key: "max_users",
+      label: "Users",
       filter: false,
-      format: (_, r) =>
-        r.max_users != null
-          ? `U:${r.max_users} W:${r.max_warehouses} S:${r.max_stores} O:${r.max_orders_per_month}`
-          : "—",
+      format: (_, r) => limitUsage(r.user_count, r.max_users),
+    },
+    {
+      key: "max_warehouses",
+      label: "Warehouses",
+      filter: false,
+      format: (_, r) => limitUsage(r.warehouse_count, r.max_warehouses),
+    },
+    {
+      key: "max_stores",
+      label: "Stores",
+      filter: false,
+      format: (_, r) => limitUsage(r.store_count, r.max_stores),
+    },
+    {
+      key: "max_orders_per_month",
+      label: "Orders / Mo",
+      filter: false,
+      format: (_, r) => limitUsage(r.orders_this_month, r.max_orders_per_month),
     },
     { key: "created_at", label: "Created", format: formatDateTime },
     {

@@ -1,6 +1,7 @@
 import { readDb, writeDb } from "../database/db.js";
 import { encrypt } from "../utils/cipher.js";
 import { cascadeSoftDeleteTenant } from "../utils/softDeleteCascade.js";
+import { subscriptionRepository } from "./subscriptionRepository.js";
 
 const PERMISSION_ACTIONS = ["view", "create", "edit", "delete", "manage"];
 const DEFAULT_TIMEZONE = "Asia/Karachi";
@@ -11,6 +12,11 @@ export const tenantRepository = {
       `SELECT t.id, t.id AS tenant_id, t.company_name, t.owner_name, t.owner_email, t.owner_phone,
               t.industry, t.status, t.login_portal, t.created_at, t.updated_at,
               tl.max_users, tl.max_warehouses, tl.max_stores, tl.max_orders_per_month,
+              (SELECT COUNT(*) FROM users u WHERE u.tenant_id = t.id AND u.deleted_at IS NULL) AS user_count,
+              (SELECT COUNT(*) FROM inventory_warehouses w WHERE w.tenant_id = t.id AND w.deleted_at IS NULL) AS warehouse_count,
+              (SELECT COUNT(*) FROM ecom_store_connections s WHERE s.tenant_id = t.id AND s.deleted_at IS NULL) AS store_count,
+              (SELECT COUNT(*) FROM orders o WHERE o.tenant_id = t.id AND o.deleted_at IS NULL
+                 AND MONTH(o.created_at) = MONTH(CURRENT_DATE()) AND YEAR(o.created_at) = YEAR(CURRENT_DATE())) AS orders_this_month,
               ts.billing_cycle, ts.start_date, ts.renewal_date, ts.status AS subscription_status,
               ts.total_amount, ts.amount_due,
               sp.plan_name, sp.id AS subscription_plan_id
@@ -45,6 +51,18 @@ export const tenantRepository = {
   },
 
   async getTenantModules(tenantId) {
+    const [planRows] = await readDb.query(
+      `SELECT m.id AS module_id, 1 AS is_enabled, m.module_name
+       FROM wh_tenant_subscriptions ts
+       INNER JOIN wh_subscription_module sm
+         ON sm.subscription_plan_id = ts.subscription_plan_id AND sm.deleted_at IS NULL
+       INNER JOIN modules m ON m.id = sm.module_id AND m.deleted_at IS NULL
+       WHERE ts.tenant_id = ? AND ts.deleted_at IS NULL
+       ORDER BY m.module_name`,
+      [tenantId]
+    );
+    if (planRows.length > 0) return planRows;
+
     const [rows] = await readDb.query(
       `SELECT tm.module_id, tm.is_enabled, m.module_name
        FROM wh_tenant_modules tm
@@ -53,6 +71,51 @@ export const tenantRepository = {
       [tenantId]
     );
     return rows;
+  },
+
+  async resolveTenantModuleIds(subscriptionPlanId, requestedModuleIds) {
+    const planModuleIds = await subscriptionRepository.getModuleIds(subscriptionPlanId);
+    if (!planModuleIds.length) return (requestedModuleIds || []).map(Number).filter(Boolean);
+
+    const requested = (requestedModuleIds || []).map(Number).filter(Boolean);
+    if (!requested.length) return planModuleIds;
+
+    const allowed = new Set(planModuleIds);
+    const filtered = requested.filter((id) => allowed.has(id));
+    return filtered.length > 0 ? filtered : planModuleIds;
+  },
+
+  async setTenantModules(tenantId, moduleIds, connection = null) {
+    const exec = connection ? connection.execute.bind(connection) : writeDb.query.bind(writeDb);
+    await exec(
+      `UPDATE wh_tenant_modules SET deleted_at = NOW() WHERE tenant_id = ? AND deleted_at IS NULL`,
+      [tenantId]
+    );
+    for (const moduleId of moduleIds) {
+      await exec(
+        `INSERT INTO wh_tenant_modules (is_enabled, enabled_at, module_id, tenant_id)
+         VALUES (1, NOW(), ?, ?)
+         ON DUPLICATE KEY UPDATE is_enabled = 1, enabled_at = NOW(), disabled_at = NULL, deleted_at = NULL`,
+        [moduleId, tenantId]
+      );
+    }
+  },
+
+  async syncTenantModulesFromPlan(tenantId, planId, connection = null) {
+    const moduleIds = await subscriptionRepository.getModuleIds(planId);
+    await this.setTenantModules(tenantId, moduleIds, connection);
+    return moduleIds;
+  },
+
+  async syncModulesForPlanTenants(planId) {
+    const [tenants] = await readDb.query(
+      `SELECT tenant_id FROM wh_tenant_subscriptions
+       WHERE subscription_plan_id = ? AND deleted_at IS NULL`,
+      [planId]
+    );
+    for (const { tenant_id } of tenants) {
+      await this.syncTenantModulesFromPlan(tenant_id, planId);
+    }
   },
 
   async updateLoginPortal(id, loginPortal) {
@@ -121,7 +184,7 @@ export const tenantRepository = {
     const [rows] = await readDb.query(
       `SELECT id, bank, cash, total_received, received_at
        FROM wh_tenant_payments
-       WHERE tenant_id = ? AND deleted_at IS NULL
+       WHERE tenant_id = ? AND deleted_at IS NULL AND total_received > 0
        ORDER BY id DESC LIMIT 1`,
       [tenantId]
     );
@@ -202,17 +265,24 @@ export const tenantRepository = {
       const bank = payload.payment?.bank ?? 0;
       const cash = payload.payment?.cash ?? 0;
       const totalReceived = payload.payment?.total_received ?? bank + cash;
-      if (payRows.length) {
+      if (totalReceived > 0) {
+        if (payRows.length) {
+          await connection.execute(
+            `UPDATE wh_tenant_payments SET bank = ?, cash = ?, total_received = ?, received_at = ?
+             WHERE id = ? AND deleted_at IS NULL`,
+            [bank, cash, totalReceived, payload.payment?.received_at || null, payRows[0].id]
+          );
+        } else {
+          await connection.execute(
+            `INSERT INTO wh_tenant_payments (bank, cash, total_received, received_at, tenant_id)
+             VALUES (?, ?, ?, ?, ?)`,
+            [bank, cash, totalReceived, payload.payment?.received_at || null, tenantId]
+          );
+        }
+      } else if (payRows.length) {
         await connection.execute(
-          `UPDATE wh_tenant_payments SET bank = ?, cash = ?, total_received = ?, received_at = ?
-           WHERE id = ? AND deleted_at IS NULL`,
-          [bank, cash, totalReceived, payload.payment?.received_at || null, payRows[0].id]
-        );
-      } else {
-        await connection.execute(
-          `INSERT INTO wh_tenant_payments (bank, cash, total_received, received_at, tenant_id)
-           VALUES (?, ?, ?, ?, ?)`,
-          [bank, cash, totalReceived, payload.payment?.received_at || null, tenantId]
+          `UPDATE wh_tenant_payments SET deleted_at = NOW() WHERE id = ? AND deleted_at IS NULL`,
+          [payRows[0].id]
         );
       }
 
@@ -220,7 +290,11 @@ export const tenantRepository = {
         `UPDATE wh_tenant_modules SET deleted_at = NOW() WHERE tenant_id = ? AND deleted_at IS NULL`,
         [tenantId]
       );
-      for (const moduleId of payload.module_ids) {
+      const moduleIds = await this.resolveTenantModuleIds(
+        payload.subscription_plan_id,
+        payload.module_ids
+      );
+      for (const moduleId of moduleIds) {
         await connection.execute(
           `INSERT INTO wh_tenant_modules (is_enabled, enabled_at, module_id, tenant_id)
            VALUES (1, NOW(), ?, ?)
@@ -339,13 +413,19 @@ export const tenantRepository = {
       const bank = payload.payment?.bank ?? 0;
       const cash = payload.payment?.cash ?? 0;
       const totalReceived = payload.payment?.total_received ?? bank + cash;
-      await connection.execute(
-        `INSERT INTO wh_tenant_payments (bank, cash, total_received, received_at, tenant_id)
-         VALUES (?, ?, ?, ?, ?)`,
-        [bank, cash, totalReceived, payload.payment?.received_at || null, tenantId]
-      );
+      if (totalReceived > 0) {
+        await connection.execute(
+          `INSERT INTO wh_tenant_payments (bank, cash, total_received, received_at, tenant_id)
+           VALUES (?, ?, ?, ?, ?)`,
+          [bank, cash, totalReceived, payload.payment?.received_at || null, tenantId]
+        );
+      }
 
-      for (const moduleId of payload.module_ids) {
+      const moduleIds = await this.resolveTenantModuleIds(
+        payload.subscription_plan_id,
+        payload.module_ids
+      );
+      for (const moduleId of moduleIds) {
         await connection.execute(
           `INSERT INTO wh_tenant_modules (is_enabled, enabled_at, module_id, tenant_id)
            VALUES (1, NOW(), ?, ?)`,
@@ -377,7 +457,7 @@ export const tenantRepository = {
       );
       const roleId = roleResult.insertId;
 
-      for (const moduleId of payload.module_ids) {
+      for (const moduleId of moduleIds) {
         for (const action of PERMISSION_ACTIONS) {
           await connection.execute(
             `INSERT INTO permissions (permission_name, action, role_id, module_id)

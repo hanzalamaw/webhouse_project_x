@@ -1,37 +1,15 @@
-import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useAuth } from "../../../context/AuthContext";
-import { apiFetch } from "../../../api/client";
 import { PageHeader } from "../../../components/PageHeader";
 import { Button } from "../../../components/Button";
-import { moduleBasePath } from "../navConfig";
+import { useAuth } from "../../../context/AuthContext";
+import { moduleBasePath } from "../modules/registry";
+import { useTenantModules } from "../hooks/useTenantModules";
 import "./ModuleHub.css";
 
 export default function ModuleHub() {
-  const { user, authFetch, logout } = useAuth();
+  const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const [modules, setModules] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      setLoading(true);
-      setError("");
-      try {
-        const res = await apiFetch("/tenant/modules", {}, authFetch);
-        if (!cancelled) setModules(res.data || []);
-      } catch (err) {
-        if (!cancelled) setError(err.message || "Could not load modules.");
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [authFetch]);
+  const { visible, loading, error } = useTenantModules();
 
   return (
     <div className="wh-module-hub">
@@ -59,23 +37,23 @@ export default function ModuleHub() {
       {error && <p className="wh-field__error">{error}</p>}
       {loading && <p className="wh-muted">Loading modules…</p>}
 
-      {!loading && !error && modules.length === 0 && (
+      {!loading && !error && visible.length === 0 && (
         <p className="wh-muted">No modules are enabled for your organization yet.</p>
       )}
 
-      {!loading && modules.length > 0 && (
+      {!loading && visible.length > 0 && (
         <div className="wh-module-grid">
-          {modules.map((mod) => (
+          {visible.map((mod) => (
             <button
-              key={mod.module_id}
+              key={mod.slug}
               type="button"
               className="wh-module-card"
-              onClick={() => navigate(`${moduleBasePath(mod.module_id)}/dashboard`)}
+              onClick={() => navigate(`${moduleBasePath(mod.slug)}/dashboard`)}
             >
               <span className="wh-module-card__icon" aria-hidden>
-                {(mod.module_name || "M").charAt(0).toUpperCase()}
+                {mod.letter}
               </span>
-              <span className="wh-module-card__name">{mod.module_name}</span>
+              <span className="wh-module-card__name">{mod.name}</span>
             </button>
           ))}
         </div>

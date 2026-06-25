@@ -27,7 +27,7 @@ function isGroupActive(pathname, item) {
   return item.children?.some((c) => isPathActive(pathname, c.path));
 }
 
-export default function TenantSidebar({ moduleId }) {
+export default function TenantSidebar({ moduleSlug }) {
   const [isExpanded, setIsExpanded] = useState(readSidebarExpanded);
   const [openGroups, setOpenGroups] = useState({});
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -38,7 +38,7 @@ export default function TenantSidebar({ moduleId }) {
   const { user, logout } = useAuth();
   const { darkMode, toggleDarkMode } = useTheme();
 
-  const menuItems = useMemo(() => getTenantMenuItems(moduleId), [moduleId]);
+  const menuItems = useMemo(() => getTenantMenuItems(moduleSlug), [moduleSlug]);
   const logoutRedirect = `/${user?.login_portal || "erp1"}`;
 
   useEffect(() => {

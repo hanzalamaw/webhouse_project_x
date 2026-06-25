@@ -9,6 +9,14 @@ export const transactionController = {
     }
   },
 
+  async listTenants(req, res) {
+    try {
+      res.json(await transactionService.listTenants(req.query));
+    } catch (e) {
+      res.status(500).json({ message: e.message });
+    }
+  },
+
   async listPayments(req, res) {
     try {
       res.json(await transactionService.listPayments(req.query));

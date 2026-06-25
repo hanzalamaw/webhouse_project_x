@@ -57,7 +57,7 @@ export default function Transaction() {
   const [toolbar, setToolbar] = useState({ ...EMPTY_TOOLBAR });
 
   const filteredRows = useMemo(
-    () => applyToolbarFilters(rows, toolbar, { dateField: "received_at" }),
+    () => applyToolbarFilters(rows, toolbar, { dateField: "start_date" }),
     [rows, toolbar]
   );
 
@@ -96,8 +96,8 @@ export default function Transaction() {
     setSummary(data);
   }, [authFetch]);
 
-  const loadPayments = useCallback(async () => {
-    const data = await fetchAllTableRows("/transactions/payments", authFetch);
+  const loadTenants = useCallback(async () => {
+    const data = await fetchAllTableRows("/transactions/tenants", authFetch);
     setRows(data);
   }, [authFetch]);
 
@@ -117,8 +117,8 @@ export default function Transaction() {
   );
 
   const reload = useCallback(async () => {
-    await Promise.all([loadSummary(), loadPayments()]);
-  }, [loadSummary, loadPayments]);
+    await Promise.all([loadSummary(), loadTenants()]);
+  }, [loadSummary, loadTenants]);
 
   useEffect(() => {
     setLoading(true);
@@ -269,7 +269,7 @@ export default function Transaction() {
     <div className="wh-page">
       <PageHeader
         title="Transaction"
-        description="Track tenant payments, outstanding dues, and billing activity."
+        description="Tenant billing overview — open a tenant to record or review payments."
       />
       <div className="wh-stat-grid">
         <StatCard
@@ -285,18 +285,18 @@ export default function Transaction() {
       </div>
       <Card className="wh-card--table">
         <div className="wh-card-table__head">
-          <h3 className="wh-card__title">Payment History</h3>
+          <h3 className="wh-card__title">Tenants</h3>
         </div>
         {loading ? (
-          <p className="wh-muted">Loading transactions…</p>
+          <p className="wh-muted">Loading tenants…</p>
         ) : (
           <>
             <TableToolbar
               rows={rows}
               value={toolbar}
               onChange={setToolbar}
-              dateField="received_at"
-              searchPlaceholder="Search payments…"
+              dateField="start_date"
+              searchPlaceholder="Search tenants…"
             />
             <DataTable
               columns={columns}
@@ -306,7 +306,7 @@ export default function Transaction() {
               pageSize={TABLE_PAGE_SIZE}
               onPageChange={setPage}
               onRowClick={openAddModal}
-              emptyMessage="No payment records yet."
+              emptyMessage="No tenants yet."
             />
           </>
         )}

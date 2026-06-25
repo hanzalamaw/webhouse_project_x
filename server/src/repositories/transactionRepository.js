@@ -1,6 +1,19 @@
 import { readDb } from "../database/db.js";
 import { addPaymentReceived, calcPeriodExpectedTotal } from "../utils/billing.js";
 
+function enrichTenantBillingRow(row) {
+  if (!row) return row;
+  const period_total = calcPeriodExpectedTotal(
+    row.plan_price,
+    row.billing_cycle,
+    row.start_date,
+    row.end_date
+  );
+  const total_received = Number(row.total_received || 0);
+  const amount_due = Math.max(0, Number((period_total - total_received).toFixed(2)));
+  return { ...row, period_total, amount_due, total_received };
+}
+
 function enrichPaymentRow(row) {
   if (!row) return row;
   const period_total = calcPeriodExpectedTotal(
@@ -32,6 +45,37 @@ export const transactionRepository = {
     };
   },
 
+  async findAllTenantBilling({ limit, offset }) {
+    const [rows] = await readDb.query(
+      `SELECT t.id AS tenant_id, t.company_name,
+              ts.billing_cycle, ts.start_date, ts.renewal_date AS end_date,
+              sp.plan_name, sp.plan_price,
+              COALESCE(pay.bank, 0) AS bank,
+              COALESCE(pay.cash, 0) AS cash,
+              COALESCE(pay.total_received, 0) AS total_received
+       FROM wh_tenants t
+       LEFT JOIN wh_tenant_subscriptions ts ON ts.tenant_id = t.id AND ts.deleted_at IS NULL
+       LEFT JOIN wh_subscription_plans sp ON sp.id = ts.subscription_plan_id AND sp.deleted_at IS NULL
+       LEFT JOIN (
+         SELECT tenant_id,
+                SUM(bank) AS bank,
+                SUM(cash) AS cash,
+                SUM(total_received) AS total_received
+         FROM wh_tenant_payments
+         WHERE deleted_at IS NULL AND total_received > 0
+         GROUP BY tenant_id
+       ) pay ON pay.tenant_id = t.id
+       WHERE t.deleted_at IS NULL
+       ORDER BY t.company_name ASC
+       LIMIT ? OFFSET ?`,
+      [limit, offset]
+    );
+    const [[{ total }]] = await readDb.query(
+      `SELECT COUNT(*) AS total FROM wh_tenants WHERE deleted_at IS NULL`
+    );
+    return { rows: rows.map(enrichTenantBillingRow), total };
+  },
+
   async findAllPayments({ limit, offset }) {
     const [rows] = await readDb.query(
       `SELECT p.id, p.bank, p.cash, p.total_received, p.received_at, p.tenant_id,
@@ -43,13 +87,13 @@ export const transactionRepository = {
        INNER JOIN wh_tenants t ON t.id = p.tenant_id AND t.deleted_at IS NULL
        LEFT JOIN wh_tenant_subscriptions ts ON ts.tenant_id = t.id AND ts.deleted_at IS NULL
        LEFT JOIN wh_subscription_plans sp ON sp.id = ts.subscription_plan_id AND sp.deleted_at IS NULL
-       WHERE p.deleted_at IS NULL
+       WHERE p.deleted_at IS NULL AND p.total_received > 0
        ORDER BY COALESCE(p.received_at, p.id) DESC
        LIMIT ? OFFSET ?`,
       [limit, offset]
     );
     const [[{ total }]] = await readDb.query(
-      `SELECT COUNT(*) AS total FROM wh_tenant_payments WHERE deleted_at IS NULL`
+      `SELECT COUNT(*) AS total FROM wh_tenant_payments WHERE deleted_at IS NULL AND total_received > 0`
     );
     return { rows: rows.map(enrichPaymentRow), total };
   },
@@ -82,7 +126,7 @@ export const transactionRepository = {
        INNER JOIN wh_tenants t ON t.id = p.tenant_id AND t.deleted_at IS NULL
        LEFT JOIN wh_tenant_subscriptions ts ON ts.tenant_id = t.id AND ts.deleted_at IS NULL
        LEFT JOIN wh_subscription_plans sp ON sp.id = ts.subscription_plan_id AND sp.deleted_at IS NULL
-       WHERE p.tenant_id = ? AND p.deleted_at IS NULL
+       WHERE p.tenant_id = ? AND p.deleted_at IS NULL AND p.total_received > 0
        ORDER BY COALESCE(p.received_at, p.id) DESC`,
       [tenantId]
     );
@@ -95,7 +139,7 @@ export const transactionRepository = {
 
     const [payments] = await query(
       `SELECT COALESCE(SUM(total_received), 0) AS total
-       FROM wh_tenant_payments WHERE tenant_id = ? AND deleted_at IS NULL`,
+       FROM wh_tenant_payments WHERE tenant_id = ? AND deleted_at IS NULL AND total_received > 0`,
       [tenantId]
     );
     const paid = Number(payments[0]?.total || 0);
@@ -130,7 +174,7 @@ export const transactionRepository = {
   async sumTenantPayments(tenantId, excludePaymentId = null) {
     let sql = `SELECT COALESCE(SUM(total_received), 0) AS total
                FROM wh_tenant_payments
-               WHERE tenant_id = ? AND deleted_at IS NULL`;
+               WHERE tenant_id = ? AND deleted_at IS NULL AND total_received > 0`;
     const params = [tenantId];
     if (excludePaymentId) {
       sql += ` AND id != ?`;

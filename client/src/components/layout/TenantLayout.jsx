@@ -5,13 +5,13 @@ import TenantSidebar from "./TenantSidebar";
 import "./MainLayout.css";
 
 export default function TenantLayout() {
-  const { moduleId } = useParams();
+  const { moduleSlug } = useParams();
   const { user, logout } = useAuth();
 
   return (
     <div className="wh-layout">
       <div className="wh-layout-wrapper">
-        <TenantSidebar moduleId={moduleId} />
+        <TenantSidebar moduleSlug={moduleSlug} />
         <div className="wh-layout-main">
           <main className="wh-layout-content">
             {user?.impersonating && (

@@ -83,10 +83,21 @@ export function monthsBetweenDates(startDate, endDate) {
   return Math.max(1, months);
 }
 
-/** Expected subscription total for the period between start and end dates. */
+export function resolveBillingPeriodEnd(startDate, renewalDate, asOf = new Date()) {
+  const renewal = parseLocalDate(renewalDate);
+  const asOfDate = asOf instanceof Date ? asOf : parseLocalDate(asOf);
+  if (!asOfDate) {
+    return renewal ? formatLocalDate(renewal) : String(renewalDate || "").slice(0, 10);
+  }
+  if (!renewal || asOfDate <= renewal) return formatLocalDate(asOfDate);
+  return formatLocalDate(renewal);
+}
+
+/** Expected subscription total accrued from start through today (capped at renewal). */
 export function calcPeriodExpectedTotal(monthlyPrice, billingCycle, startDate, endDate) {
   const price = Number(monthlyPrice) || 0;
-  const months = monthsBetweenDates(startDate, endDate);
+  const periodEnd = resolveBillingPeriodEnd(startDate, endDate);
+  const months = monthsBetweenDates(startDate, periodEnd);
   if (billingCycle === "yearly") {
     const years = Math.max(1, Math.ceil(months / 12));
     return Number((calcBillingTotal(price, "yearly") * years).toFixed(2));

@@ -6,6 +6,12 @@ export const transactionService = {
     return transactionRepository.getSummary();
   },
 
+  async listTenants(query) {
+    const { page, limit, offset } = parsePagination(query);
+    const { rows, total } = await transactionRepository.findAllTenantBilling({ limit, offset });
+    return paginatedResponse(rows, total, page, limit);
+  },
+
   async listPayments(query) {
     const { page, limit, offset } = parsePagination(query);
     const { rows, total } = await transactionRepository.findAllPayments({ limit, offset });
