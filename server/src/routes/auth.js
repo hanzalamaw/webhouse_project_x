@@ -5,6 +5,7 @@ import { sessionRepository } from "../repositories/sessionRepository.js";
 import { tenantRepository } from "../repositories/tenantRepository.js";
 import { createActivityAlert } from "../utils/activityAlerts.js";
 import { tenantPermissionService } from "../services/tenantPermissionService.js";
+import { extractClientIp } from "../utils/clientIp.js";
 
 const toWhUserPayload = (user) => ({
   id: user.id,
@@ -171,7 +172,7 @@ export function registerAuthRoutes(app, db, { JWT_SECRET, JWT_EXPIRES_IN, JWT_RE
       return res.status(400).json({ message: "Invalid portal" });
     }
 
-    const ip = req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || req.socket?.remoteAddress || "0.0.0.0";
+    const ip = extractClientIp(req);
     const deviceInfo = req.headers["user-agent"] || null;
     const result = await tenantLogin(
       db,

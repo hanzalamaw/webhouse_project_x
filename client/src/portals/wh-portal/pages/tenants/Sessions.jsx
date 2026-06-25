@@ -9,6 +9,7 @@ import { useAuth } from "../../../../context/AuthContext";
 import { apiFetch, fetchAllTableRows, TABLE_PAGE_SIZE } from "../../../../api/client";
 import { applyToolbarFilters, EMPTY_TOOLBAR } from "../../../../utils/tableFilters";
 import { formatDateTime } from "../../../../utils/dateTime";
+import { formatSessionIp, simplifyDeviceInfo } from "../../../../utils/sessionDisplay";
 
 function isLiveSession(row) {
   return Number(row.is_active) === 1 && !row.logout_at;
@@ -70,8 +71,8 @@ export default function Sessions() {
     { key: "company_name", label: "Tenant" },
     { key: "user_name", label: "User" },
     { key: "user_email", label: "Email" },
-    { key: "ip_address", label: "IP" },
-    { key: "device_info", label: "Device", format: (v) => v || "—" },
+    { key: "ip_address", label: "IP", format: (v) => formatSessionIp(v) },
+    { key: "device_info", label: "Device", format: (v) => simplifyDeviceInfo(v) },
     { key: "login_at", label: "Login At", format: formatDateTime },
     {
       key: "is_active",

@@ -24,7 +24,7 @@ function applyImpliedPermissions(matrix) {
 
 export default function RolesAndPermissions() {
   const { authFetch } = useAuth();
-  const { canCreate, canEdit, canView, readOnly } = useModulePermission("admin");
+  const { canCreate, canEdit } = useModulePermission("admin");
   const [roles, setRoles] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [detail, setDetail] = useState(null);
@@ -112,6 +112,7 @@ export default function RolesAndPermissions() {
   };
 
   const createRole = async () => {
+    if (!canCreate) return;
     if (!newRoleName.trim()) return;
     if (newRoleName.trim() === SUPER_ADMIN_ROLE_NAME) {
       setError("Super Admin is a reserved role name");
@@ -149,11 +150,6 @@ export default function RolesAndPermissions() {
       />
       {error && <div className="wh-alert wh-alert--error">{error}</div>}
       {message && <div className="wh-alert wh-alert--success">{message}</div>}
-      {readOnly && canView && (
-        <p className="wh-muted" style={{ marginBottom: 12 }}>
-          View-only access — you cannot create roles or change permissions.
-        </p>
-      )}
 
       <div className="wh-split-layout">
         <Card className="wh-split-layout__side">
@@ -176,19 +172,21 @@ export default function RolesAndPermissions() {
               ))}
             </ul>
           )}
-          {canCreate && (
           <div className="wh-role-create">
             <FormField
               id="newRole"
               label="New role name"
               value={newRoleName}
               onChange={(e) => setNewRoleName(e.target.value)}
+              disabled={!canCreate}
             />
-            <Button onClick={createRole} disabled={creating || !newRoleName.trim()}>
+            <Button
+              onClick={createRole}
+              disabled={!canCreate || creating || !newRoleName.trim()}
+            >
               {creating ? "Creating…" : "Create Role"}
             </Button>
           </div>
-          )}
         </Card>
 
         <Card className="wh-split-layout__main">
@@ -270,9 +268,9 @@ export default function RolesAndPermissions() {
                 </table>
               </div>
 
-              {!isSuperAdminRole && canEdit && (
+              {!isSuperAdminRole && (
                 <div className="wh-form-grid__actions" style={{ marginTop: 16 }}>
-                  <Button onClick={saveRole} disabled={saving}>
+                  <Button onClick={saveRole} disabled={!canEdit || saving}>
                     {saving ? "Saving…" : "Save role & permissions"}
                   </Button>
                 </div>

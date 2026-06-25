@@ -155,7 +155,7 @@ export default function PlanSubscription() {
     { key: "received_at", label: "Date", format: formatDateTime },
     { key: "bank", label: "Bank", format: (v) => formatPKR(v) },
     { key: "cash", label: "Cash", format: (v) => formatPKR(v) },
-    { key: "total_received", label: "Total", format: (v) => formatPKR(v) },
+    { key: "total_received", label: "Total Paid", format: (v) => formatPKR(v) },
   ];
 
   const dash = (v) => (loading ? "—" : v);
@@ -255,14 +255,14 @@ export default function PlanSubscription() {
               <KpiCard
                 label="Current Cycle Due"
                 value={money(cycleDue)}
-                hint={`Received ${money(billing?.current_cycle_received)} this cycle`}
+                hint={`Paid ${money(billing?.current_cycle_received)} this cycle`}
                 icon={<SubscriptionIcon />}
                 tone={cycleDue > 0 ? "danger" : "success"}
               />
             </div>
             <div className="wh-dash-col-3">
               <KpiCard
-                label="Total Received"
+                label="Total Paid"
                 value={money(billing?.total_received)}
                 hint={`Billed ${money(billing?.total_billing_amount)} to date`}
                 icon={<SubscriptionIcon />}
@@ -320,7 +320,7 @@ export default function PlanSubscription() {
               <Panel title="Lifetime billing" subtitle="All-time totals since subscription start">
                 <div className="wh-tx-summary-grid wh-tx-summary-grid--stacked">
                   <SummaryRow label="Total billed" value={money(billing?.total_billing_amount)} />
-                  <SummaryRow label="Total received" value={money(billing?.total_received)} accent />
+                  <SummaryRow label="Total paid" value={money(billing?.total_received)} accent />
                   <SummaryRow
                     label="Total due"
                     value={money(billing?.total_amount_due)}
@@ -333,7 +333,7 @@ export default function PlanSubscription() {
               <Panel title="Current cycle" subtitle="Charges and payments for this billing period">
                 <div className="wh-tx-summary-grid wh-tx-summary-grid--stacked">
                   <SummaryRow label="Cycle amount" value={money(billing?.current_cycle_amount)} />
-                  <SummaryRow label="Cycle received" value={money(billing?.current_cycle_received)} accent />
+                  <SummaryRow label="Cycle paid" value={money(billing?.current_cycle_received)} accent />
                   <SummaryRow
                     label="Cycle due"
                     value={money(billing?.current_cycle_due)}

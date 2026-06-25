@@ -10,6 +10,7 @@ import { useModulePermission } from "../../../../../hooks/useModulePermission";
 import { apiFetch, fetchAllTableRows, TABLE_PAGE_SIZE } from "../../../../../api/client";
 import { applyToolbarFilters, EMPTY_TOOLBAR } from "../../../../../utils/tableFilters";
 import { formatDateTime } from "../../../../../utils/dateTime";
+import { formatSessionIp, simplifyDeviceInfo } from "../../../../../utils/sessionDisplay";
 
 function isLiveSession(row) {
   return Number(row.is_active) === 1 && !row.logout_at;
@@ -17,7 +18,8 @@ function isLiveSession(row) {
 
 export default function Sessions() {
   const { authFetch } = useAuth();
-  const { canDelete, canView, readOnly } = useModulePermission("admin");
+  const { canEdit, canDelete } = useModulePermission("admin");
+  const canTerminate = canEdit || canDelete;
   const [rows, setRows] = useState([]);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
@@ -54,6 +56,7 @@ export default function Sessions() {
   }, [load]);
 
   const terminate = async (id) => {
+    if (!canTerminate) return;
     setTerminatingId(id);
     setMessage("");
     setError("");
@@ -71,8 +74,8 @@ export default function Sessions() {
   const columns = [
     { key: "user_name", label: "User" },
     { key: "user_email", label: "Email" },
-    { key: "ip_address", label: "IP" },
-    { key: "device_info", label: "Device", format: (v) => v || "—" },
+    { key: "ip_address", label: "IP", format: (v) => formatSessionIp(v) },
+    { key: "device_info", label: "Device", format: (v) => simplifyDeviceInfo(v) },
     { key: "login_at", label: "Login At", format: formatDateTime },
     {
       key: "is_active",
@@ -84,11 +87,11 @@ export default function Sessions() {
       label: "Actions",
       filter: false,
       render: (row) =>
-        isLiveSession(row) && canDelete ? (
+        isLiveSession(row) ? (
           <Button
             variant="danger"
             className="wh-btn--sm"
-            disabled={terminatingId === row.id}
+            disabled={!canTerminate || terminatingId === row.id}
             onClick={() => terminate(row.id)}
           >
             {terminatingId === row.id ? "…" : "Terminate"}
@@ -102,11 +105,6 @@ export default function Sessions() {
   return (
     <div className="wh-page">
       <PageHeader title="Sessions" description="Active and recent sessions for your organization." />
-      {readOnly && canView && (
-        <p className="wh-muted" style={{ marginBottom: 12 }}>
-          View-only access — you cannot terminate sessions.
-        </p>
-      )}
       {error && <div className="wh-alert wh-alert--error">{error}</div>}
       {message && <div className="wh-alert wh-alert--success">{message}</div>}
       <Card className="wh-card--table">

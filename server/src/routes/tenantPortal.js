@@ -60,7 +60,7 @@ export function registerTenantPortalRoutes(app, verifyToken) {
 
   app.get("/api/tenant/sessions", ...guard, view, tenantPortalController.sessionsList);
 
-  app.post("/api/tenant/sessions/:id/terminate", ...guard, del, tenantPortalController.sessionsTerminate);
+  app.post("/api/tenant/sessions/:id/terminate", ...guard, edit, tenantPortalController.sessionsTerminate);
 
 
 

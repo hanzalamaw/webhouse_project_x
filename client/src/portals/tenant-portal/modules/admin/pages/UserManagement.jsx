@@ -28,7 +28,7 @@ const EMPTY_FORM = {
 
 export default function UserManagement() {
   const { authFetch } = useAuth();
-  const { canCreate, canEdit, canView, readOnly } = useModulePermission("admin");
+  const { canCreate, canEdit } = useModulePermission("admin");
   const [rows, setRows] = useState([]);
   const [roles, setRoles] = useState([]);
   const [limits, setLimits] = useState({ max_users: 0, active_count: 0 });
@@ -85,6 +85,7 @@ export default function UserManagement() {
   }, [load]);
 
   const openCreate = () => {
+    if (!canCreate) return;
     setEditId(null);
     setEditingSuperAdmin(false);
     const defaultRole = roles.find((r) => r.role_name !== SUPER_ADMIN_ROLE_NAME);
@@ -93,6 +94,7 @@ export default function UserManagement() {
   };
 
   const openEdit = (row) => {
+    if (!canEdit) return;
     setEditId(row.id);
     setEditingSuperAdmin(row.role_name === SUPER_ADMIN_ROLE_NAME);
     setForm({
@@ -153,19 +155,20 @@ export default function UserManagement() {
       render: (r) => <StatusBadge status={r.status} />,
     },
     { key: "last_login_at", label: "Last Login", format: (v) => (v ? formatDateTime(v) : "—") },
-    ...(canEdit
-      ? [
-          {
-            label: "Actions",
-            filter: false,
-            render: (row) => (
-              <Button variant="secondary" className="wh-btn--sm" onClick={() => openEdit(row)}>
-                Edit
-              </Button>
-            ),
-          },
-        ]
-      : []),
+    {
+      label: "Actions",
+      filter: false,
+      render: (row) => (
+        <Button
+          variant="secondary"
+          className="wh-btn--sm"
+          disabled={!canEdit}
+          onClick={() => openEdit(row)}
+        >
+          Edit
+        </Button>
+      ),
+    },
   ];
 
   return (
@@ -174,18 +177,14 @@ export default function UserManagement() {
         title="User Management"
         description={`Active users: ${limits.active_count}/${limits.max_users}. Users can be set active or inactive — no delete.`}
         actions={
-          canCreate ? (
-            <Button onClick={openCreate} disabled={limits.active_count >= limits.max_users}>
-              Add User
-            </Button>
-          ) : null
+          <Button
+            onClick={openCreate}
+            disabled={!canCreate || limits.active_count >= limits.max_users}
+          >
+            Add User
+          </Button>
         }
       />
-      {readOnly && canView && (
-        <p className="wh-muted" style={{ marginBottom: 12 }}>
-          View-only access — you cannot add or edit users.
-        </p>
-      )}
       {error && <div className="wh-alert wh-alert--error">{error}</div>}
       {message && <div className="wh-alert wh-alert--success">{message}</div>}
       <Card className="wh-card--table">
@@ -220,7 +219,7 @@ export default function UserManagement() {
             <Button variant="secondary" onClick={() => setModalOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={save} disabled={saving}>
+            <Button onClick={save} disabled={saving || (editId ? !canEdit : !canCreate)}>
               {saving ? "Saving…" : "Save"}
             </Button>
           </>

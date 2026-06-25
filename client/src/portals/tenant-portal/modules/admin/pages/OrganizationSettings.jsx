@@ -77,7 +77,7 @@ const EMPTY_FORM = {
 
 export default function OrganizationSettings() {
   const { authFetch } = useAuth();
-  const { canEdit, canView, readOnly } = useModulePermission("admin");
+  const { canEdit } = useModulePermission("admin");
   const { currencies, timezones, loading: refLoading } = useReferenceData();
   const [form, setForm] = useState(EMPTY_FORM);
   const [loading, setLoading] = useState(true);
@@ -164,11 +164,6 @@ export default function OrganizationSettings() {
       />
       {error && <div className="wh-alert wh-alert--error">{error}</div>}
       {message && <div className="wh-alert wh-alert--success">{message}</div>}
-      {readOnly && canView && (
-        <p className="wh-muted" style={{ marginBottom: 12 }}>
-          View-only access — organization settings cannot be changed.
-        </p>
-      )}
       <Card>
         {loading ? (
           <p className="wh-muted">Loading…</p>
@@ -249,11 +244,9 @@ export default function OrganizationSettings() {
               />
             </div>
             <div className="wh-form-grid__actions">
-              {canEdit && (
-                <Button onClick={save} disabled={saving}>
-                  {saving ? "Saving…" : "Save settings"}
-                </Button>
-              )}
+              <Button onClick={save} disabled={!canEdit || saving}>
+                {saving ? "Saving…" : "Save settings"}
+              </Button>
             </div>
           </div>
         )}

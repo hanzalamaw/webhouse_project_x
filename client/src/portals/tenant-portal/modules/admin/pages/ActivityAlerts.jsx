@@ -13,7 +13,7 @@ import { formatDateTime } from "../../../../../utils/dateTime";
 
 export default function ActivityAlerts() {
   const { authFetch } = useAuth();
-  const { canEdit, canView, readOnly } = useModulePermission("admin");
+  const { canEdit } = useModulePermission("admin");
   const [rows, setRows] = useState([]);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
@@ -48,6 +48,7 @@ export default function ActivityAlerts() {
   }, [load]);
 
   const markRead = async (id) => {
+    if (!canEdit) return;
     try {
       await apiFetch(`/tenant/activity-alerts/${id}/read`, { method: "PATCH" }, authFetch);
       await load();
@@ -70,8 +71,13 @@ export default function ActivityAlerts() {
       label: "Actions",
       filter: false,
       render: (row) =>
-        !row.is_read && canEdit ? (
-          <Button variant="secondary" className="wh-btn--sm" onClick={() => markRead(row.id)}>
+        !row.is_read ? (
+          <Button
+            variant="secondary"
+            className="wh-btn--sm"
+            disabled={!canEdit}
+            onClick={() => markRead(row.id)}
+          >
             Mark read
           </Button>
         ) : (
@@ -86,11 +92,6 @@ export default function ActivityAlerts() {
         title="Activity Alerts"
         description="Important security and configuration events for your organization."
       />
-      {readOnly && canView && (
-        <p className="wh-muted" style={{ marginBottom: 12 }}>
-          View-only access — you cannot mark alerts as read.
-        </p>
-      )}
       {error && <div className="wh-alert wh-alert--error">{error}</div>}
       <Card className="wh-card--table">
         {loading ? (
