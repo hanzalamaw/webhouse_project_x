@@ -21,6 +21,7 @@ import { getNavItems as getFinanceNav } from "./finance/navConfig";
 
 import InventoryDashboard from "./inventory-procurement/pages/Dashboard";
 import { getNavItems as getInventoryNav } from "./inventory-procurement/navConfig";
+import { INVENTORY_ROUTES } from "./inventory-procurement/routes.jsx";
 
 import { MODULE_SECTION_ROUTES } from "./shared/buildModuleNav";
 
@@ -40,9 +41,9 @@ export const TENANT_MODULE_DEFINITIONS = [
   },
   {
     slug: "logistics-partners",
-    name: "Logistics Partners Management",
+    name: "Logistics Partners",
     letter: "L",
-    aliases: ["Logistics"],
+    aliases: ["Logistics", "Logistics Partners Management"],
     Dashboard: LogisticsDashboard,
     getNavItems: getLogisticsNav,
   },
@@ -93,6 +94,7 @@ export const TENANT_MODULE_DEFINITIONS = [
     aliases: ["Inventory"],
     Dashboard: InventoryDashboard,
     getNavItems: getInventoryNav,
+    routes: INVENTORY_ROUTES,
   },
 ];
 

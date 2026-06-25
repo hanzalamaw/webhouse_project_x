@@ -31,7 +31,7 @@ WHERE `module_name` IN (
   'POS',
   'Logistics',
   'Admin',
-  'Logistics Partners Management',
+  'Logistics Partners',
   'Order Management',
   'E-Commerce Integration',
   'Finance & Accounting',
@@ -43,7 +43,7 @@ WHERE `module_name` IN (
 -- -----------------------------------------------------------------------------
 INSERT INTO `modules` (`module_name`) VALUES
   ('Admin'),
-  ('Logistics Partners Management'),
+  ('Logistics Partners'),
   ('Order Management'),
   ('POS'),
   ('CRM'),
@@ -52,7 +52,7 @@ INSERT INTO `modules` (`module_name`) VALUES
   ('Inventory & Procurement');
 
 SET @mod_admin      = (SELECT `id` FROM `modules` WHERE `module_name` = 'Admin'                         AND `deleted_at` IS NULL ORDER BY `id` LIMIT 1);
-SET @mod_logistics  = (SELECT `id` FROM `modules` WHERE `module_name` = 'Logistics Partners Management' AND `deleted_at` IS NULL ORDER BY `id` LIMIT 1);
+SET @mod_logistics  = (SELECT `id` FROM `modules` WHERE `module_name` = 'Logistics Partners' AND `deleted_at` IS NULL ORDER BY `id` LIMIT 1);
 SET @mod_orders     = (SELECT `id` FROM `modules` WHERE `module_name` = 'Order Management'              AND `deleted_at` IS NULL ORDER BY `id` LIMIT 1);
 SET @mod_pos        = (SELECT `id` FROM `modules` WHERE `module_name` = 'POS'                          AND `deleted_at` IS NULL ORDER BY `id` LIMIT 1);
 SET @mod_crm        = (SELECT `id` FROM `modules` WHERE `module_name` = 'CRM'                          AND `deleted_at` IS NULL ORDER BY `id` LIMIT 1);

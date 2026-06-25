@@ -118,18 +118,22 @@ function AppRoutes() {
             >
               <Route index element={<Navigate to="dashboard" replace />} />
               <Route path="dashboard" element={<Dashboard />} />
-              {MODULE_SECTION_ROUTES.map((section) => (
-                <Route
-                  key={section.path}
-                  path={section.path}
-                  element={
-                    <ModulePlaceholder
-                      title={`${mod.name} — ${section.title}`}
-                      description="This section will be built soon."
-                    />
-                  }
-                />
+              {(mod.routes || []).map((section) => (
+                <Route key={section.path} path={section.path} element={section.element} />
               ))}
+              {!mod.routes &&
+                MODULE_SECTION_ROUTES.map((section) => (
+                  <Route
+                    key={section.path}
+                    path={section.path}
+                    element={
+                      <ModulePlaceholder
+                        title={`${mod.name} — ${section.title}`}
+                        description="This section will be built soon."
+                      />
+                    }
+                  />
+                ))}
             </Route>
           );
         })}

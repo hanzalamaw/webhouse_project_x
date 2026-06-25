@@ -7,6 +7,7 @@ import { createVerifyToken } from "./src/middleware/auth.js";
 import { registerAuthRoutes } from "./src/routes/auth.js";
 import { registerDashboardRoutes } from "./src/routes/dashboard.js";
 import { registerWhPortalRoutes } from "./src/routes/whPortal.js";
+import { registerInventoryRoutes } from "./src/routes/inventory.js";
 import { purgeSoftDeleted } from "./src/jobs/purgeSoftDeleted.js";
 
 dotenv.config();
@@ -35,6 +36,7 @@ const startServer = async () => {
     jwtExpiresIn: JWT_EXPIRES_IN,
     jwtRefreshExpiresIn: JWT_REFRESH_EXPIRES_IN,
   });
+  registerInventoryRoutes(app, verifyToken);
 
   app.get("/", (req, res) => {
     res.send("API running");

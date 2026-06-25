@@ -1,11 +1,17 @@
-import { Outlet, useParams } from "react-router-dom";
+import { Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { Button } from "../Button";
 import TenantSidebar from "./TenantSidebar";
 import "./MainLayout.css";
 
+function moduleSlugFromPath(pathname) {
+  const match = String(pathname || "").match(/^\/app\/m\/([^/]+)/);
+  return match?.[1] || "";
+}
+
 export default function TenantLayout() {
-  const { moduleSlug } = useParams();
+  const { pathname } = useLocation();
+  const moduleSlug = moduleSlugFromPath(pathname);
   const { user, logout } = useAuth();
 
   return (
