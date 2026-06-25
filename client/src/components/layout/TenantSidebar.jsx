@@ -75,6 +75,18 @@ export default function TenantSidebar({ moduleSlug }) {
   }, [menuItems, location.pathname]);
 
   useEffect(() => {
+    const next = {};
+    for (const item of menuItems) {
+      if (item.children?.some((c) => isPathActive(location.pathname, c.path))) {
+        next[item.id] = true;
+      }
+    }
+    if (Object.keys(next).length) {
+      setOpenGroups((prev) => ({ ...prev, ...next }));
+    }
+  }, [location.pathname, menuItems]);
+
+  useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768);
     check();
     window.addEventListener("resize", check);

@@ -107,6 +107,43 @@ export const ChevronIcon = ({ direction = "right" }) => (
   </svg>
 );
 
+export const ProductIcon = () => (
+  <svg {...iconProps}>
+    <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+    <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+    <line x1="12" y1="22.08" x2="12" y2="12" />
+  </svg>
+);
+
+export const WarehouseIcon = () => (
+  <svg {...iconProps}>
+    <path d="M3 21h18" />
+    <path d="M5 21V7l8-4v18" />
+    <path d="M19 21V11l-6-4" />
+    <path d="M9 9v0" />
+    <path d="M9 12v0" />
+    <path d="M9 15v0" />
+    <path d="M9 18v0" />
+  </svg>
+);
+
+export const ProcurementIcon = () => (
+  <svg {...iconProps}>
+    <rect x="1" y="3" width="15" height="13" rx="2" />
+    <path d="M16 8h4a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H7" />
+    <path d="M5 8V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v2" />
+  </svg>
+);
+
+export const TransferIcon = () => (
+  <svg {...iconProps}>
+    <polyline points="17 1 21 5 17 9" />
+    <path d="M3 5h18" />
+    <polyline points="7 23 3 19 7 15" />
+    <path d="M21 19H3" />
+  </svg>
+);
+
 export const HamburgerIcon = ({ isOpen }) => (
   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
     {isOpen ? (

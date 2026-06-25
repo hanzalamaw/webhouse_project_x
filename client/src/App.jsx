@@ -118,23 +118,27 @@ function AppRoutes() {
             >
               <Route index element={<Navigate to="dashboard" replace />} />
               <Route path="dashboard" element={<Dashboard />} />
-              {(mod.sections || MODULE_SECTION_ROUTES).map((section) => {
+              {(mod.routes || []).map((section) => (
+                <Route key={section.path} path={section.path} element={section.element} />
+              ))}
+              {!mod.routes &&
+                (mod.sections || MODULE_SECTION_ROUTES).map((section) => {
                 const SectionComponent = section.Component;
                 return (
-                  <Route
-                    key={section.path}
-                    path={section.path}
-                    element={
-                      SectionComponent ? (
+                    <Route
+                      key={section.path}
+                      path={section.path}
+                      element={
+                        SectionComponent ? (
                         <SectionComponent />
                       ) : (
                         <ModulePlaceholder
-                          title={`${mod.name} — ${section.title}`}
-                          description="This section will be built soon."
-                        />
-                      )
+                            title={`${mod.name} — ${section.title}`}
+                            description="This section will be built soon."
+                          />
+                        )
                     }
-                  />
+                    />
                 );
               })}
               {mod.slug === "admin" && (
@@ -142,7 +146,7 @@ function AppRoutes() {
                   <Route path="roles-management" element={<Navigate to="roles-and-permissions" replace />} />
                   <Route path="permissions-management" element={<Navigate to="roles-and-permissions" replace />} />
                 </>
-              )}
+                )}
             </Route>
           );
         })}
