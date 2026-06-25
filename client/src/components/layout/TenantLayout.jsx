@@ -1,6 +1,5 @@
 import { Outlet, useLocation } from "react-router-dom";
 import { useMemo } from "react";
-import { Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { Button } from "../Button";
 import TenantSidebar from "./TenantSidebar";
@@ -11,19 +10,12 @@ function moduleSlugFromPath(pathname) {
   return match?.[1] ?? null;
 }
 
-function moduleSlugFromPath(pathname) {
-  const match = String(pathname || "").match(/^\/app\/m\/([^/]+)/);
-  return match?.[1] || "";
-}
-
 export default function TenantLayout() {
   const location = useLocation();
   const moduleSlug = useMemo(
     () => moduleSlugFromPath(location.pathname),
     [location.pathname]
   );
-  const { pathname } = useLocation();
-  const moduleSlug = moduleSlugFromPath(pathname);
   const { user, logout } = useAuth();
 
   return (
