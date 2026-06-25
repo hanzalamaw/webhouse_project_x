@@ -13,15 +13,40 @@ function formatLocalDate(d) {
   return `${y}-${m}-${day}`;
 }
 
-/** Billing period end for accrued charges: today, capped at renewal. */
-export function resolveBillingPeriodEnd(startDate, renewalDate, asOf = new Date()) {
-  const renewal = parseLocalDate(renewalDate);
-  const asOfDate = asOf instanceof Date ? asOf : parseLocalDate(asOf);
-  if (!asOfDate) {
-    return renewal ? formatLocalDate(renewal) : String(renewalDate || "").slice(0, 10);
+function addMonths(date, months) {
+  const d = new Date(date.getTime());
+  d.setMonth(d.getMonth() + months);
+  return d;
+}
+
+function addYears(date, years) {
+  const d = new Date(date.getTime());
+  d.setFullYear(d.getFullYear() + years);
+  return d;
+}
+
+/** Next renewal from a period start (monthly = +1 month, yearly = +1 year). */
+export function calcNextRenewalDate(startDate, cycle = "monthly") {
+  const d = parseLocalDate(startDate);
+  if (!d) return "";
+  const next = cycle === "yearly" ? addYears(d, 1) : addMonths(d, 1);
+  return formatLocalDate(next);
+}
+
+/** Roll start/renewal forward while today is past renewal_date. */
+export function rollSubscriptionDates(startDate, renewalDate, cycle, asOf = new Date()) {
+  let start = String(startDate || "").slice(0, 10);
+  let renewal = String(renewalDate || "").slice(0, 10);
+  const asOfStr = formatLocalDate(asOf instanceof Date ? asOf : parseLocalDate(asOf) || new Date());
+  let rolled = false;
+
+  while (renewal && asOfStr > renewal) {
+    start = renewal;
+    renewal = calcNextRenewalDate(start, cycle);
+    rolled = true;
   }
-  if (!renewal || asOfDate <= renewal) return formatLocalDate(asOfDate);
-  return formatLocalDate(renewal);
+
+  return { start_date: start, renewal_date: renewal, rolled };
 }
 
 export function billingMultiplier(cycle) {
@@ -31,6 +56,11 @@ export function billingMultiplier(cycle) {
 
 export function calcBillingTotal(monthlyPrice, cycle) {
   return Number((Number(monthlyPrice) * billingMultiplier(cycle)).toFixed(2));
+}
+
+/** One billing cycle charge (monthly = plan price, yearly = 12 × price). */
+export function cycleChargeAmount(monthlyPrice, cycle) {
+  return calcBillingTotal(monthlyPrice, cycle);
 }
 
 export function monthsBetweenDates(startDate, endDate) {
@@ -43,18 +73,91 @@ export function monthsBetweenDates(startDate, endDate) {
   return Math.max(1, months);
 }
 
-/** Expected subscription total accrued from start through today (capped at renewal). */
-export function calcPeriodExpectedTotal(monthlyPrice, billingCycle, startDate, endDate) {
-  const price = Number(monthlyPrice) || 0;
-  const periodEnd = resolveBillingPeriodEnd(startDate, endDate);
-  const months = monthsBetweenDates(startDate, periodEnd);
-  if (billingCycle === "yearly") {
-    const years = Math.max(1, Math.ceil(months / 12));
-    return Number((calcBillingTotal(price, "yearly") * years).toFixed(2));
+/** Elapsed billing cycles from anchor through asOf (inclusive of the active cycle). */
+export function countElapsedCycles(anchorDate, asOfDate, cycle) {
+  const anchor = parseLocalDate(anchorDate);
+  const asOf = parseLocalDate(asOfDate);
+  if (!anchor || !asOf) return 1;
+
+  let cycles = 0;
+  let boundary = new Date(anchor.getTime());
+  const step = cycle === "yearly" ? (d) => addYears(d, 1) : (d) => addMonths(d, 1);
+
+  while (boundary <= asOf) {
+    cycles += 1;
+    boundary = step(boundary);
   }
-  return Number((price * months).toFixed(2));
+
+  return Math.max(1, cycles);
+}
+
+/** Current billing cycle window based on anchor anniversary. */
+export function getCurrentCycleWindow(anchorDate, asOfDate, cycle) {
+  const anchor = parseLocalDate(anchorDate);
+  const asOf = parseLocalDate(asOfDate);
+  if (!anchor || !asOf) {
+    const today = formatLocalDate(new Date());
+    return { cycle_start: today, cycle_end: today };
+  }
+
+  let cycleStart = new Date(anchor.getTime());
+  if (cycle === "yearly") {
+    while (addYears(cycleStart, 1) <= asOf) {
+      cycleStart = addYears(cycleStart, 1);
+    }
+    return {
+      cycle_start: formatLocalDate(cycleStart),
+      cycle_end: formatLocalDate(addYears(cycleStart, 1)),
+    };
+  }
+
+  while (addMonths(cycleStart, 1) <= asOf) {
+    cycleStart = addMonths(cycleStart, 1);
+  }
+  return {
+    cycle_start: formatLocalDate(cycleStart),
+    cycle_end: formatLocalDate(addMonths(cycleStart, 1)),
+  };
+}
+
+export function calcTotalBillingAmount(monthlyPrice, cycle, anchorDate, asOfDate) {
+  const cycles = countElapsedCycles(anchorDate, asOfDate, cycle);
+  return Number((cycleChargeAmount(monthlyPrice, cycle) * cycles).toFixed(2));
+}
+
+export function calcCurrentCycleAmount(monthlyPrice, cycle) {
+  return cycleChargeAmount(monthlyPrice, cycle);
+}
+
+export function sumPaymentsInCycle(payments, cycleStart, cycleEnd) {
+  const start = parseLocalDate(cycleStart);
+  const end = parseLocalDate(cycleEnd);
+  if (!start || !end) return 0;
+  return payments.reduce((sum, p) => {
+    const at = parseLocalDate(p.received_at);
+    if (!at || at < start || at >= end) return sum;
+    return sum + Number(p.total_received || 0);
+  }, 0);
 }
 
 export function addPaymentReceived(bank, cash) {
   return Number((Number(bank || 0) + Number(cash || 0)).toFixed(2));
+}
+
+/** @deprecated use calcTotalBillingAmount */
+export function resolveBillingPeriodEnd(startDate, renewalDate, asOf = new Date()) {
+  const renewal = parseLocalDate(renewalDate);
+  const asOfDate = asOf instanceof Date ? asOf : parseLocalDate(asOf);
+  if (!asOfDate) {
+    return renewal ? formatLocalDate(renewal) : String(renewalDate || "").slice(0, 10);
+  }
+  if (!renewal || asOfDate <= renewal) return formatLocalDate(asOfDate);
+  return formatLocalDate(renewal);
+}
+
+/** @deprecated use calcTotalBillingAmount */
+export function calcPeriodExpectedTotal(monthlyPrice, billingCycle, startDate, endDate) {
+  const anchor = startDate;
+  const asOf = resolveBillingPeriodEnd(startDate, endDate);
+  return calcTotalBillingAmount(monthlyPrice, billingCycle, anchor, asOf);
 }

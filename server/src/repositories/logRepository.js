@@ -23,7 +23,7 @@ export const logRepository = {
               al.created_at, t.company_name, m.module_name, u.name AS user_name, u.email AS user_email
        FROM audit_logs al
        JOIN wh_tenants t ON t.id = al.tenant_id AND t.deleted_at IS NULL
-       JOIN modules m ON m.id = al.module_id AND m.deleted_at IS NULL
+       LEFT JOIN modules m ON m.id = al.module_id AND m.deleted_at IS NULL
        JOIN users u ON u.id = al.user_id AND u.deleted_at IS NULL
        WHERE al.deleted_at IS NULL AND al.tenant_id = ?
        ORDER BY al.created_at DESC LIMIT ? OFFSET ?`,

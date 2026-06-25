@@ -3,6 +3,7 @@ import crypto from "crypto";
 import { tenantRepository } from "../repositories/tenantRepository.js";
 import { sessionRepository } from "../repositories/sessionRepository.js";
 import { logWhAudit } from "../utils/whAudit.js";
+import { tenantPermissionService } from "./tenantPermissionService.js";
 
 const toTenantUserPayload = (user, tenant, impersonatedBy) => ({
   id: user.id,
@@ -60,7 +61,11 @@ export function createImpersonationService({ jwtSecret, jwtExpiresIn, jwtRefresh
       return {
         token,
         refreshToken,
-        user: toTenantUserPayload(user, tenant, adminUserId),
+        user: await tenantPermissionService.enrichUserPayload(
+          toTenantUserPayload(user, tenant, adminUserId),
+          tenantId,
+          { impersonating: true }
+        ),
       };
     },
   };

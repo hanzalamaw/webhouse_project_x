@@ -199,6 +199,11 @@ export default function ManageSubscriptions() {
           }
         }}
         recordName={deleteRow?.plan_name}
+        categoryLabel="subscription plan"
+        cascadeItems={[
+          "All modules assigned to this subscription plan",
+          "Tenants on this plan may lose access to those modules",
+        ]}
         loading={deleting}
       />
     </div>

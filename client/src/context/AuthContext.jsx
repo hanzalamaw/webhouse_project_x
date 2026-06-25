@@ -11,7 +11,10 @@ import {
   updateActiveUser,
   mergeTenantUserFromApi,
   readImpersonationSession,
+  readSessionTimestamps,
+  touchSessionActivity,
 } from "./authSession";
+import { isLocalSessionExpired } from "../utils/sessionPolicy";
 
 const AuthContext = createContext(null);
 
@@ -57,6 +60,7 @@ export const AuthProvider = ({ children }) => {
 
   const authFetch = useCallback(async (url, options = {}) => {
     const epoch = sessionEpochRef.current;
+    touchSessionActivity();
     const token = getActiveToken();
     const headers = { ...options.headers, ...(token ? { Authorization: `Bearer ${token}` } : {}) };
     let res = await fetch(url, { ...options, headers });
@@ -103,6 +107,12 @@ export const AuthProvider = ({ children }) => {
     }
 
     const { user: storedUser, token } = session;
+    const { sessionStartedAt, lastActivityAt } = readSessionTimestamps();
+    if (isLocalSessionExpired(sessionStartedAt, lastActivityAt, storedUser)) {
+      clearSessionAndLogout(storedUser);
+      return;
+    }
+
     if (!ensureFreshTokens(storedUser)) return;
 
     setUser(storedUser);
@@ -144,8 +154,12 @@ export const AuthProvider = ({ children }) => {
       }
 
       if (!res.ok) {
-        if (getActiveToken() === token) {
-          clearSessionAndLogout(storedUser);
+        if (res.status === 401 || res.status === 403) {
+          if (getActiveToken() === token) {
+            clearSessionAndLogout(storedUser);
+          }
+        } else {
+          setLoading(false);
         }
         return;
       }
@@ -156,10 +170,16 @@ export const AuthProvider = ({ children }) => {
         const merged = mergeTenantUserFromApi(data.user, storedUser);
         setUser(merged);
         updateActiveUser(merged);
+        touchSessionActivity();
       }
     } catch {
-      if (epoch === sessionEpochRef.current && getActiveToken() === token) {
-        clearSessionAndLogout(storedUser);
+      if (epoch === sessionEpochRef.current) {
+        const { sessionStartedAt: s, lastActivityAt: a } = readSessionTimestamps();
+        if (isLocalSessionExpired(s, a, storedUser)) {
+          clearSessionAndLogout(storedUser);
+        } else {
+          setLoading(false);
+        }
       }
     } finally {
       if (epoch === sessionEpochRef.current) {
@@ -174,13 +194,37 @@ export const AuthProvider = ({ children }) => {
     const onFocus = () => {
       const session = readStoredSession();
       if (!session) return;
+      const { sessionStartedAt, lastActivityAt } = readSessionTimestamps();
+      if (isLocalSessionExpired(sessionStartedAt, lastActivityAt, session.user)) {
+        clearSessionAndLogout(session.user);
+        return;
+      }
       if (!ensureFreshTokens(session.user)) return;
       if (isTokenExpired(getActiveToken())) {
         validateStoredSession();
       }
     };
+
+    const onActivity = () => touchSessionActivity();
+
+    const idleCheck = window.setInterval(() => {
+      const session = readStoredSession();
+      if (!session?.user) return;
+      const { sessionStartedAt, lastActivityAt } = readSessionTimestamps();
+      if (isLocalSessionExpired(sessionStartedAt, lastActivityAt, session.user)) {
+        clearSessionAndLogout(session.user);
+      }
+    }, 60_000);
+
+    const activityEvents = ["mousedown", "keydown", "scroll", "touchstart"];
+    activityEvents.forEach((ev) => window.addEventListener(ev, onActivity, { passive: true }));
     window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
+
+    return () => {
+      window.clearInterval(idleCheck);
+      activityEvents.forEach((ev) => window.removeEventListener(ev, onActivity));
+      window.removeEventListener("focus", onFocus);
+    };
     // Validate stored session once on app load only (login manages its own state).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

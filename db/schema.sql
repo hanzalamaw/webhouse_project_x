@@ -158,6 +158,7 @@ CREATE TABLE IF NOT EXISTS `wh_tenant_subscriptions` (
   `id` INT NOT NULL AUTO_INCREMENT,
   `billing_cycle` VARCHAR(45) NOT NULL,
   `start_date` DATE NOT NULL,
+  `billing_anchor_date` DATE NULL DEFAULT NULL,
   `renewal_date` DATE NOT NULL,
   `status` VARCHAR(45) NOT NULL,
   `updated_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

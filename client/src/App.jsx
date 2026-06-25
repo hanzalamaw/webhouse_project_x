@@ -118,18 +118,31 @@ function AppRoutes() {
             >
               <Route index element={<Navigate to="dashboard" replace />} />
               <Route path="dashboard" element={<Dashboard />} />
-              {MODULE_SECTION_ROUTES.map((section) => (
-                <Route
-                  key={section.path}
-                  path={section.path}
-                  element={
-                    <ModulePlaceholder
-                      title={`${mod.name} — ${section.title}`}
-                      description="This section will be built soon."
-                    />
-                  }
-                />
-              ))}
+              {(mod.sections || MODULE_SECTION_ROUTES).map((section) => {
+                const SectionComponent = section.Component;
+                return (
+                  <Route
+                    key={section.path}
+                    path={section.path}
+                    element={
+                      SectionComponent ? (
+                        <SectionComponent />
+                      ) : (
+                        <ModulePlaceholder
+                          title={`${mod.name} — ${section.title}`}
+                          description="This section will be built soon."
+                        />
+                      )
+                    }
+                  />
+                );
+              })}
+              {mod.slug === "admin" && (
+                <>
+                  <Route path="roles-management" element={<Navigate to="roles-and-permissions" replace />} />
+                  <Route path="permissions-management" element={<Navigate to="roles-and-permissions" replace />} />
+                </>
+              )}
             </Route>
           );
         })}

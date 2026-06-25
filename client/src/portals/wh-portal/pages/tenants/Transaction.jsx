@@ -55,13 +55,26 @@ export default function Transaction() {
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
   const [toolbar, setToolbar] = useState({ ...EMPTY_TOOLBAR });
+  const [loadError, setLoadError] = useState("");
 
   const filteredRows = useMemo(
-    () => applyToolbarFilters(rows, toolbar, { dateField: "start_date" }),
+    () => applyToolbarFilters(rows, toolbar, { dateField: "cycle_start" }),
     [rows, toolbar]
   );
 
-  const periodTotal = contextRow?.period_total ?? 0;
+  const formatElapsedPeriods = (row) => {
+    const n = Number(row?.elapsed_periods);
+    if (!n) return "—";
+    if (row.billing_cycle === "yearly") {
+      return `${n} year${n === 1 ? "" : "s"}`;
+    }
+    return `${n} month${n === 1 ? "" : "s"}`;
+  };
+
+  const periodTotal = contextRow?.total_billing_amount ?? contextRow?.period_total ?? 0;
+  const currentCycleAmount = contextRow?.current_cycle_amount ?? 0;
+  const currentCycleReceived = contextRow?.current_cycle_received ?? 0;
+  const currentCycleDue = contextRow?.current_cycle_due ?? 0;
   const tenantPaidCurrent = useMemo(
     () => sumField(tenantPayments, "total_received"),
     [tenantPayments]
@@ -117,12 +130,18 @@ export default function Transaction() {
   );
 
   const reload = useCallback(async () => {
-    await Promise.all([loadSummary(), loadTenants()]);
+    setLoadError("");
+    try {
+      await Promise.all([loadSummary(), loadTenants()]);
+    } catch (err) {
+      setLoadError(err.message || "Failed to load transactions");
+      setRows([]);
+    }
   }, [loadSummary, loadTenants]);
 
   useEffect(() => {
     setLoading(true);
-    reload().catch(() => {}).finally(() => setLoading(false));
+    reload().finally(() => setLoading(false));
   }, [reload]);
 
   const openAddModal = async (row) => {
@@ -254,13 +273,53 @@ export default function Transaction() {
     { key: "company_name", label: "Tenant" },
     { key: "plan_name", label: "Plan", format: (v) => v || "—" },
     { key: "billing_cycle", label: "Cycle" },
-    { key: "start_date", label: "Start Date", filterType: "date", format: formatDate },
-    { key: "end_date", label: "End Date", filterType: "date", format: formatDate },
-    { key: "period_total", label: "Period Total", format: (_, r) => formatPKR(r.period_total) },
-    { key: "total_received", label: "Received", format: (_, r) => formatPKR(r.total_received) },
-    { key: "amount_due", label: "Due", format: (_, r) => formatPKR(r.amount_due) },
-    { key: "bank", label: "Bank", format: (_, r) => formatPKR(r.bank) },
-    { key: "cash", label: "Cash", format: (_, r) => formatPKR(r.cash) },
+    {
+      key: "elapsed_periods",
+      label: "Periods",
+      format: (_, r) => formatElapsedPeriods(r),
+    },
+    {
+      key: "cycle_start",
+      label: "Start Date",
+      filterType: "date",
+      format: (_, r) => formatDate(r.cycle_start || r.start_date),
+    },
+    {
+      key: "end_date",
+      label: "Period End",
+      filterType: "date",
+      format: (_, r) => formatDate(r.cycle_end || r.end_date),
+    },
+    {
+      key: "total_billing_amount",
+      label: "Total Billing",
+      format: (_, r) => formatPKR(r.total_billing_amount ?? r.period_total),
+    },
+    {
+      key: "total_received",
+      label: "Total Received",
+      format: (_, r) => formatPKR(r.total_received),
+    },
+    {
+      key: "total_amount_due",
+      label: "Total Due",
+      format: (_, r) => formatPKR(r.total_amount_due ?? r.amount_due),
+    },
+    {
+      key: "current_cycle_amount",
+      label: "Cycle Amount",
+      format: (_, r) => formatPKR(r.current_cycle_amount),
+    },
+    {
+      key: "current_cycle_received",
+      label: "Cycle Received",
+      format: (_, r) => formatPKR(r.current_cycle_received),
+    },
+    {
+      key: "current_cycle_due",
+      label: "Cycle Due",
+      format: (_, r) => formatPKR(r.current_cycle_due),
+    },
   ];
 
   const meta = contextRow;
@@ -271,6 +330,7 @@ export default function Transaction() {
         title="Transaction"
         description="Tenant billing overview — open a tenant to record or review payments."
       />
+      {loadError && <div className="wh-alert wh-alert--error">{loadError}</div>}
       <div className="wh-stat-grid">
         <StatCard
           label="Outstanding Dues"
@@ -295,7 +355,7 @@ export default function Transaction() {
               rows={rows}
               value={toolbar}
               onChange={setToolbar}
-              dateField="start_date"
+              dateField="cycle_start"
               searchPlaceholder="Search tenants…"
             />
             <DataTable
@@ -334,13 +394,17 @@ export default function Transaction() {
               { label: "Tenant", value: meta?.company_name || "—" },
               { label: "Plan", value: meta?.plan_name || "—" },
               { label: "Billing cycle", value: meta?.billing_cycle || "—" },
-              { label: "Start date", value: toInputDate(meta?.start_date) || "—" },
-              { label: "End date", value: toInputDate(meta?.end_date) || "—" },
-              { label: "Period total", value: formatPKR(periodTotal), accent: true },
+              { label: "Billing periods", value: formatElapsedPeriods(meta) },
+              { label: "Current period start", value: toInputDate(meta?.cycle_start || meta?.start_date) || "—" },
+              { label: "Period end", value: toInputDate(meta?.cycle_end || meta?.end_date) || "—" },
+              { label: "Total billing", value: formatPKR(periodTotal), accent: true },
+              { label: "Total received", value: formatPKR(tenantPaidCurrent) },
+              { label: "Total due", value: formatPKR(currentPending) },
+              { label: "Current cycle amount", value: formatPKR(currentCycleAmount) },
+              { label: "Current cycle received", value: formatPKR(currentCycleReceived) },
+              { label: "Current cycle due", value: formatPKR(currentCycleDue) },
               { label: "Current bank", value: formatPKR(tenantBankCurrent) },
               { label: "Current cash", value: formatPKR(tenantCashCurrent) },
-              { label: "Current received", value: formatPKR(tenantPaidCurrent) },
-              { label: "Current pending", value: formatPKR(currentPending) },
             ]}
           />
         </div>
@@ -395,7 +459,6 @@ export default function Transaction() {
                 <thead>
                   <tr>
                     <th>Date</th>
-                    <th>ID</th>
                     <th>Bank</th>
                     <th>Cash</th>
                     <th>Total</th>
@@ -405,13 +468,12 @@ export default function Transaction() {
                 <tbody>
                   {!tenantPayments.length ? (
                     <tr>
-                      <td colSpan={6} className="wh-table-empty">No payments for this tenant.</td>
+                      <td colSpan={5} className="wh-table-empty">No payments for this tenant.</td>
                     </tr>
                   ) : (
                     tenantPayments.map((p) => (
                       <tr key={p.id}>
                         <td>{p.received_at ? formatDateTime(p.received_at) : "—"}</td>
-                        <td>{p.id}</td>
                         <td>{formatPKR(p.bank)}</td>
                         <td>{formatPKR(p.cash)}</td>
                         <td>{formatPKR(p.total_received)}</td>
@@ -446,7 +508,7 @@ export default function Transaction() {
       <Modal
         open={!!fixPayment}
         onClose={closeFixModal}
-        title={`Edit Payment #${fixPayment?.id || ""}`}
+        title="Edit Payment"
         className="wh-modal--transaction"
         footer={
           <>
@@ -500,7 +562,11 @@ export default function Transaction() {
           setDeleteError("");
         }}
         title="Delete payment"
-        recordName={`payment #${deletePayment?.id || ""}`}
+        categoryLabel="payment"
+        cascadeItems={[
+          "The tenant's total received, amount due, and current cycle balances will be recalculated",
+        ]}
+        recordName={`payment on ${deletePayment?.received_at ? formatDateTime(deletePayment.received_at) : "this date"}`}
         confirmPhrase="DELETE"
         loading={deleting}
         error={deleteError}

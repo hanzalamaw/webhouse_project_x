@@ -200,6 +200,11 @@ export default function ManageModules() {
         onConfirm={confirmDelete}
         error={deleteError}
         recordName={deleteRow?.module_name}
+        categoryLabel="module"
+        cascadeItems={[
+          "This module will be removed from all subscription plans",
+          "Tenant module assignments that include this module",
+        ]}
         loading={deleting}
       />
     </div>

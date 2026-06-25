@@ -163,6 +163,10 @@ export default function ManageTickets() {
           }
         }}
         recordName={deleteRow?.subject}
+        categoryLabel="support ticket"
+        cascadeItems={[
+          "All replies and updates linked to this ticket",
+        ]}
         loading={deleting}
       />
     </div>

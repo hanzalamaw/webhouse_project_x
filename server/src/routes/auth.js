@@ -3,6 +3,8 @@ import crypto from "crypto";
 import { verifyPassword } from "../utils/cipher.js";
 import { sessionRepository } from "../repositories/sessionRepository.js";
 import { tenantRepository } from "../repositories/tenantRepository.js";
+import { createActivityAlert } from "../utils/activityAlerts.js";
+import { tenantPermissionService } from "../services/tenantPermissionService.js";
 
 const toWhUserPayload = (user) => ({
   id: user.id,
@@ -54,7 +56,8 @@ async function tenantLogin(
   JWT_EXPIRES_IN,
   JWT_REFRESH_EXPIRES_IN,
   ip,
-  deviceInfo
+  deviceInfo,
+  { forceLogoutOthers = false } = {}
 ) {
   const normalized = String(username).trim().toLowerCase();
   const [rows] = await db.execute(
@@ -66,11 +69,38 @@ async function tenantLogin(
     [normalized]
   );
   const row = rows[0];
-  if (!row || !verifyPassword(password, row.password)) return null;
+  if (!row || !verifyPassword(password, row.password)) {
+    if (row) {
+      await createActivityAlert({
+        tenantId: row.tid,
+        alertType: "failed_login",
+        title: "Failed login attempt",
+        message: `Failed login for ${normalized} from ${ip || "unknown IP"}.`,
+        priority: "high",
+      });
+    }
+    return null;
+  }
   if (row.tenant_status !== "active") return { error: "Tenant account is not active" };
   if (row.login_portal !== portal) return { error: "This account cannot log in from this portal" };
 
   await db.execute("UPDATE users SET last_login_at = NOW() WHERE id = ?", [row.id]);
+
+  const existingSession = await sessionRepository.findActiveForUser(row.id);
+  if (existingSession && !forceLogoutOthers) {
+    return {
+      conflict: true,
+      existingSession: {
+        id: existingSession.id,
+        ip_address: existingSession.ip_address,
+        device_info: existingSession.device_info,
+        login_at: existingSession.login_at,
+      },
+    };
+  }
+  if (existingSession && forceLogoutOthers) {
+    await sessionRepository.terminateAllForUser(row.id);
+  }
 
   const sessionToken = crypto.randomBytes(32).toString("hex");
   const sessionId = await sessionRepository.create({
@@ -152,10 +182,19 @@ export function registerAuthRoutes(app, db, { JWT_SECRET, JWT_EXPIRES_IN, JWT_RE
       JWT_EXPIRES_IN,
       JWT_REFRESH_EXPIRES_IN,
       ip,
-      deviceInfo
+      deviceInfo,
+      { forceLogoutOthers: Boolean(req.body.forceLogoutOthers) }
     );
     if (!result) return res.status(401).json({ message: "Invalid credentials" });
     if (result.error) return res.status(403).json({ message: result.error });
+    if (result.conflict) {
+      return res.status(409).json({
+        message: "You are already logged in on another device.",
+        code: "SESSION_CONFLICT",
+        existingSession: result.existingSession,
+      });
+    }
+    result.user = await tenantPermissionService.enrichUserPayload(result.user, result.user.tenant_id);
     res.json(result);
   });
 
@@ -242,12 +281,22 @@ export function registerAuthRoutes(app, db, { JWT_SECRET, JWT_EXPIRES_IN, JWT_RE
       userPayload.impersonating = true;
       userPayload.impersonated_by = req.impersonatedBy;
     }
-    res.json({ user: userPayload });
+    const enriched = await tenantPermissionService.enrichUserPayload(userPayload, row.tenant_id, {
+      impersonating: Boolean(req.impersonatedBy),
+    });
+    res.json({ user: enriched });
   });
 
   app.get("/api/tenant/modules", verifyToken, requireActiveTenantSession, async (req, res) => {
     if (req.userRole !== "tenant") return res.status(403).json({ message: "Forbidden" });
+    const permCtx = await tenantPermissionService.resolveForUser(req.tenantId, req.userId, {
+      impersonating: Boolean(req.impersonatedBy),
+    });
     const modules = await tenantRepository.getTenantModules(req.tenantId);
-    res.json({ data: modules.filter((m) => m.is_enabled) });
+    res.json({
+      data: modules.filter(
+        (m) => m.is_enabled && tenantPermissionService.canViewModule(permCtx, m.module_name)
+      ),
+    });
   });
 }

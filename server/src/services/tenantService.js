@@ -1,5 +1,6 @@
 import { tenantRepository } from "../repositories/tenantRepository.js";
 import { subscriptionRepository } from "../repositories/subscriptionRepository.js";
+import { transactionRepository } from "../repositories/transactionRepository.js";
 import { decrypt } from "../utils/cipher.js";
 import { logWhAudit } from "../utils/whAudit.js";
 import { paginatedResponse, parsePagination } from "../utils/pagination.js";
@@ -39,6 +40,8 @@ export const tenantService = {
       ...payload,
       login_portal: loginPortal,
     });
+    await transactionRepository.processAutoRenewalForTenant(id);
+    await transactionRepository.syncSubscriptionDues(id);
     const updated = await this.getById(id);
     await logWhAudit({
       adminUserId: audit.adminUserId,

@@ -17,7 +17,9 @@ export const tenantRepository = {
               (SELECT COUNT(*) FROM ecom_store_connections s WHERE s.tenant_id = t.id AND s.deleted_at IS NULL) AS store_count,
               (SELECT COUNT(*) FROM orders o WHERE o.tenant_id = t.id AND o.deleted_at IS NULL
                  AND MONTH(o.created_at) = MONTH(CURRENT_DATE()) AND YEAR(o.created_at) = YEAR(CURRENT_DATE())) AS orders_this_month,
-              ts.billing_cycle, ts.start_date, ts.renewal_date, ts.status AS subscription_status,
+              ts.billing_cycle, ts.start_date, ts.renewal_date,
+              COALESCE(ts.billing_anchor_date, ts.start_date) AS billing_anchor_date,
+              ts.status AS subscription_status,
               ts.total_amount, ts.amount_due,
               sp.plan_name, sp.id AS subscription_plan_id
        FROM wh_tenants t
@@ -38,6 +40,7 @@ export const tenantRepository = {
     const [rows] = await readDb.query(
       `SELECT t.*, tl.max_users, tl.max_warehouses, tl.max_stores, tl.max_orders_per_month,
               ts.id AS subscription_id, ts.billing_cycle, ts.start_date, ts.renewal_date,
+              COALESCE(ts.billing_anchor_date, ts.start_date) AS billing_anchor_date,
               ts.status AS subscription_status, ts.total_amount, ts.amount_due, ts.subscription_plan_id,
               sp.plan_name
        FROM wh_tenants t
@@ -231,8 +234,15 @@ export const tenantRepository = {
       );
 
       await connection.execute(
-        `UPDATE wh_tenant_limits SET max_users = ?, max_warehouses = ?, max_stores = ?, max_orders_per_month = ?
-         WHERE tenant_id = ? AND deleted_at IS NULL`,
+        `INSERT INTO wh_tenant_limits
+         (max_users, max_warehouses, max_stores, max_orders_per_month, tenant_id)
+         VALUES (?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+           max_users = VALUES(max_users),
+           max_warehouses = VALUES(max_warehouses),
+           max_stores = VALUES(max_stores),
+           max_orders_per_month = VALUES(max_orders_per_month),
+           deleted_at = NULL`,
         [
           payload.limits.max_users,
           payload.limits.max_warehouses,
@@ -242,21 +252,36 @@ export const tenantRepository = {
         ]
       );
 
-      await connection.execute(
-        `UPDATE wh_tenant_subscriptions SET billing_cycle = ?, start_date = ?, renewal_date = ?,
-         status = ?, total_amount = ?, amount_due = ?, subscription_plan_id = ?
-         WHERE tenant_id = ? AND deleted_at IS NULL`,
-        [
-          payload.billing.billing_cycle,
-          payload.billing.start_date,
-          payload.billing.renewal_date,
-          payload.billing.status || "active",
-          payload.billing.total_amount,
-          payload.billing.amount_due,
-          payload.subscription_plan_id,
-          tenantId,
-        ]
+      const [existingSubs] = await connection.execute(
+        `SELECT id FROM wh_tenant_subscriptions WHERE tenant_id = ? AND deleted_at IS NULL LIMIT 1`,
+        [tenantId]
       );
+      const billingParams = [
+        payload.billing.billing_cycle,
+        payload.billing.start_date,
+        payload.billing.renewal_date,
+        payload.billing.start_date,
+        payload.billing.status || "active",
+        payload.billing.total_amount,
+        payload.billing.amount_due,
+        payload.subscription_plan_id,
+      ];
+      if (existingSubs.length) {
+        await connection.execute(
+          `UPDATE wh_tenant_subscriptions SET billing_cycle = ?, start_date = ?, renewal_date = ?,
+           billing_anchor_date = ?, status = ?, total_amount = ?, amount_due = ?, subscription_plan_id = ?
+           WHERE id = ? AND deleted_at IS NULL`,
+          [...billingParams, existingSubs[0].id]
+        );
+      } else {
+        await connection.execute(
+          `INSERT INTO wh_tenant_subscriptions
+           (billing_cycle, start_date, renewal_date, billing_anchor_date, status, total_amount, amount_due,
+            tenant_id, subscription_plan_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [...billingParams, tenantId]
+        );
+      }
 
       const [payRows] = await connection.execute(
         `SELECT id FROM wh_tenant_payments WHERE tenant_id = ? AND deleted_at IS NULL ORDER BY id DESC LIMIT 1`,
@@ -395,11 +420,12 @@ export const tenantRepository = {
 
       await connection.execute(
         `INSERT INTO wh_tenant_subscriptions
-         (billing_cycle, start_date, renewal_date, status, total_amount, amount_due,
+         (billing_cycle, start_date, billing_anchor_date, renewal_date, status, total_amount, amount_due,
           tenant_id, subscription_plan_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           payload.billing.billing_cycle,
+          payload.billing.start_date,
           payload.billing.start_date,
           payload.billing.renewal_date,
           payload.billing.status || "active",

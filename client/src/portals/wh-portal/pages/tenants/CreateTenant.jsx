@@ -94,7 +94,7 @@ function mapTenantToDraft(t) {
     },
     billing: {
       billing_cycle: t.billing_cycle || "monthly",
-      start_date: toInputDate(t.start_date),
+      start_date: toInputDate(t.billing_anchor_date || t.start_date),
       renewal_date: toInputDate(t.renewal_date),
       status: t.subscription_status || "active",
       total_amount: t.total_amount ?? 0,
@@ -201,7 +201,7 @@ export default function CreateTenant() {
   const draftKey = isEdit ? `wh_edit_tenant_draft_${routeTenantId}` : WIZARD_DRAFT_KEY;
   const [searchParams, setSearchParams] = useSearchParams();
   const [draft, setDraft, clearDraft] = useWizardDraft(draftKey, buildInitial());
-  const [hydrated, setHydrated] = useState(!isEdit);
+  const [hydrated, setHydrated] = useState(false);
   const [plans, setPlans] = useState([]);
   const [planModules, setPlanModules] = useState([]);
   const [extraModules, setExtraModules] = useState([]);
@@ -274,17 +274,26 @@ export default function CreateTenant() {
   }, [loadPlans]);
 
   useEffect(() => {
-    if (!isEdit || hydrated) return;
+    if (!isEdit) {
+      setHydrated(true);
+      return;
+    }
+    let active = true;
+    setHydrated(false);
     (async () => {
       try {
         const tenant = await apiFetch(`/tenants/${routeTenantId}`, {}, authFetch);
+        if (!active) return;
         setDraft(mapTenantToDraft(tenant));
         setHydrated(true);
       } catch (err) {
-        setError(err.message || "Failed to load tenant");
+        if (active) setError(err.message || "Failed to load tenant");
       }
     })();
-  }, [isEdit, hydrated, routeTenantId, authFetch, setDraft]);
+    return () => {
+      active = false;
+    };
+  }, [isEdit, routeTenantId, authFetch, setDraft]);
 
   useEffect(() => {
     if (searchParams.get("resumed") !== "1") return;

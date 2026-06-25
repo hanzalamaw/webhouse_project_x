@@ -1,5 +1,13 @@
 import AdminDashboard from "./admin/pages/Dashboard";
 import { getNavItems as getAdminNav } from "./admin/navConfig";
+import AdminUserManagement from "./admin/pages/UserManagement";
+import AdminRolesAndPermissions from "./admin/pages/RolesAndPermissions";
+import AdminAuditLogs from "./admin/pages/AuditLogs";
+import AdminSessions from "./admin/pages/Sessions";
+import AdminOrganizationSettings from "./admin/pages/OrganizationSettings";
+import AdminPlanSubscription from "./admin/pages/PlanSubscription";
+import AdminActivityAlerts from "./admin/pages/ActivityAlerts";
+import AdminHelpCenter from "./admin/pages/HelpCenter";
 
 import LogisticsDashboard from "./logistics-partners/pages/Dashboard";
 import { getNavItems as getLogisticsNav } from "./logistics-partners/navConfig";
@@ -37,6 +45,16 @@ export const TENANT_MODULE_DEFINITIONS = [
     aliases: [],
     Dashboard: AdminDashboard,
     getNavItems: getAdminNav,
+    sections: [
+      { path: "user-management", title: "User Management", Component: AdminUserManagement },
+      { path: "roles-and-permissions", title: "Roles & Permissions", Component: AdminRolesAndPermissions },
+      { path: "audit-logs", title: "Audit Logs", Component: AdminAuditLogs },
+      { path: "sessions", title: "Sessions", Component: AdminSessions },
+      { path: "organization-settings", title: "Organization Settings", Component: AdminOrganizationSettings },
+      { path: "plan-subscription", title: "Plan & Subscription", Component: AdminPlanSubscription },
+      { path: "activity-alerts", title: "Activity Alerts", Component: AdminActivityAlerts },
+      { path: "help-center", title: "Help Center", Component: AdminHelpCenter },
+    ],
   },
   {
     slug: "logistics-partners",

@@ -246,6 +246,12 @@ export default function ManageTenant() {
           }
         }}
         recordName={deleteRow?.company_name}
+        categoryLabel="tenant"
+        cascadeItems={[
+          "All users, roles, permissions, and sessions for this tenant",
+          "Subscription, payments, limits, and organization settings",
+          "Enabled modules, audit logs, and activity alerts",
+        ]}
         loading={deleting}
       />
     </div>

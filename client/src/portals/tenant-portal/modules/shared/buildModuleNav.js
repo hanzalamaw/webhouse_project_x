@@ -32,16 +32,10 @@ export function buildModuleNav(slug) {
       icon: TenantsIcon,
     },
     {
-      id: "roles-management",
-      label: "Roles Management",
-      path: `${base}/roles-management`,
+      id: "roles-and-permissions",
+      label: "Roles & Permissions",
+      path: `${base}/roles-and-permissions`,
       icon: ImpersonateIcon,
-    },
-    {
-      id: "permissions-management",
-      label: "Permissions Management",
-      path: `${base}/permissions-management`,
-      icon: ModuleIcon,
     },
     {
       id: "audit-logs",
@@ -84,8 +78,7 @@ export function buildModuleNav(slug) {
 
 export const MODULE_SECTION_ROUTES = [
   { path: "user-management", title: "User Management" },
-  { path: "roles-management", title: "Roles Management" },
-  { path: "permissions-management", title: "Permissions Management" },
+  { path: "roles-and-permissions", title: "Roles & Permissions" },
   { path: "audit-logs", title: "Audit Logs" },
   { path: "sessions", title: "Sessions" },
   { path: "organization-settings", title: "Organization Settings" },
