@@ -417,7 +417,18 @@ export const inventoryService = {
   async listWarehouses(tenantId, query) {
     const { page, limit, offset } = parsePagination(query);
     const { rows, total } = await inventoryRepository.listWarehouses(tenantId, { limit, offset });
-    return paginatedResponse(rows, total, page, limit);
+    const limits = await this.getWarehouseLimits(tenantId);
+    return { ...paginatedResponse(rows, total, page, limit), limits };
+  },
+
+  async getWarehouseLimits(tenantId) {
+    const max_warehouses = await inventoryRepository.getTenantWarehouseLimit(tenantId);
+    const warehouse_count = await inventoryRepository.countWarehouses(tenantId);
+    return {
+      max_warehouses,
+      warehouse_count,
+      can_create: max_warehouses <= 0 || warehouse_count < max_warehouses,
+    };
   },
 
   async getWarehouse(tenantId, id) {
@@ -425,6 +436,12 @@ export const inventoryService = {
   },
 
   async createWarehouse(tenantId, body) {
+    const limits = await this.getWarehouseLimits(tenantId);
+    if (!limits.can_create) {
+      throw new Error(
+        `Warehouse limit reached (${limits.warehouse_count}/${limits.max_warehouses}). Contact your administrator to increase the limit.`
+      );
+    }
     const warehouse_name = String(body.warehouse_name || "").trim();
     if (!warehouse_name) throw new Error("Warehouse name is required");
     const status = body.status || "active";

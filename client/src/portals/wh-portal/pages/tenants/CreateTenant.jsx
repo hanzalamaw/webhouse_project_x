@@ -16,6 +16,7 @@ import {
   BILLING_CYCLES,
 } from "../../../../api/client";
 import { formatPKR } from "../../../../utils/currency";
+import { formatModuleLabel, sortModulesByDisplayOrder } from "../../../tenant-portal/modules/registry";
 import {
   calcBillingTotal,
   calcRenewalDate,
@@ -365,7 +366,7 @@ export default function CreateTenant() {
     const map = new Map();
     planModules.forEach((m) => map.set(m.id, m));
     extraModules.forEach((m) => map.set(m.id, m));
-    return [...map.values()].sort((a, b) => a.module_name.localeCompare(b.module_name));
+    return sortModulesByDisplayOrder([...map.values()]);
   }, [planModules, extraModules]);
 
   const handleCancel = () => {
@@ -651,7 +652,7 @@ export default function CreateTenant() {
                     checked={draft.module_ids.includes(m.id)}
                     onChange={() => toggleModule(m.id)}
                   />
-                  {m.module_name}
+                  {formatModuleLabel(m)}
                   {!planModules.some((pm) => pm.id === m.id) && (
                     <span style={{ marginLeft: 6, fontSize: 12 }}>(new)</span>
                   )}
@@ -816,7 +817,7 @@ export default function CreateTenant() {
               value={
                 displayModules
                   .filter((m) => draft.module_ids.includes(m.id))
-                  .map((m) => m.module_name)
+                  .map((m) => formatModuleLabel(m))
                   .join(", ") || "—"
               }
             />

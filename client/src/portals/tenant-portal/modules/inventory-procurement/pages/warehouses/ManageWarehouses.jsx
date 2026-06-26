@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "../../../../../../context/AuthContext";
-import { apiFetch, fetchAllTableRows, TABLE_PAGE_SIZE } from "../../../../../../api/client";
+import { apiFetch, TABLE_PAGE_SIZE } from "../../../../../../api/client";
 import { PageHeader } from "../../../../../../components/PageHeader";
 import { Card } from "../../../../../../components/Card";
 import { DataTable } from "../../../../../../components/DataTable";
@@ -26,14 +26,17 @@ export default function ManageWarehouses() {
   const [editRow, setEditRow] = useState(null);
   const [deleteRow, setDeleteRow] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [limits, setLimits] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await fetchAllTableRows("/inventory/warehouses", authFetch);
-      setRows(data);
+      const res = await apiFetch("/inventory/warehouses?page=1&limit=10000&all=1", {}, authFetch);
+      setRows(res.data || []);
+      setLimits(res.limits || null);
     } catch {
       setRows([]);
+      setLimits(null);
     } finally {
       setLoading(false);
     }
@@ -112,7 +115,20 @@ export default function ManageWarehouses() {
 
   return (
     <div className="wh-page">
-      <PageHeader title="Warehouses" description="Create and manage warehouse locations for inventory storage." />
+      <PageHeader
+        title="Warehouses"
+        description={
+          limits?.max_warehouses
+            ? `Create and manage warehouse locations (${limits.warehouse_count ?? rows.length} / ${limits.max_warehouses} used).`
+            : "Create and manage warehouse locations for inventory storage."
+        }
+      />
+
+      {limits && !limits.can_create && (
+        <div className="wh-alert wh-alert--error">
+          Warehouse limit reached ({limits.warehouse_count}/{limits.max_warehouses}). Increase the limit in Admin → Plan & Subscription.
+        </div>
+      )}
 
       <Card className="wh-inv-create-card">
         <h3 className="wh-card__title">Create warehouse</h3>
@@ -127,7 +143,7 @@ export default function ManageWarehouses() {
           <FormField id="wh_location" label="Location" as="textarea" rows={3} value={form.location} onChange={(e) => setForm((f) => ({ ...f, location: e.target.value }))} />
           {error && <p className="wh-field__error">{error}</p>}
           {message && <p className="wh-form-message">{message}</p>}
-          <Button type="submit" disabled={saving}>{saving ? "Creating…" : "Create Warehouse"}</Button>
+          <Button type="submit" disabled={saving || limits?.can_create === false}>{saving ? "Creating…" : "Create Warehouse"}</Button>
         </form>
       </Card>
 

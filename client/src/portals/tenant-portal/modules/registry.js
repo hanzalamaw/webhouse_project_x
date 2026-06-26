@@ -20,6 +20,7 @@ import { getNavItems as getPosNav } from "./pos/navConfig";
 
 import CrmDashboard from "./crm/pages/Dashboard";
 import { getNavItems as getCrmNav } from "./crm/navConfig";
+import { CRM_ROUTES } from "./crm/routes.jsx";
 
 import EcommerceDashboard from "./ecommerce/pages/Dashboard";
 import { getNavItems as getEcommerceNav } from "./ecommerce/navConfig";
@@ -42,6 +43,7 @@ export const TENANT_MODULE_DEFINITIONS = [
   {
     slug: "admin",
     name: "Admin",
+    displayNumber: 1,
     letter: "A",
     aliases: [],
     Dashboard: AdminDashboard,
@@ -60,6 +62,7 @@ export const TENANT_MODULE_DEFINITIONS = [
   {
     slug: "logistics-partners",
     name: "Logistics Partners",
+    displayNumber: 2,
     letter: "L",
     aliases: ["Logistics", "Logistics Partners Management"],
     Dashboard: LogisticsDashboard,
@@ -68,6 +71,7 @@ export const TENANT_MODULE_DEFINITIONS = [
   {
     slug: "order-management",
     name: "Order Management",
+    displayNumber: 3,
     letter: "O",
     aliases: ["Orders"],
     Dashboard: OrderManagementDashboard,
@@ -76,6 +80,7 @@ export const TENANT_MODULE_DEFINITIONS = [
   {
     slug: "pos",
     name: "POS",
+    displayNumber: 4,
     letter: "P",
     aliases: [],
     Dashboard: PosDashboard,
@@ -84,14 +89,17 @@ export const TENANT_MODULE_DEFINITIONS = [
   {
     slug: "crm",
     name: "CRM",
+    displayNumber: 5,
     letter: "C",
     aliases: [],
     Dashboard: CrmDashboard,
     getNavItems: getCrmNav,
+    routes: CRM_ROUTES,
   },
   {
     slug: "ecommerce",
     name: "E-Commerce Integration",
+    displayNumber: 6,
     letter: "E",
     aliases: [],
     Dashboard: EcommerceDashboard,
@@ -100,6 +108,7 @@ export const TENANT_MODULE_DEFINITIONS = [
   {
     slug: "finance",
     name: "Finance & Accounting",
+    displayNumber: 7,
     letter: "F",
     aliases: [],
     Dashboard: FinanceDashboard,
@@ -108,6 +117,7 @@ export const TENANT_MODULE_DEFINITIONS = [
   {
     slug: "inventory-procurement",
     name: "Inventory & Procurement",
+    displayNumber: 8,
     letter: "I",
     aliases: ["Inventory"],
     Dashboard: InventoryDashboard,
@@ -124,6 +134,24 @@ export function moduleBasePath(slug) {
 
 export function getModuleBySlug(slug) {
   return TENANT_MODULE_DEFINITIONS.find((m) => m.slug === slug) || null;
+}
+
+export function getDefinitionForModuleName(moduleName) {
+  return TENANT_MODULE_DEFINITIONS.find((d) => moduleMatchesAssignment(d, moduleName)) || null;
+}
+
+export function sortModulesByDisplayOrder(modulesFromApi) {
+  return [...(modulesFromApi || [])].sort((a, b) => {
+    const da = getDefinitionForModuleName(a.module_name)?.displayNumber ?? 99;
+    const db = getDefinitionForModuleName(b.module_name)?.displayNumber ?? 99;
+    return da - db;
+  });
+}
+
+export function formatModuleLabel(moduleRow) {
+  const num = getDefinitionForModuleName(moduleRow?.module_name)?.displayNumber;
+  const name = moduleRow?.module_name || "";
+  return num ? `${num}. ${name}` : name;
 }
 
 export function moduleMatchesAssignment(definition, assignedModuleName) {

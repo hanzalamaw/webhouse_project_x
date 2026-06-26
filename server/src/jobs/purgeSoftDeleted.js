@@ -17,6 +17,10 @@ const TABLES_WITH_SOFT_DELETE = [
   "audit_logs",
   "sessions",
   "organization_settings",
+  "crm_leads",
+  "crm_customers",
+  "crm_customer_addresses",
+  "crm_customer_complaints",
 ];
 
 /**

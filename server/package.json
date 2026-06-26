@@ -6,7 +6,8 @@
     "setup:db": "node scripts/setup-db.js",
     "seed:sample": "node scripts/seed-sample.js",
     "check:db": "node scripts/check-db.js",
-    "purge:deleted": "node scripts/purge-soft-deleted.js"
+    "purge:deleted": "node scripts/purge-soft-deleted.js",
+    "migrate:crm": "node scripts/migrate-crm.js"
   },
   "name": "server",
   "version": "1.0.0",

@@ -413,6 +413,24 @@ export const inventoryRepository = {
   },
 
   // ── Warehouses ─────────────────────────────────────────────────────────────
+  async countWarehouses(tenantId) {
+    const [[row]] = await readDb.query(
+      `SELECT COUNT(*) AS total FROM inventory_warehouses
+       WHERE tenant_id = ? AND deleted_at IS NULL`,
+      [tenantId]
+    );
+    return Number(row.total || 0);
+  },
+
+  async getTenantWarehouseLimit(tenantId) {
+    const [rows] = await readDb.query(
+      `SELECT max_warehouses FROM wh_tenant_limits
+       WHERE tenant_id = ? AND deleted_at IS NULL LIMIT 1`,
+      [tenantId]
+    );
+    return Number(rows[0]?.max_warehouses || 0);
+  },
+
   async listWarehouses(tenantId, { limit, offset }) {
     const [rows] = await readDb.query(
       `SELECT w.id, w.warehouse_name, w.location, w.city, w.status, w.created_at, w.tenant_id,

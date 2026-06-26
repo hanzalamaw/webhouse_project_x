@@ -656,43 +656,14 @@ CREATE TABLE IF NOT EXISTS `inventory_stock_transfers` (
 -- =============================================================================
 
 -- -----------------------------------------------------
--- Table `crm_leads`
--- -----------------------------------------------------
-CREATE TABLE IF NOT EXISTS `crm_leads` (
-  `id` INT NOT NULL AUTO_INCREMENT,
-  `lead_name` VARCHAR(100) NOT NULL,
-  `phone` VARCHAR(45) NULL DEFAULT NULL,
-  `email` VARCHAR(100) NULL DEFAULT NULL,
-  `source` VARCHAR(100) NULL DEFAULT NULL,
-  `status` VARCHAR(45) NOT NULL,
-  `notes` TEXT NULL DEFAULT NULL,
-  `created_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  `assigned_to` INT NULL DEFAULT NULL,
-  `tenant_id` INT NOT NULL,
-  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
-  PRIMARY KEY (`id`),
-  INDEX `fk_crm_leads_users1_idx` (`assigned_to` ASC),
-  INDEX `fk_crm_leads_wh_tenants1_idx` (`tenant_id` ASC),
-  CONSTRAINT `fk_crm_leads_users1`
-    FOREIGN KEY (`assigned_to`)
-    REFERENCES `users` (`id`)
-    ON DELETE CASCADE
-    ON UPDATE CASCADE,
-  CONSTRAINT `fk_crm_leads_wh_tenants1`
-    FOREIGN KEY (`tenant_id`)
-    REFERENCES `wh_tenants` (`id`)
-    ON DELETE CASCADE
-    ON UPDATE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- -----------------------------------------------------
 -- Table `crm_customers`
 -- -----------------------------------------------------
 CREATE TABLE IF NOT EXISTS `crm_customers` (
   `id` INT NOT NULL AUTO_INCREMENT,
   `customer_name` VARCHAR(100) NOT NULL,
   `company_name` VARCHAR(100) NULL DEFAULT NULL,
+  `customer_type` VARCHAR(45) NOT NULL DEFAULT 'retailer',
+  `tags` VARCHAR(500) NULL DEFAULT NULL,
   `phone` VARCHAR(45) NULL DEFAULT NULL,
   `email` VARCHAR(100) NULL DEFAULT NULL,
   `status` VARCHAR(45) NOT NULL,
@@ -740,6 +711,46 @@ CREATE TABLE IF NOT EXISTS `crm_customer_addresses` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------
+-- Table `crm_leads`
+-- -----------------------------------------------------
+CREATE TABLE IF NOT EXISTS `crm_leads` (
+  `id` INT NOT NULL AUTO_INCREMENT,
+  `lead_name` VARCHAR(100) NOT NULL,
+  `phone` VARCHAR(45) NULL DEFAULT NULL,
+  `email` VARCHAR(100) NULL DEFAULT NULL,
+  `company_name` VARCHAR(100) NULL DEFAULT NULL,
+  `source` VARCHAR(100) NULL DEFAULT NULL,
+  `status` VARCHAR(45) NOT NULL,
+  `notes` TEXT NULL DEFAULT NULL,
+  `created_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `assigned_to` INT NULL DEFAULT NULL,
+  `converted_customer_id` INT NULL DEFAULT NULL,
+  `converted_at` TIMESTAMP NULL DEFAULT NULL,
+  `tenant_id` INT NOT NULL,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  INDEX `fk_crm_leads_users1_idx` (`assigned_to` ASC),
+  INDEX `fk_crm_leads_converted_customer_idx` (`converted_customer_id` ASC),
+  INDEX `fk_crm_leads_wh_tenants1_idx` (`tenant_id` ASC),
+  CONSTRAINT `fk_crm_leads_users1`
+    FOREIGN KEY (`assigned_to`)
+    REFERENCES `users` (`id`)
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
+  CONSTRAINT `fk_crm_leads_converted_customer`
+    FOREIGN KEY (`converted_customer_id`)
+    REFERENCES `crm_customers` (`id`)
+    ON DELETE SET NULL
+    ON UPDATE CASCADE,
+  CONSTRAINT `fk_crm_leads_wh_tenants1`
+    FOREIGN KEY (`tenant_id`)
+    REFERENCES `wh_tenants` (`id`)
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- -----------------------------------------------------
 -- Table `crm_customer_complaints`
 -- -----------------------------------------------------
 CREATE TABLE IF NOT EXISTS `crm_customer_complaints` (
@@ -748,15 +759,19 @@ CREATE TABLE IF NOT EXISTS `crm_customer_complaints` (
   `description` TEXT NULL DEFAULT NULL,
   `status` VARCHAR(45) NOT NULL,
   `priority` VARCHAR(45) NOT NULL,
+  `issue_type` VARCHAR(45) NOT NULL DEFAULT 'complaint',
   `created_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
   `resolved_at` TIMESTAMP NULL DEFAULT NULL,
+  `resolution_note` TEXT NULL DEFAULT NULL,
   `customer_id` INT NOT NULL,
   `user_id` INT NOT NULL,
+  `assigned_to` INT NULL DEFAULT NULL,
   `tenant_id` INT NOT NULL,
   `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   INDEX `fk_crm_customer_complaints_crm_customers1_idx` (`customer_id` ASC),
   INDEX `fk_crm_customer_complaints_users1_idx` (`user_id` ASC),
+  INDEX `fk_crm_customer_complaints_assigned_idx` (`assigned_to` ASC),
   INDEX `fk_crm_customer_complaints_wh_tenants1_idx` (`tenant_id` ASC),
   CONSTRAINT `fk_crm_customer_complaints_crm_customers1`
     FOREIGN KEY (`customer_id`)
@@ -767,6 +782,11 @@ CREATE TABLE IF NOT EXISTS `crm_customer_complaints` (
     FOREIGN KEY (`user_id`)
     REFERENCES `users` (`id`)
     ON DELETE CASCADE
+    ON UPDATE CASCADE,
+  CONSTRAINT `fk_crm_customer_complaints_assigned`
+    FOREIGN KEY (`assigned_to`)
+    REFERENCES `users` (`id`)
+    ON DELETE SET NULL
     ON UPDATE CASCADE,
   CONSTRAINT `fk_crm_customer_complaints_wh_tenants1`
     FOREIGN KEY (`tenant_id`)

@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "../../../components/Button";
 import { useAuth } from "../../../context/AuthContext";
-import { moduleBasePath, TENANT_MODULE_DEFINITIONS } from "../modules/registry";
+import { moduleBasePath } from "../modules/registry";
 import { useTenantModules } from "../hooks/useTenantModules";
 import heroImage from "../../../assets/Main top-right Image.png";
 import adminImage from "../../../assets/Admin.png";
@@ -47,11 +47,6 @@ function getGreeting() {
 function getDisplayName(user) {
   const name = user?.name || user?.username || "";
   return name.split(" ")[0] || "there";
-}
-
-function getModuleNumber(slug) {
-  const index = TENANT_MODULE_DEFINITIONS.findIndex((m) => m.slug === slug);
-  return index >= 0 ? index + 1 : null;
 }
 
 export default function ModuleHub() {
@@ -136,9 +131,7 @@ export default function ModuleHub() {
 
         {!loading && filtered.length > 0 && (
           <div className="wh-module-grid">
-            {filtered.map((mod) => {
-              const number = getModuleNumber(mod.slug);
-              return (
+            {filtered.map((mod, index) => (
                 <button
                   key={mod.slug}
                   type="button"
@@ -152,7 +145,7 @@ export default function ModuleHub() {
                   />
                   <div className="wh-module-card__content">
                     <h2 className="wh-module-card__title">
-                      {number}. {mod.name}
+                      {index + 1}. {mod.name}
                     </h2>
                     <p className="wh-module-card__desc">
                       {MODULE_DESCRIPTIONS[mod.slug]}
@@ -165,8 +158,7 @@ export default function ModuleHub() {
                     </svg>
                   </span>
                 </button>
-              );
-            })}
+            ))}
           </div>
         )}
 
