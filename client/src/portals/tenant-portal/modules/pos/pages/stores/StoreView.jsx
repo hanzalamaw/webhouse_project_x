@@ -173,7 +173,7 @@ export default function StoreView() {
           <form onSubmit={addTerminal} className="wh-form-stack" style={{ marginTop: 12 }}>
             <div className="wh-form-grid wh-form-grid--3">
               <FormField id="terminal_name" label="Terminal name" value={terminalForm.terminal_name} onChange={(e) => setTerminalForm((f) => ({ ...f, terminal_name: e.target.value }))} required />
-              <FormField id="device_code" label="Machine code" value={terminalForm.device_code} onChange={(e) => setTerminalForm((f) => ({ ...f, device_code: e.target.value }))} required />
+              <FormField id="device_code" label="Terminal code" value={terminalForm.device_code} onChange={(e) => setTerminalForm((f) => ({ ...f, device_code: e.target.value }))} required />
               <FormField id="status" label="Status" as="select" value={terminalForm.status} onChange={(e) => setTerminalForm((f) => ({ ...f, status: e.target.value }))}>
                 {TERMINAL_STATUSES.map((s) => <option key={s} value={s}>{TERMINAL_STATUS_LABELS[s] || s}</option>)}
               </FormField>

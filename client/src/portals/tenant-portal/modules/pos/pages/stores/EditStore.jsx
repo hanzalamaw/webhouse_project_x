@@ -8,7 +8,7 @@ import { FormField } from "../../../../../../components/FormField";
 import { Button } from "../../../../../../components/Button";
 import { FormBlock } from "../../../../../../components/FormBlock";
 import { FormPageLayout, FormActions } from "../../../../../../components/FormPageLayout";
-import { MODULE_BASE, OUTLET_STATUSES, OUTLET_STATUS_LABELS } from "../../constants";
+import { MODULE_BASE, OUTLET_STATUSES, OUTLET_STATUS_LABELS, TERMINAL_STATUSES, TERMINAL_STATUS_LABELS } from "../../constants";
 
 const EMPTY = {
   outlet_name: "",
@@ -30,12 +30,24 @@ function timeForApi(value) {
   return value.length === 5 ? `${value}:00` : value;
 }
 
+function newTerminalRow(existing = null) {
+  return {
+    _key: existing?.id ? `t-${existing.id}` : `t-${Date.now()}-${Math.random()}`,
+    id: existing?.id || null,
+    terminal_name: existing?.terminal_name || "",
+    device_code: existing?.device_code || "",
+    status: existing?.status || "active",
+  };
+}
+
 export default function EditStore() {
   const { storeId } = useParams();
   const { authFetch } = useAuth();
-  const { canEdit, readOnly } = useModulePermission("pos");
+  const { canEdit, canCreate, readOnly } = useModulePermission("pos");
   const navigate = useNavigate();
   const [form, setForm] = useState(EMPTY);
+  const [terminals, setTerminals] = useState([]);
+  const [removedTerminalIds, setRemovedTerminalIds] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -44,9 +56,12 @@ export default function EditStore() {
 
   useEffect(() => {
     setLoading(true);
-    apiFetch(`/pos/outlets`, {}, authFetch)
-      .then((res) => {
-        const row = (res.data || res || []).find((o) => String(o.id) === String(storeId));
+    Promise.all([
+      apiFetch("/pos/outlets", {}, authFetch),
+      apiFetch("/pos/terminals", {}, authFetch),
+    ])
+      .then(([outletRes, terminalRes]) => {
+        const row = (outletRes.data || []).find((o) => String(o.id) === String(storeId));
         if (!row) throw new Error("Store not found");
         setForm({
           outlet_name: row.outlet_name || "",
@@ -57,6 +72,10 @@ export default function EditStore() {
           store_close_time: timeForInput(row.store_close_time) || "21:00",
           opening_balance: String(row.opening_balance ?? 0),
         });
+        const storeTerminals = (terminalRes.data || []).filter(
+          (t) => String(t.outlet_id) === String(storeId)
+        );
+        setTerminals(storeTerminals.length ? storeTerminals.map((t) => newTerminalRow(t)) : [newTerminalRow()]);
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
@@ -77,12 +96,42 @@ export default function EditStore() {
           store_close_time: timeForApi(form.store_close_time),
         }),
       }, authFetch);
+
+      const validTerminals = terminals.filter((t) => t.terminal_name.trim() && t.device_code.trim());
+      if (!validTerminals.length) throw new Error("Add at least one terminal with name and terminal code.");
+      const codes = validTerminals.map((t) => t.device_code.trim());
+      if (new Set(codes).size !== codes.length) throw new Error("Terminal codes must be unique.");
+
+      for (const id of removedTerminalIds) {
+        await apiFetch(`/pos/terminals/${id}`, { method: "DELETE" }, authFetch);
+      }
+
+      for (const t of validTerminals) {
+        const body = {
+          terminal_name: t.terminal_name.trim(),
+          device_code: t.device_code.trim(),
+          status: t.status,
+          outlet_id: Number(storeId),
+        };
+        if (t.id) {
+          await apiFetch(`/pos/terminals/${t.id}`, { method: "PUT", body: JSON.stringify(body) }, authFetch);
+        } else if (canCreate) {
+          await apiFetch("/pos/terminals", { method: "POST", body: JSON.stringify(body) }, authFetch);
+        }
+      }
+
       navigate(`${MODULE_BASE}/stores/${storeId}`);
     } catch (err) {
       setError(err.message);
     } finally {
       setSaving(false);
     }
+  };
+
+  const removeTerminal = (row) => {
+    if (terminals.length <= 1) return;
+    if (row.id) setRemovedTerminalIds((ids) => [...ids, row.id]);
+    setTerminals((rows) => rows.filter((r) => r._key !== row._key));
   };
 
   if (loading) {
@@ -98,7 +147,7 @@ export default function EditStore() {
       <FormPageLayout>
         <PageHeader
           title="Edit Store"
-          description="Update store location, hours, and opening balance."
+          description="Update store details, hours, and terminals."
           actions={<Button variant="secondary" onClick={() => navigate(`${MODULE_BASE}/stores/${storeId}`)}>Back to store</Button>}
         />
         <form onSubmit={submit} className="wh-form-stack">
@@ -121,6 +170,37 @@ export default function EditStore() {
               <FormField id="store_open_time" label="Store open" type="time" value={form.store_open_time} onChange={(e) => setForm((f) => ({ ...f, store_open_time: e.target.value }))} disabled={disabled} required />
               <FormField id="store_close_time" label="Store close" type="time" value={form.store_close_time} onChange={(e) => setForm((f) => ({ ...f, store_close_time: e.target.value }))} disabled={disabled} />
             </div>
+          </FormBlock>
+
+          <FormBlock title="Terminals" description="Terminal codes must be unique across your stores. Other tenants may reuse the same codes.">
+            <div className="wh-inv-line-items">
+              {terminals.map((t, idx) => (
+                <div key={t._key} className="wh-inv-line-item">
+                  <div className="wh-inv-line-item__head">
+                    <strong>Terminal {idx + 1}</strong>
+                    {terminals.length > 1 && !disabled && (
+                      <Button type="button" variant="secondary" className="wh-btn--sm" onClick={() => removeTerminal(t)}>
+                        Remove
+                      </Button>
+                    )}
+                  </div>
+                  <div className="wh-form-grid wh-form-grid--3">
+                    <FormField id={`terminal_name_${t._key}`} label="Terminal name" value={t.terminal_name} onChange={(e) => setTerminals((rows) => rows.map((r) => r._key === t._key ? { ...r, terminal_name: e.target.value } : r))} disabled={disabled} required />
+                    <FormField id={`device_code_${t._key}`} label="Terminal code" value={t.device_code} onChange={(e) => setTerminals((rows) => rows.map((r) => r._key === t._key ? { ...r, device_code: e.target.value } : r))} disabled={disabled} required />
+                    <FormField id={`terminal_status_${t._key}`} label="Status" as="select" value={t.status} onChange={(e) => setTerminals((rows) => rows.map((r) => r._key === t._key ? { ...r, status: e.target.value } : r))} disabled={disabled}>
+                      {TERMINAL_STATUSES.map((s) => <option key={s} value={s}>{TERMINAL_STATUS_LABELS[s] || s}</option>)}
+                    </FormField>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {!disabled && canCreate && (
+              <div className="wh-inv-warehouse-add">
+                <Button type="button" variant="secondary" onClick={() => setTerminals((rows) => [...rows, newTerminalRow()])}>
+                  Add terminal
+                </Button>
+              </div>
+            )}
           </FormBlock>
 
           {error && <p className="wh-field__error">{error}</p>}

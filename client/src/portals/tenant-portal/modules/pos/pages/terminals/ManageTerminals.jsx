@@ -61,7 +61,7 @@ export default function ManageTerminals() {
 
   const columns = [
     { key: "terminal_name", label: "Terminal" },
-    { key: "device_code", label: "Machine code" },
+    { key: "device_code", label: "Terminal code" },
     { key: "outlet_name", label: "Outlet" },
     { key: "status", label: "Status", render: (r) => <StatusBadge status={r.status} /> },
     { key: "created_at", label: "Created", format: formatDateTime },
@@ -89,7 +89,7 @@ export default function ManageTerminals() {
     <div className="wh-page">
       <PageHeader
         title="Terminals"
-        description="Register checkout devices. Cashiers pair using the machine code in POS Terminal."
+        description="Register checkout devices. Cashiers pair using the terminal code in POS Terminal."
         actions={canCreate ? <Button onClick={() => navigate(`${MODULE_BASE}/terminals/create`)} disabled={!outlets.length}>Create Terminal</Button> : null}
       />
 

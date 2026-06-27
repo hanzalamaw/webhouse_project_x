@@ -479,6 +479,19 @@ export const crmRepository = {
     }));
   },
 
+  async findCustomersByPhone(tenantId, phone) {
+    const p = String(phone || "").trim();
+    if (!p) return [];
+    const [rows] = await readDb.query(
+      `SELECT id, customer_name, company_name, customer_type, phone, email, status
+       FROM crm_customers
+       WHERE tenant_id = ? AND deleted_at IS NULL AND phone = ?
+       ORDER BY customer_name ASC, id ASC`,
+      [tenantId, p]
+    );
+    return rows;
+  },
+
   async findCustomerByPhoneOrEmail(tenantId, phone, email) {
     const p = String(phone || "").trim();
     const e = String(email || "").trim().toLowerCase();

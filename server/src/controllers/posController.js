@@ -166,6 +166,15 @@ export const posController = {
     }
   },
 
+  async lookupTerminal(req, res) {
+    try {
+      const deviceCode = req.query.device_code || req.query.code || "";
+      res.json(await posService.lookupTerminalByCode(req.tenantId, deviceCode));
+    } catch (e) {
+      res.status(500).json({ message: e.message });
+    }
+  },
+
   async connectTerminal(req, res) {
     try {
       const result = await posService.connectTerminal(

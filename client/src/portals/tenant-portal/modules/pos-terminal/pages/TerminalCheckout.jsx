@@ -55,10 +55,13 @@ export default function TerminalCheckout() {
   const [register, setRegister] = useState(null);
   const [drawer, setDrawer] = useState(null);
   const [products, setProducts] = useState([]);
-  const [outlets, setOutlets] = useState([]);
-  const [terminals, setTerminals] = useState([]);
-  const [selectedOutletId, setSelectedOutletId] = useState("");
   const [deviceCode, setDeviceCode] = useState(DEVICE_CODE);
+  const [terminals, setTerminals] = useState([]);
+  const [terminalsLoading, setTerminalsLoading] = useState(false);
+  const [terminalsLoadFailed, setTerminalsLoadFailed] = useState(false);
+  const [lookupFallback, setLookupFallback] = useState(null);
+  const [lookupChecking, setLookupChecking] = useState(false);
+  const [sessionRestoring, setSessionRestoring] = useState(false);
 
   const [cart, setCart] = useState([]);
   const [search, setSearch] = useState("");
@@ -72,9 +75,8 @@ export default function TerminalCheckout() {
   const [customerModalLoading, setCustomerModalLoading] = useState(false);
   const [customerFoundModalOpen, setCustomerFoundModalOpen] = useState(false);
   const [customerCreateModalOpen, setCustomerCreateModalOpen] = useState(false);
-  const [lookupCustomerResult, setLookupCustomerResult] = useState(null);
+  const [lookupCustomers, setLookupCustomers] = useState([]);
   const [newCustomerName, setNewCustomerName] = useState("");
-  const [lastLookedUpPhone, setLastLookedUpPhone] = useState("");
 
   const [loading, setLoading] = useState(false);
   const [connecting, setConnecting] = useState(false);
@@ -86,51 +88,12 @@ export default function TerminalCheckout() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
 
-  const loadGateData = useCallback(async () => {
-    try {
-      const [outletRes, terminalRes] = await Promise.all([
-        apiFetch("/pos/outlets", {}, authFetch),
-        apiFetch("/pos/terminals", {}, authFetch),
-      ]);
-      const rows = Array.isArray(outletRes?.data) ? outletRes.data : [];
-      const terminalRows = Array.isArray(terminalRes?.data) ? terminalRes.data : [];
-      setOutlets(rows);
-      setTerminals(terminalRows);
-    } catch (err) {
-      setError(err.message || "Could not load stores.");
-    }
-  }, [authFetch]);
-
-  const terminalsForCode = useMemo(() => {
-    const code = deviceCode.trim();
-    if (!code) return [];
-    return terminals.filter(
-      (terminal) =>
-        String(terminal.device_code) === code &&
-        String(terminal.status || "active").toLowerCase() === "active"
-    );
-  }, [terminals, deviceCode]);
-
-  const connectOutletOptions = useMemo(() => {
-    const activeOutlets = outlets.filter((outlet) => outlet.status === "active");
-    if (!terminalsForCode.length) return activeOutlets;
-    const outletIds = new Set(terminalsForCode.map((terminal) => String(terminal.outlet_id)));
-    return activeOutlets.filter((outlet) => outletIds.has(String(outlet.id)));
-  }, [outlets, terminalsForCode]);
-
-  useEffect(() => {
-    if (terminalsForCode.length === 1) {
-      setSelectedOutletId(String(terminalsForCode[0].outlet_id));
-      return;
-    }
-    if (
-      selectedOutletId &&
-      terminalsForCode.length > 1 &&
-      !terminalsForCode.some((terminal) => String(terminal.outlet_id) === String(selectedOutletId))
-    ) {
-      setSelectedOutletId("");
-    }
-  }, [terminalsForCode, selectedOutletId]);
+  const applySessionResponse = useCallback((res) => {
+    setTerminal(res.terminal || null);
+    setRegister(res.register || null);
+    setDrawer(res.drawer || null);
+    setProducts(Array.isArray(res.products) ? res.products : []);
+  }, []);
 
   const refreshProducts = useCallback(async (terminalId) => {
     const id = terminalId ?? terminal?.id;
@@ -146,17 +109,9 @@ export default function TerminalCheckout() {
     }
   }, [authFetch, terminal?.id]);
 
-  const applySessionResponse = useCallback((res) => {
-    setTerminal(res.terminal || null);
-    setRegister(res.register || null);
-    setDrawer(res.drawer || null);
-    setProducts(Array.isArray(res.products) ? res.products : []);
-    if (res?.terminal?.outlet_id) setSelectedOutletId(String(res.terminal.outlet_id));
-  }, []);
-
   const restoreSession = useCallback(async (stored) => {
     if (!stored?.terminal_id) return;
-    setLoading(true);
+    setSessionRestoring(true);
     setError("");
     try {
       const res = await apiFetch(`/pos/terminal/${stored.terminal_id}/session`, {}, authFetch);
@@ -170,17 +125,98 @@ export default function TerminalCheckout() {
       setDrawer(null);
       setProducts([]);
     } finally {
-      setLoading(false);
+      setSessionRestoring(false);
     }
   }, [applySessionResponse, authFetch]);
 
-  useEffect(() => {
-    loadGateData().catch(() => {});
-  }, [loadGateData]);
+  const loadGateTerminals = useCallback(async () => {
+    setTerminalsLoading(true);
+    setTerminalsLoadFailed(false);
+    try {
+      const res = await apiFetch("/pos/terminals", {}, authFetch);
+      setTerminals(Array.isArray(res?.data) ? res.data : []);
+    } catch (err) {
+      setTerminals([]);
+      setTerminalsLoadFailed(true);
+      setError("");
+    } finally {
+      setTerminalsLoading(false);
+    }
+  }, [authFetch]);
+
+  const matchedTerminal = useMemo(() => {
+    const code = deviceCode.trim();
+    if (!code) return null;
+    return (
+      terminals.find(
+        (row) =>
+          String(row.device_code || "").trim() === code &&
+          String(row.status || "active").toLowerCase() === "active"
+      ) || null
+    );
+  }, [terminals, deviceCode]);
+
+  const inactiveTerminal = useMemo(() => {
+    const code = deviceCode.trim();
+    if (!code || matchedTerminal) return null;
+    return terminals.find((row) => String(row.device_code || "").trim() === code) || null;
+  }, [terminals, deviceCode, matchedTerminal]);
+
+  const resolvedTerminal = useMemo(() => {
+    if (matchedTerminal) return matchedTerminal;
+    if (
+      lookupFallback?.found &&
+      String(lookupFallback.status || "active").toLowerCase() === "active"
+    ) {
+      return lookupFallback;
+    }
+    return null;
+  }, [matchedTerminal, lookupFallback]);
 
   useEffect(() => {
     if (session?.terminal_id) restoreSession(session).catch(() => {});
   }, [session, restoreSession]);
+
+  useEffect(() => {
+    if (terminal?.id) return undefined;
+    loadGateTerminals().catch(() => {});
+    return undefined;
+  }, [terminal?.id, loadGateTerminals]);
+
+  useEffect(() => {
+    if (terminal?.id || terminalsLoading) return undefined;
+    if (!terminalsLoadFailed && terminals.length > 0) return undefined;
+
+    const code = deviceCode.trim();
+    if (!code) {
+      setLookupFallback(null);
+      setLookupChecking(false);
+      return undefined;
+    }
+
+    let cancelled = false;
+    setLookupChecking(true);
+    const timer = window.setTimeout(async () => {
+      try {
+        const res = await apiFetch(
+          `/pos/terminal/lookup?device_code=${encodeURIComponent(code)}`,
+          {},
+          authFetch
+        );
+        if (cancelled) return;
+        setLookupFallback(res?.found ? res : null);
+      } catch {
+        if (!cancelled) setLookupFallback(null);
+      } finally {
+        if (!cancelled) setLookupChecking(false);
+      }
+    }, 300);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [deviceCode, terminal?.id, terminalsLoading, terminalsLoadFailed, terminals.length, authFetch]);
 
   useEffect(() => {
     if (!terminal?.id) return undefined;
@@ -197,14 +233,14 @@ export default function TerminalCheckout() {
     setError("");
     setMessage("");
     try {
-      const outletId = Number(selectedOutletId);
-      if (!outletId) throw new Error("Store is required.");
+      const code = deviceCode.trim();
+      if (!code) throw new Error("Terminal code is required.");
+      if (!resolvedTerminal) {
+        throw new Error("Enter a valid active terminal code.");
+      }
       const res = await apiFetch("/pos/terminal/connect", {
         method: "POST",
-        body: JSON.stringify({
-          outlet_id: outletId,
-          device_code: deviceCode.trim(),
-        }),
+        body: JSON.stringify({ device_code: code }),
       }, authFetch);
       applySessionResponse(res);
       const stored = { terminal_id: res.terminal.id };
@@ -241,6 +277,9 @@ export default function TerminalCheckout() {
 
   const addToCart = (product) => {
     const unitPrice = getProductUnitPrice(product);
+    const sellingPrice = Number(product?.selling_price) || 0;
+    const lineDiscount = Number(product?.discount) || 0;
+    const lineTax = Number(product?.tax) || 0;
     setCart((prev) => {
       const index = prev.findIndex((line) => line.product_id === product.id);
       if (index >= 0) {
@@ -255,6 +294,9 @@ export default function TerminalCheckout() {
           product_name: product.product_name,
           sku: product.sku,
           unit_price: unitPrice,
+          selling_price: sellingPrice,
+          line_discount: lineDiscount,
+          line_tax: lineTax,
           quantity: 1,
         },
       ];
@@ -273,11 +315,24 @@ export default function TerminalCheckout() {
     );
   };
 
+  const setLineQuantity = (productId, rawValue) => {
+    const parsed = parseInt(String(rawValue).trim(), 10);
+    if (!Number.isFinite(parsed) || parsed < 1) return;
+    setCart((prev) =>
+      prev.map((line) =>
+        line.product_id === productId ? { ...line, quantity: parsed } : line
+      )
+    );
+  };
+
+  const removeFromCart = (productId) => {
+    setCart((prev) => prev.filter((line) => line.product_id !== productId));
+  };
+
   const clearCustomerSelection = () => {
     setSelectedCustomer(null);
-    setLookupCustomerResult(null);
+    setLookupCustomers([]);
     setCustomerPhone("");
-    setLastLookedUpPhone("");
   };
 
   const runCustomerLookup = async () => {
@@ -286,7 +341,6 @@ export default function TerminalCheckout() {
       clearCustomerSelection();
       return;
     }
-    if (phone === lastLookedUpPhone) return;
     setLookupLoading(true);
     setError("");
     try {
@@ -295,12 +349,17 @@ export default function TerminalCheckout() {
         {},
         authFetch
       );
-      setLastLookedUpPhone(phone);
-      if (lookup?.found && lookup?.customer) {
-        setLookupCustomerResult(lookup.customer);
+      const customers = Array.isArray(lookup?.customers)
+        ? lookup.customers
+        : lookup?.customer
+          ? [lookup.customer]
+          : [];
+      if (lookup?.found && customers.length) {
+        setLookupCustomers(customers);
+        setNewCustomerName("");
         setCustomerFoundModalOpen(true);
       } else {
-        setLookupCustomerResult(null);
+        setLookupCustomers([]);
         setNewCustomerName("");
         setCustomerCreateModalOpen(true);
       }
@@ -336,8 +395,9 @@ export default function TerminalCheckout() {
         }),
       }, authFetch);
       setSelectedCustomer(created);
-      setLookupCustomerResult(created);
+      setLookupCustomers([created]);
       setCustomerCreateModalOpen(false);
+      setCustomerFoundModalOpen(false);
       setMessage(`Customer ${created.customer_name} linked to this sale.`);
     } catch (err) {
       setError(err.message || "Could not create customer.");
@@ -346,9 +406,36 @@ export default function TerminalCheckout() {
     }
   };
 
+  const handleUseExistingCustomer = (customer) => {
+    if (!customer) return;
+    setSelectedCustomer(customer);
+    setMessage(`Customer ${customer.customer_name} linked to this sale.`);
+    setCustomerFoundModalOpen(false);
+  };
+
+  const handleCreateNewFromFound = async () => {
+    await handleCreateCustomer();
+  };
+
   const subtotal = cartSubtotal(cart);
   const discount = Math.max(0, Number(discountAmount) || 0);
   const total = Math.max(0, round2(subtotal - discount));
+  const cartPricing = useMemo(() => {
+    let grossSubtotal = 0;
+    let productDiscountTotal = 0;
+    let productTaxTotal = 0;
+    for (const line of cart) {
+      const qty = Number(line.quantity) || 0;
+      grossSubtotal += (Number(line.selling_price) || 0) * qty;
+      productDiscountTotal += (Number(line.line_discount) || 0) * qty;
+      productTaxTotal += (Number(line.line_tax) || 0) * qty;
+    }
+    return {
+      grossSubtotal: round2(grossSubtotal),
+      productDiscountTotal: round2(productDiscountTotal),
+      productTaxTotal: round2(productTaxTotal),
+    };
+  }, [cart]);
   const expectedDrawer = round2(
     Number(register?.opening_balance || 0) + Number(register?.cash_collected || 0)
   );
@@ -405,57 +492,55 @@ export default function TerminalCheckout() {
   };
 
   if (!session?.terminal_id || !terminal) {
+    const canConnect = Boolean(resolvedTerminal) && !sessionRestoring;
+    const codeEntered = Boolean(deviceCode.trim());
+    const codeChecking = codeEntered && (terminalsLoading || lookupChecking);
+    const inactiveMatch =
+      inactiveTerminal ||
+      (lookupFallback?.found && String(lookupFallback.status || "active").toLowerCase() !== "active"
+        ? lookupFallback
+        : null);
     return (
-      <div className="pos-terminal__gate">
+      <div className="pos-terminal pos-terminal__gate">
         <div className="pos-terminal__gate-inner">
           <div className="pos-terminal__gate-brand">
             <h1>POS Terminal</h1>
-            <p className="wh-muted">Choose your store and connect this checkout machine.</p>
+            <p className="wh-muted">Enter your terminal code to open checkout.</p>
           </div>
           <Card>
             <h2 className="wh-card__title">Connect terminal</h2>
             {error && <p className="wh-field__error">{error}</p>}
             <form className="wh-form" onSubmit={connectTerminal}>
               <FormField
-                id="outlet_id"
-                label="Store"
-                as="select"
-                value={selectedOutletId}
-                onChange={(event) => setSelectedOutletId(event.target.value)}
-                disabled={connecting}
-              >
-                <option value="">Select store</option>
-                {connectOutletOptions.map((outlet) => (
-                  <option key={outlet.id} value={String(outlet.id)}>
-                    {outlet.outlet_name}
-                  </option>
-                ))}
-              </FormField>
-              {deviceCode.trim() && terminalsForCode.length > 1 && (
-                <p className="wh-muted">
-                  Machine code <strong>{deviceCode.trim()}</strong> is registered at multiple stores. Pick the store where your products were created.
-                </p>
-              )}
-              {deviceCode.trim() && terminalsForCode.length === 0 && (
-                <p className="wh-field__error">
-                  No active terminal found with machine code <strong>{deviceCode.trim()}</strong>.
-                </p>
-              )}
-              <FormField
                 id="device_code"
-                label="Machine code"
+                label="Terminal code"
                 value={deviceCode}
                 onChange={(event) => setDeviceCode(event.target.value)}
                 autoFocus
                 disabled={connecting}
               />
+              {codeEntered && codeChecking && (
+                <p className="pos-terminal__code-status pos-terminal__code-status--checking">
+                  Checking terminal code…
+                </p>
+              )}
+              {codeEntered && !codeChecking && !resolvedTerminal && !inactiveMatch && (
+                <p className="pos-terminal__code-status pos-terminal__code-status--error">
+                  No terminal found with code <strong>{deviceCode.trim()}</strong>.
+                </p>
+              )}
+              {inactiveMatch && (
+                <p className="pos-terminal__code-status pos-terminal__code-status--error">
+                  Terminal <strong>{inactiveMatch.terminal_name}</strong> at {inactiveMatch.outlet_name} is inactive.
+                </p>
+              )}
               <p className="wh-muted">Default code is {DEVICE_CODE} unless your store uses a custom one.</p>
               <div className="wh-modal__actions" style={{ marginTop: 16, paddingTop: 0 }}>
                 <Button type="button" variant="secondary" onClick={() => navigate("/app")} disabled={connecting}>
                   All modules
                 </Button>
-                <Button type="submit" disabled={connecting || loading}>
-                  {connecting || loading ? "Connecting..." : "Open terminal"}
+                <Button type="submit" disabled={connecting || !canConnect}>
+                  {connecting ? "Connecting..." : "Open terminal"}
                 </Button>
               </div>
             </form>
@@ -577,7 +662,9 @@ export default function TerminalCheckout() {
           ) : filteredProducts.length ? (
             <div className="pos-terminal-v2__product-grid">
               {filteredProducts.map((product) => {
-                const unitPrice = getProductUnitPrice(product);
+                const sellingPrice = Number(product.selling_price) || 0;
+                const productDiscount = Number(product.discount) || 0;
+                const productTax = Number(product.tax) || 0;
                 return (
                   <button
                     key={product.id}
@@ -590,9 +677,23 @@ export default function TerminalCheckout() {
                       <span>SKU: {product.sku}</span>
                       <span>{product.category_name || "Uncategorized"}</span>
                     </div>
-                    <div className="pos-terminal-v2__product-price-row">
-                      <span className="pos-terminal-v2__product-price">{formatPKR(unitPrice)}</span>
-                      <span className="pos-terminal-v2__stock">Stock: {Number(product.available_qty || 0)}</span>
+                    <div className="pos-terminal-v2__product-price">{formatPKR(sellingPrice)}</div>
+                    {(productDiscount > 0 || productTax > 0) && (
+                      <div className="pos-terminal-v2__product-adjustments">
+                        {productDiscount > 0 && (
+                          <span className="pos-terminal-v2__adj pos-terminal-v2__adj--discount">
+                            Discount: {formatPKR(productDiscount)}
+                          </span>
+                        )}
+                        {productTax > 0 && (
+                          <span className="pos-terminal-v2__adj pos-terminal-v2__adj--tax">
+                            Tax: {formatPKR(productTax)}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                    <div className="pos-terminal-v2__product-stock">
+                      Stock: {Number(product.available_qty || 0)}
                     </div>
                   </button>
                 );
@@ -670,22 +771,43 @@ export default function TerminalCheckout() {
                   <div className="pos-terminal-v2__cart-row" key={line.product_id}>
                     <div className="pos-terminal-v2__cart-main">
                       <div className="pos-terminal-v2__cart-name">{line.product_name}</div>
+                      <div className="pos-terminal-v2__cart-price">
+                        {formatPKR(round2(line.quantity * line.unit_price))}
+                      </div>
                       <div className="pos-terminal-v2__cart-sub">
                         {line.sku} · {formatPKR(line.unit_price)} each
                       </div>
+                      {(line.line_discount > 0 || line.line_tax > 0) && (
+                        <div className="pos-terminal-v2__cart-adjustments">
+                          {line.line_discount > 0 && <span>Disc: {formatPKR(line.line_discount * line.quantity)}</span>}
+                          {line.line_tax > 0 && <span>Tax: {formatPKR(line.line_tax * line.quantity)}</span>}
+                        </div>
+                      )}
                     </div>
-                    <div className="pos-terminal-v2__cart-actions">
-                      <button type="button" onClick={() => changeQty(line.product_id, -1)}>
+                    <div className="pos-terminal-v2__cart-qty">
+                      <button type="button" aria-label="Decrease quantity" onClick={() => changeQty(line.product_id, -1)}>
                         -
                       </button>
-                      <span>{line.quantity}</span>
-                      <button type="button" onClick={() => changeQty(line.product_id, 1)}>
+                      <input
+                        type="number"
+                        min="1"
+                        step="1"
+                        className="pos-terminal-v2__cart-qty-input"
+                        value={line.quantity}
+                        onChange={(event) => setLineQuantity(line.product_id, event.target.value)}
+                        aria-label={`Quantity for ${line.product_name}`}
+                      />
+                      <button type="button" aria-label="Increase quantity" onClick={() => changeQty(line.product_id, 1)}>
                         +
                       </button>
                     </div>
-                    <div className="pos-terminal-v2__cart-line-total">
-                      {formatPKR(round2(line.quantity * line.unit_price))}
-                    </div>
+                    <button
+                      type="button"
+                      className="pos-terminal-v2__cart-remove"
+                      onClick={() => removeFromCart(line.product_id)}
+                    >
+                      Remove
+                    </button>
                   </div>
                 ))
               ) : (
@@ -714,7 +836,23 @@ export default function TerminalCheckout() {
 
           <div className="pos-terminal-v2__panel">
             <div className="pos-terminal-v2__summary-row">
-              <span>Subtotal</span>
+              <span>Items subtotal</span>
+              <strong>{formatPKR(cartPricing.grossSubtotal)}</strong>
+            </div>
+            {cartPricing.productDiscountTotal > 0 && (
+              <div className="pos-terminal-v2__summary-row pos-terminal-v2__summary-row--deduction">
+                <span>Product discounts</span>
+                <strong>-{formatPKR(cartPricing.productDiscountTotal)}</strong>
+              </div>
+            )}
+            {cartPricing.productTaxTotal > 0 && (
+              <div className="pos-terminal-v2__summary-row">
+                <span>Product tax</span>
+                <strong>{formatPKR(cartPricing.productTaxTotal)}</strong>
+              </div>
+            )}
+            <div className="pos-terminal-v2__summary-row">
+              <span>Net subtotal</span>
               <strong>{formatPKR(subtotal)}</strong>
             </div>
             <FormField
@@ -726,6 +864,12 @@ export default function TerminalCheckout() {
               value={discountAmount}
               onChange={(event) => setDiscountAmount(event.target.value)}
             />
+            {discount > 0 && (
+              <div className="pos-terminal-v2__summary-row pos-terminal-v2__summary-row--deduction">
+                <span>Order discount applied</span>
+                <strong>-{formatPKR(discount)}</strong>
+              </div>
+            )}
             <div className="pos-terminal-v2__summary-row pos-terminal-v2__summary-row--total">
               <span>Total</span>
               <strong>{formatPKR(total)}</strong>
@@ -739,30 +883,84 @@ export default function TerminalCheckout() {
 
       <Modal
         open={customerFoundModalOpen}
-        onClose={() => setCustomerFoundModalOpen(false)}
-        title="Existing customer found"
+        onClose={() => !customerModalLoading && setCustomerFoundModalOpen(false)}
+        title={lookupCustomers.length > 1 ? "Customers found" : "Customer found"}
+        className="pos-terminal-customer-modal"
+        wide={lookupCustomers.length > 2}
+        footer={
+          <>
+            <Button
+              variant="secondary"
+              onClick={() => setCustomerFoundModalOpen(false)}
+              disabled={customerModalLoading}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleCreateNewFromFound}
+              disabled={customerModalLoading || !newCustomerName.trim()}
+            >
+              {customerModalLoading ? "Creating..." : "Create new & use"}
+            </Button>
+          </>
+        }
       >
-        <p className="wh-modal__text">
-          Use <strong>{lookupCustomerResult?.customer_name}</strong> for this sale?
+        <p className="pos-terminal-customer-modal__intro">
+          {lookupCustomers.length === 1
+            ? "This phone number is linked to one customer. Choose how to continue."
+            : `${lookupCustomers.length} customers are registered with this phone number. Select one or create a new customer.`}
         </p>
-        <p className="wh-muted" style={{ marginTop: 8 }}>
-          Phone: {lookupCustomerResult?.phone || customerPhone}
-        </p>
-        <div className="wh-modal__actions" style={{ paddingLeft: 0, paddingRight: 0 }}>
-          <Button variant="secondary" onClick={() => setCustomerFoundModalOpen(false)}>
-            Cancel
-          </Button>
-          <Button
-            onClick={() => {
-              if (lookupCustomerResult) {
-                setSelectedCustomer(lookupCustomerResult);
-                setMessage(`Customer ${lookupCustomerResult.customer_name} linked to this sale.`);
-              }
-              setCustomerFoundModalOpen(false);
-            }}
-          >
-            Use customer
-          </Button>
+
+        <div className="pos-terminal-customer-modal__phone-row">
+          <span className="pos-terminal-customer-modal__label">Phone</span>
+          <span className="pos-terminal-customer-modal__value">
+            {lookupCustomers[0]?.phone || customerPhone}
+          </span>
+        </div>
+
+        <div className="pos-terminal-customer-modal__list">
+          {lookupCustomers.map((customer) => (
+            <div className="pos-terminal-customer-modal__item" key={customer.id}>
+              <div className="pos-terminal-customer-modal__item-main">
+                <div className="pos-terminal-customer-modal__item-name">{customer.customer_name}</div>
+                {customer.company_name && (
+                  <div className="pos-terminal-customer-modal__item-meta">{customer.company_name}</div>
+                )}
+                {customer.customer_type && (
+                  <div className="pos-terminal-customer-modal__item-meta">
+                    {String(customer.customer_type).replace(/_/g, " ")}
+                  </div>
+                )}
+              </div>
+              <Button
+                type="button"
+                variant="secondary"
+                className="wh-btn--sm"
+                onClick={() => handleUseExistingCustomer(customer)}
+                disabled={customerModalLoading}
+              >
+                Use
+              </Button>
+            </div>
+          ))}
+        </div>
+
+        <div className="pos-terminal-customer-modal__divider" aria-hidden="true">
+          <span>or</span>
+        </div>
+
+        <div className="pos-terminal-customer-modal__new">
+          <h4 className="pos-terminal-customer-modal__section-title">Create a new customer</h4>
+          <p className="pos-terminal-customer-modal__hint">
+            Register a different name for the same phone number.
+          </p>
+          <FormField
+            id="found_new_customer_name"
+            label="New customer name"
+            value={newCustomerName}
+            onChange={(event) => setNewCustomerName(event.target.value)}
+            placeholder="Enter name for new customer"
+          />
         </div>
       </Modal>
 

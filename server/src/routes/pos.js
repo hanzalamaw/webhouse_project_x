@@ -2,6 +2,7 @@ import { posController } from "../controllers/posController.js";
 import { posInventoryController } from "../controllers/posInventoryController.js";
 import { tenantRouteAuth } from "../middleware/tenantRouteAuth.js";
 import { createTenantPermissionMiddleware } from "../middleware/tenantPermissions.js";
+import { tenantPermissionService } from "../services/tenantPermissionService.js";
 import { POS_MODULE, POS_TERMINAL_MODULE } from "../utils/posConstants.js";
 
 export function registerPosRoutes(app, verifyToken) {
@@ -17,6 +18,13 @@ export function registerPosRoutes(app, verifyToken) {
 
   const terminalView = requirePermission(POS_TERMINAL_MODULE, "view");
   const terminalCreate = requirePermission(POS_TERMINAL_MODULE, "create");
+  const posOrTerminalView = (req, res, next) => {
+    if (req.userRole !== "tenant") return next();
+    const ctx = req.tenantPermCtx;
+    if (tenantPermissionService.canAccess(ctx, POS_TERMINAL_MODULE, "view")) return next();
+    if (tenantPermissionService.canAccess(ctx, POS_MODULE, "view")) return next();
+    return res.status(403).json({ message: "Insufficient permissions" });
+  };
 
   app.get(`${base}/dashboard`, ...auth, view, posController.dashboard);
   app.get(`${base}/reference`, ...auth, view, posController.reference);
@@ -67,6 +75,7 @@ export function registerPosRoutes(app, verifyToken) {
   app.post(`${inv}/stock-transfers/:id/cancel`, ...auth, edit, posInventoryController.cancelTransfer);
 
   app.post(`${base}/terminal/connect`, ...auth, terminalView, posController.connectTerminal);
+  app.get(`${base}/terminal/lookup`, ...auth, posOrTerminalView, posController.lookupTerminal);
   app.get(`${base}/terminal/:terminalId/session`, ...auth, terminalView, posController.getTerminalSession);
   app.get(`${base}/terminal/:terminalId/products`, ...auth, terminalView, posController.getTerminalProducts);
   app.post(`${base}/terminal/:terminalId/shift-off`, ...auth, terminalView, posController.closeShift);

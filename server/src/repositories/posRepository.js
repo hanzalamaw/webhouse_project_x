@@ -77,6 +77,22 @@ export const posRepository = {
     return rows[0] || null;
   },
 
+  async findOutletByName(tenantId, outletName, excludeId = null) {
+    const name = String(outletName || "").trim();
+    if (!name) return null;
+    const params = [tenantId, name];
+    let sql = `SELECT id, outlet_name FROM pos_outlets
+      WHERE tenant_id = ? AND deleted_at IS NULL
+        AND LOWER(TRIM(outlet_name)) = LOWER(?)`;
+    if (excludeId != null) {
+      sql += " AND id != ?";
+      params.push(excludeId);
+    }
+    sql += " LIMIT 1";
+    const [rows] = await readDb.query(sql, params);
+    return rows[0] || null;
+  },
+
   async createOutlet(tenantId, data) {
     const [result] = await writeDb.query(
       `INSERT INTO pos_outlets (outlet_name, location, city, status, store_open_time, store_close_time, opening_balance, tenant_id)
@@ -162,6 +178,23 @@ export const posRepository = {
        LIMIT 1`,
       params
     );
+    return rows[0] || null;
+  },
+
+  async findTerminalByDeviceCode(tenantId, deviceCode, excludeId = null) {
+    const code = String(deviceCode || "").trim();
+    if (!code) return null;
+    const params = [tenantId, code];
+    let sql = `SELECT t.*, o.outlet_name
+      FROM pos_terminals t
+      INNER JOIN pos_outlets o ON o.id = t.outlet_id AND o.deleted_at IS NULL
+      WHERE ${tw("t", tenantId)} AND t.device_code = ?`;
+    if (excludeId != null) {
+      sql += " AND t.id != ?";
+      params.push(excludeId);
+    }
+    sql += " LIMIT 1";
+    const [rows] = await readDb.query(sql, params);
     return rows[0] || null;
   },
 

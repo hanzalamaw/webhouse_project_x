@@ -88,7 +88,7 @@ export default function CreateTerminal() {
       <FormPageLayout>
         <PageHeader
           title={isEdit ? "Edit Terminal" : "Create Terminal"}
-          description={isEdit ? "Update device name, machine code, and outlet." : "Register a checkout device. Cashiers pair using the machine code in POS Terminal."}
+          description={isEdit ? "Update device name, terminal code, and outlet." : "Register a checkout device. Cashiers pair using the terminal code in POS Terminal."}
           actions={<Button variant="secondary" onClick={() => navigate(`${MODULE_BASE}/terminals`)}>Back to terminals</Button>}
         />
 
@@ -97,10 +97,10 @@ export default function CreateTerminal() {
         )}
 
         <form onSubmit={submit} className="wh-form-stack">
-          <FormBlock title="Terminal details" description="Device name, machine code, outlet, and status.">
+          <FormBlock title="Terminal details" description="Device name, terminal code, outlet, and status.">
             <div className="wh-form-grid wh-form-grid--3">
               <FormField id="terminal_name" label="Terminal name" value={form.terminal_name} onChange={(e) => setForm((f) => ({ ...f, terminal_name: e.target.value }))} disabled={disabled} required />
-              <FormField id="device_code" label="Machine code" value={form.device_code} onChange={(e) => setForm((f) => ({ ...f, device_code: e.target.value }))} disabled={disabled} required />
+              <FormField id="device_code" label="Terminal code" value={form.device_code} onChange={(e) => setForm((f) => ({ ...f, device_code: e.target.value }))} disabled={disabled} required />
               <FormField id="outlet_id" label="Outlet" as="select" value={form.outlet_id} onChange={(e) => setForm((f) => ({ ...f, outlet_id: e.target.value }))} disabled={disabled || !outlets.length} required>
                 <option value="">Select outlet</option>
                 {outlets.map((o) => <option key={o.id} value={o.id}>{o.outlet_name}</option>)}

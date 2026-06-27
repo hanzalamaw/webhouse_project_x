@@ -190,10 +190,9 @@ export const crmService = {
   async lookupCustomerByPhone(tenantId, phone) {
     const p = String(phone || "").trim();
     if (!p) throw new Error("Phone number is required");
-    const match = await crmRepository.findCustomerByPhoneOrEmail(tenantId, p, null);
-    if (!match) return { found: false, customer: null };
-    const customer = await crmRepository.getCustomer(tenantId, match.id);
-    return { found: true, customer };
+    const customers = await crmRepository.findCustomersByPhone(tenantId, p);
+    if (!customers.length) return { found: false, customer: null, customers: [] };
+    return { found: true, customer: customers[0], customers };
   },
 
   async createCustomer(tenantId, userId, body) {

@@ -18,6 +18,7 @@ const INITIAL = {
   sku: "",
   unit: "piece",
   status: "active",
+  cost_price: "0",
   selling_price: "",
   discount: "0",
   tax: "0",
@@ -42,6 +43,7 @@ function mapProductToForm(product) {
     sku: product.sku || "",
     unit: product.unit || "piece",
     status: product.status || "active",
+    cost_price: product.cost_price ?? "0",
     selling_price: product.selling_price ?? "",
     discount: product.discount ?? "0",
     tax: product.tax ?? "0",
@@ -207,7 +209,7 @@ export default function CreateProduct() {
         status: form.status,
         outlet_id: Number(form.outlet_id),
         category_id: Number(form.category_id),
-        cost_price: 0,
+        cost_price: Number(form.cost_price) || 0,
         selling_price: Number(form.selling_price),
         discount: Number(form.discount) || 0,
         tax: Number(form.tax) || 0,
@@ -314,8 +316,9 @@ export default function CreateProduct() {
           </div>
         </FormBlock>
 
-        <FormBlock title="Pricing" description="Selling price, discount, tax, and calculated total. Cost price defaults to zero.">
+        <FormBlock title="Pricing" description="Cost defaults to zero. Selling price, discount, tax, and calculated total.">
           <div className="wh-form-grid">
+            <FormField id="cost_price" label="Cost price (PKR)" type="number" min="0" step="0.01" value={form.cost_price} onChange={(e) => set("cost_price", e.target.value)} />
             <FormField id="selling_price" label="Selling price (PKR)" type="number" min="0" step="0.01" value={form.selling_price} onChange={(e) => set("selling_price", e.target.value)} required />
             <FormField id="discount" label="Discount (PKR)" type="number" min="0" step="0.01" value={form.discount} onChange={(e) => set("discount", e.target.value)} />
             <FormField id="tax" label="Tax (PKR)" type="number" min="0" step="0.01" value={form.tax} onChange={(e) => set("tax", e.target.value)} />

@@ -68,9 +68,9 @@ export default function CreateStore() {
       }, authFetch);
 
       const validTerminals = terminals.filter((t) => t.terminal_name.trim() && t.device_code.trim());
-      if (!validTerminals.length) throw new Error("Add at least one terminal with name and machine code.");
+      if (!validTerminals.length) throw new Error("Add at least one terminal with name and terminal code.");
       const codes = validTerminals.map((t) => t.device_code.trim());
-      if (new Set(codes).size !== codes.length) throw new Error("Machine codes must be unique within this store.");
+      if (new Set(codes).size !== codes.length) throw new Error("Terminal codes must be unique.");
 
       for (const t of validTerminals) {
         await apiFetch("/pos/terminals", {
@@ -132,23 +132,32 @@ export default function CreateStore() {
             </p>
           </FormBlock>
 
-          <FormBlock title="Terminals" description="Register checkout devices. Machine codes must be unique within this store (other stores may reuse codes).">
-            {terminals.map((t, idx) => (
-              <div key={t._key} className="wh-form-grid wh-form-grid--3" style={{ marginBottom: 12, alignItems: "end" }}>
-                <FormField id={`terminal_name_${idx}`} label="Terminal name" value={t.terminal_name} onChange={(e) => setTerminals((rows) => rows.map((r, i) => i === idx ? { ...r, terminal_name: e.target.value } : r))} disabled={disabled} required />
-                <FormField id={`device_code_${idx}`} label="Machine code" value={t.device_code} onChange={(e) => setTerminals((rows) => rows.map((r, i) => i === idx ? { ...r, device_code: e.target.value } : r))} disabled={disabled} required />
-                <div className="wh-action-btns">
-                  <FormField id={`terminal_status_${idx}`} label="Status" as="select" value={t.status} onChange={(e) => setTerminals((rows) => rows.map((r, i) => i === idx ? { ...r, status: e.target.value } : r))} disabled={disabled}>
-                    {TERMINAL_STATUSES.map((s) => <option key={s} value={s}>{TERMINAL_STATUS_LABELS[s] || s}</option>)}
-                  </FormField>
-                  {terminals.length > 1 && (
-                    <Button type="button" variant="danger" className="wh-btn--sm" onClick={() => setTerminals((rows) => rows.filter((_, i) => i !== idx))}>Remove</Button>
-                  )}
+          <FormBlock title="Terminals" description="Terminal codes must be unique across your stores. Other tenants may reuse the same codes.">
+            <div className="wh-inv-line-items">
+              {terminals.map((t, idx) => (
+                <div key={t._key} className="wh-inv-line-item">
+                  <div className="wh-inv-line-item__head">
+                    <strong>Terminal {idx + 1}</strong>
+                    {terminals.length > 1 && !disabled && (
+                      <Button type="button" variant="secondary" className="wh-btn--sm" onClick={() => setTerminals((rows) => rows.filter((_, i) => i !== idx))}>
+                        Remove
+                      </Button>
+                    )}
+                  </div>
+                  <div className="wh-form-grid wh-form-grid--3">
+                    <FormField id={`terminal_name_${idx}`} label="Terminal name" value={t.terminal_name} onChange={(e) => setTerminals((rows) => rows.map((r, i) => i === idx ? { ...r, terminal_name: e.target.value } : r))} disabled={disabled} required />
+                    <FormField id={`device_code_${idx}`} label="Terminal code" value={t.device_code} onChange={(e) => setTerminals((rows) => rows.map((r, i) => i === idx ? { ...r, device_code: e.target.value } : r))} disabled={disabled} required />
+                    <FormField id={`terminal_status_${idx}`} label="Status" as="select" value={t.status} onChange={(e) => setTerminals((rows) => rows.map((r, i) => i === idx ? { ...r, status: e.target.value } : r))} disabled={disabled}>
+                      {TERMINAL_STATUSES.map((s) => <option key={s} value={s}>{TERMINAL_STATUS_LABELS[s] || s}</option>)}
+                    </FormField>
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
             {!disabled && (
-              <Button type="button" variant="secondary" onClick={() => setTerminals((rows) => [...rows, newTerminalRow()])}>Add another terminal</Button>
+              <div className="wh-inv-warehouse-add">
+                <Button type="button" variant="secondary" onClick={() => setTerminals((rows) => [...rows, newTerminalRow()])}>Add terminal</Button>
+              </div>
             )}
           </FormBlock>
 

@@ -60,7 +60,7 @@ export default function TerminalLogsView() {
     <div className="wh-page wh-page--wide">
       <PageHeader
         title={terminal.terminal_name}
-        description={`${terminal.outlet_name} · Machine code ${terminal.device_code}`}
+        description={`${terminal.outlet_name} · Terminal code ${terminal.device_code}`}
         actions={<Button variant="secondary" onClick={() => navigate(`${MODULE_BASE}/registers`)}>All terminals</Button>}
       />
 

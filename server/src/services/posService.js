@@ -38,11 +38,19 @@ function outletPayload(body, existing = {}) {
   };
 }
 
-async function assertUniqueDeviceCode(tenantId, outletId, deviceCode, excludeId = null) {
+async function assertUniqueTerminalCode(tenantId, deviceCode, excludeId = null) {
   const code = String(deviceCode || "").trim();
-  const existing = await posRepository.getTerminalByDeviceCode(tenantId, outletId, code, excludeId);
+  const existing = await posRepository.findTerminalByDeviceCode(tenantId, code, excludeId);
   if (existing) {
-    throw new Error("This store already has a terminal with this machine code.");
+    throw new Error("A terminal with this terminal code already exists for your account.");
+  }
+}
+
+async function assertUniqueOutletName(tenantId, outletName, excludeId = null) {
+  const name = String(outletName || "").trim();
+  const existing = await posRepository.findOutletByName(tenantId, name, excludeId);
+  if (existing) {
+    throw new Error("A store with this name already exists for your account.");
   }
 }
 
@@ -149,8 +157,10 @@ export const posService = {
     }
     const storeOpen = normalizeTime(body.store_open_time, "Store open time");
     if (!storeOpen) throw new Error("Store open time is required");
+    const outletName = requireText(body.outlet_name, "Store name");
+    await assertUniqueOutletName(tenantId, outletName);
     return posRepository.createOutlet(tenantId, {
-      outlet_name: requireText(body.outlet_name, "Store name"),
+      outlet_name: outletName,
       location: body.location || null,
       city: body.city || null,
       status: normalizeStatus(body.status, OUTLET_STATUSES, "active"),
@@ -164,8 +174,10 @@ export const posService = {
     const existing = await posRepository.getOutlet(tenantId, id);
     if (!existing) return null;
     const payload = outletPayload(body, existing);
+    const outletName = requireText(payload.outlet_name ?? existing.outlet_name, "Store name");
+    await assertUniqueOutletName(tenantId, outletName, id);
     return posRepository.updateOutlet(tenantId, id, {
-      outlet_name: requireText(payload.outlet_name ?? existing.outlet_name, "Store name"),
+      outlet_name: outletName,
       location: payload.location ?? existing.location,
       city: payload.city ?? existing.city,
       status: normalizeStatus(payload.status ?? existing.status, OUTLET_STATUSES, existing.status),
@@ -192,8 +204,8 @@ export const posService = {
     if (!Number.isInteger(outletId) || outletId <= 0) throw new Error("Store is required");
     const outlet = await posRepository.getOutlet(tenantId, outletId);
     if (!outlet) throw new Error("Store not found");
-    const deviceCode = requireText(body.device_code, "Machine code");
-    await assertUniqueDeviceCode(tenantId, outletId, deviceCode);
+    const deviceCode = requireText(body.device_code, "Terminal code");
+    await assertUniqueTerminalCode(tenantId, deviceCode);
     return posRepository.createTerminal(tenantId, {
       terminal_name: requireText(body.terminal_name, "Terminal name"),
       device_code: deviceCode,
@@ -209,8 +221,8 @@ export const posService = {
     if (!Number.isInteger(outletId) || outletId <= 0) throw new Error("Store is required");
     const outlet = await posRepository.getOutlet(tenantId, outletId);
     if (!outlet) throw new Error("Store not found");
-    const deviceCode = requireText(body.device_code ?? existing.device_code, "Machine code");
-    await assertUniqueDeviceCode(tenantId, outletId, deviceCode, id);
+    const deviceCode = requireText(body.device_code ?? existing.device_code, "Terminal code");
+    await assertUniqueTerminalCode(tenantId, deviceCode, id);
     return posRepository.updateTerminal(tenantId, id, {
       terminal_name: requireText(body.terminal_name ?? existing.terminal_name, "Terminal name"),
       device_code: deviceCode,
@@ -243,13 +255,27 @@ export const posService = {
     return posRepository.getTerminalLogs(tenantId, terminalId);
   },
 
+  async lookupTerminalByCode(tenantId, deviceCode) {
+    const code = String(deviceCode || "").trim();
+    if (!code) return { found: false };
+    const terminal = await posRepository.findTerminalByDeviceCode(tenantId, code);
+    if (!terminal) return { found: false };
+    return {
+      found: true,
+      terminal_id: terminal.id,
+      terminal_name: terminal.terminal_name,
+      device_code: terminal.device_code,
+      outlet_id: terminal.outlet_id,
+      outlet_name: terminal.outlet_name,
+      status: terminal.status,
+    };
+  },
+
   async connectTerminal(tenantId, userId, body) {
-    const outletId = Number(body.outlet_id);
-    if (!Number.isInteger(outletId) || outletId <= 0) throw new Error("Store is required");
     const code = String(body.device_code || "").trim();
-    if (!code) throw new Error("Machine code is required");
-    const terminal = await posRepository.getTerminalByDeviceCode(tenantId, outletId, code);
-    if (!terminal) throw new Error("No terminal registered with this machine code at this store.");
+    if (!code) throw new Error("Terminal code is required");
+    const terminal = await posRepository.findTerminalByDeviceCode(tenantId, code);
+    if (!terminal) throw new Error("No terminal found with this terminal code.");
     if (terminal.status !== "active") throw new Error("This terminal is not active.");
 
     let { register, drawerMeta } = await ensureActiveRegister(tenantId, userId, terminal);
