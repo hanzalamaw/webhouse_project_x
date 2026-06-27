@@ -1,8 +1,8 @@
 import { inventoryController } from "../controllers/inventoryController.js";
-import { requireTenant } from "../middleware/tenantAuth.js";
+import { tenantRouteAuth } from "../middleware/tenantRouteAuth.js";
 
 export function registerInventoryRoutes(app, verifyToken) {
-  const auth = [verifyToken, requireTenant];
+  const auth = tenantRouteAuth(verifyToken);
   const base = "/api/inventory";
 
   app.get(`${base}/dashboard`, auth, inventoryController.dashboard);

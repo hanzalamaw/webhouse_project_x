@@ -1,53 +1,42 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../../../../../context/AuthContext";
-import { fetchAllTableRows, TABLE_PAGE_SIZE } from "../../../../../../api/client";
+import { apiFetch } from "../../../../../../api/client";
 import { PageHeader } from "../../../../../../components/PageHeader";
-import { Card } from "../../../../../../components/Card";
-import { DataTable } from "../../../../../../components/DataTable";
 import { TableToolbar } from "../../../../../../components/TableToolbar";
 import { StatusBadge } from "../../../../../../components/Badge";
-import { applyToolbarFilters, EMPTY_TOOLBAR } from "../../../../../../utils/tableFilters";
+import { EMPTY_TOOLBAR } from "../../../../../../utils/tableFilters";
+import { useToolbarFilteredRows } from "../../../../../../hooks/useToolbarFilteredRows";
 import { formatPKR } from "../../../../../../utils/currency";
-import { formatDateTime } from "../../../../../../utils/dateTime";
+import { MODULE_BASE } from "../../constants";
 
 const TOOLBAR_FILTERS = [
-  { key: "outlet_name", label: "Outlet" },
+  { key: "outlet_name", label: "Store" },
   { key: "terminal_name", label: "Terminal" },
-  { key: "opened_by_name", label: "Opened by" },
+  { key: "shift_status", label: "Status", options: ["open", "closed"] },
 ];
 
 export default function ManageRegisters() {
   const { authFetch } = useAuth();
-  const [rows, setRows] = useState([]);
-  const [page, setPage] = useState(1);
+  const navigate = useNavigate();
+  const [terminals, setTerminals] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [toolbar, setToolbar] = useState(EMPTY_TOOLBAR);
 
-  const enrichedRows = useMemo(
-    () =>
-      rows.map((r) => ({
-        ...r,
-        shift_status: r.closed_at ? "closed" : "open",
-      })),
-    [rows]
-  );
-
-  const filteredRows = useMemo(
-    () => applyToolbarFilters(enrichedRows, toolbar, { dateField: "opened_at", filters: TOOLBAR_FILTERS }),
-    [enrichedRows, toolbar]
-  );
-
-  useEffect(() => setPage(1), [toolbar]);
+  const filteredTerminals = useToolbarFilteredRows(terminals, toolbar, {
+    filters: TOOLBAR_FILTERS,
+  });
 
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      setRows(await fetchAllTableRows("/pos/registers", authFetch));
+      const res = await apiFetch("/pos/registers/terminals", {}, authFetch);
+      setTerminals(res.data || res || []);
     } catch (err) {
       setError(err.message);
-      setRows([]);
+      setTerminals([]);
     } finally {
       setLoading(false);
     }
@@ -55,59 +44,59 @@ export default function ManageRegisters() {
 
   useEffect(() => { load().catch(() => {}); }, [load]);
 
-  const columns = [
-    { key: "outlet_name", label: "Outlet" },
-    { key: "terminal_name", label: "Terminal" },
-    { key: "opened_by_name", label: "Opened by" },
-    { key: "opening_balance", label: "Opening", format: (v) => formatPKR(v) },
-    { key: "cash_collected", label: "Cash collected", format: (v) => formatPKR(v) },
-    {
-      key: "closing_balance",
-      label: "Closing",
-      format: (v, r) => (r.closed_at ? formatPKR(v) : "—"),
-    },
-    {
-      key: "shift_status",
-      label: "Shift",
-      render: (r) => <StatusBadge status={r.closed_at ? "inactive" : "active"} />,
-    },
-    { key: "opened_at", label: "Opened", format: formatDateTime },
-    { key: "closed_at", label: "Closed", format: (v) => (v ? formatDateTime(v) : "—") },
-  ];
-
   return (
     <div className="wh-page wh-page--wide">
       <PageHeader
         title="Cash registers"
-        description="Shift history per terminal. When a shift ends, the drawer total becomes the next shift opening balance."
+        description="Live terminal balances. Click a card to view shift and sales logs."
       />
       {error && <p className="wh-field__error">{error}</p>}
 
-      <Card className="wh-card--table">
-        <div className="wh-card-table__head"><h3 className="wh-card__title">Register shifts</h3></div>
-        {loading ? (
-          <p className="wh-muted">Loading…</p>
-        ) : (
-          <>
-            <TableToolbar
-              rows={enrichedRows}
-              value={toolbar}
-              onChange={setToolbar}
-              dateField="opened_at"
-              filters={TOOLBAR_FILTERS}
-              searchPlaceholder="Search shifts…"
-            />
-            <DataTable
-              columns={columns}
-              rows={filteredRows}
-              page={page}
-              pageSize={TABLE_PAGE_SIZE}
-              onPageChange={setPage}
-              emptyMessage="No register shifts yet."
-            />
-          </>
-        )}
-      </Card>
+      {loading ? (
+        <p className="wh-muted">Loading…</p>
+      ) : (
+        <>
+          <TableToolbar
+            rows={terminals}
+            value={toolbar}
+            onChange={setToolbar}
+            filters={TOOLBAR_FILTERS}
+            searchPlaceholder="Search terminals…"
+          />
+          <div className="wh-terminal-cards">
+            {filteredTerminals.length ? (
+              filteredTerminals.map((t) => (
+                <button
+                  type="button"
+                  key={t.id}
+                  className={`wh-terminal-card wh-terminal-card--clickable wh-terminal-card--${t.shift_status}`}
+                  onClick={() => navigate(`${MODULE_BASE}/registers/terminal/${t.id}`)}
+                >
+                  <div className="wh-terminal-card__head">
+                    <h4 className="wh-terminal-card__title">{t.terminal_name}</h4>
+                    <StatusBadge status={t.shift_status === "open" ? "active" : "inactive"} />
+                  </div>
+                  <p className="wh-terminal-card__store">{t.outlet_name}</p>
+                  <p className="wh-terminal-card__meta wh-muted">Code: {t.device_code}</p>
+                  <div className="wh-terminal-card__balance">
+                    <span className="wh-muted">Balance</span>
+                    <strong>
+                      {t.shift_status === "open" && t.current_balance != null
+                        ? formatPKR(t.current_balance)
+                        : "—"}
+                    </strong>
+                  </div>
+                  <p className="wh-terminal-card__meta wh-muted">
+                    {t.shift_status === "open" ? "Shift open · tap for logs" : "No open shift · tap for logs"}
+                  </p>
+                </button>
+              ))
+            ) : (
+              <p className="wh-muted">No terminals match your filters.</p>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }

@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../../../../../context/AuthContext";
-import { apiFetch } from "../../../../../api/client";
+import { apiFetch, fetchAllTableRows } from "../../../../../api/client";
 import { PageHeader } from "../../../../../components/PageHeader";
 import { StatusBadge } from "../../../../../components/Badge";
+import { HBars } from "../../../../../components/charts";
 import { formatPKR } from "../../../../../utils/currency";
 import { formatDateTime } from "../../../../../utils/dateTime";
 import { MODULE_BASE } from "../constants";
@@ -40,20 +41,26 @@ function Panel({ title, subtitle, children, flush, action }) {
 export default function PosDashboard() {
   const { authFetch } = useAuth();
   const [data, setData] = useState(null);
+  const [sales, setSales] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
     let active = true;
-    apiFetch("/pos/dashboard", {}, authFetch)
-      .then((res) => {
+    Promise.all([
+      apiFetch("/pos/dashboard", {}, authFetch),
+      fetchAllTableRows("/pos/sales", authFetch).catch(() => []),
+    ])
+      .then(([res, saleRows]) => {
         if (!active) return;
         setData(res);
+        setSales(saleRows);
         setError("");
       })
       .catch((e) => {
         if (!active) return;
         setData(null);
+        setSales([]);
         setError(e.message || "Failed to load dashboard");
       })
       .finally(() => {
@@ -66,14 +73,27 @@ export default function PosDashboard() {
   const dash = (n) => (loading ? "—" : n ?? 0);
   const money = (n) => (loading ? "—" : formatPKR(n));
 
+  const salesByStore = useMemo(() => {
+    const map = new Map();
+    for (const s of sales) {
+      const key = s.outlet_name || "Unknown";
+      map.set(key, (map.get(key) || 0) + Number(s.payable_amount || 0));
+    }
+    return [...map.entries()]
+      .map(([label, value]) => ({ label, value }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 6);
+  }, [sales]);
+
   const quickLinks = useMemo(
     () => [
-      { label: "Manage outlets", path: `${MODULE_BASE}/outlets` },
-      { label: "Manage terminals", path: `${MODULE_BASE}/terminals` },
+      { label: "Manage stores", path: `${MODULE_BASE}/stores/manage` },
+      { label: "Create store", path: `${MODULE_BASE}/stores/create` },
       { label: "View sales", path: `${MODULE_BASE}/sales` },
       { label: "Cash registers", path: `${MODULE_BASE}/registers` },
       { label: "Open POS Terminal", path: "/app/m/pos-terminal/checkout" },
-      { label: "Inventory products", path: "/app/m/inventory-procurement/products/manage" },
+      { label: "Manage products", path: `${MODULE_BASE}/products/manage` },
+      { label: "Create product", path: `${MODULE_BASE}/products/create` },
     ],
     []
   );
@@ -90,7 +110,7 @@ export default function PosDashboard() {
     <div className="wh-page wh-page--wide">
       <PageHeader
         title="POS"
-        description="Outlets, terminals, register shifts, and in-store sales. Products come from Inventory & Procurement."
+        description="Stores, terminals, register shifts, and in-store sales. Products come from Inventory & Procurement."
       />
 
       {error && <p className="wh-field__error">{error}</p>}
@@ -134,7 +154,7 @@ export default function PosDashboard() {
       <div className="wh-dash-grid">
         <div className="wh-dash-col-3">
           <Kpi
-            label="Outlets"
+            label="Stores"
             value={dash(stats.outlet_count)}
             hint="Store locations"
             icon={<TenantsIcon />}
@@ -183,6 +203,18 @@ export default function PosDashboard() {
             )}
           </Panel>
         </div>
+        <div className="wh-dash-col-4">
+          <Panel title="Revenue by store" subtitle="All-time payable amount">
+            {salesByStore.length ? (
+              <HBars data={salesByStore} formatValue={formatPKR} />
+            ) : (
+              <p className="wh-panel__empty">No sales data yet.</p>
+            )}
+          </Panel>
+        </div>
+      </div>
+
+      <div className="wh-dash-grid">
         <div className="wh-dash-col-4">
           <Panel title="Quick actions">
             <ul className="wh-list">

@@ -5,7 +5,8 @@ import { DataTable } from "../../../../../components/DataTable";
 import { TableToolbar } from "../../../../../components/TableToolbar";
 import { useAuth } from "../../../../../context/AuthContext";
 import { apiFetch, fetchAllTableRows, TABLE_PAGE_SIZE } from "../../../../../api/client";
-import { applyToolbarFilters, EMPTY_TOOLBAR } from "../../../../../utils/tableFilters";
+import { EMPTY_TOOLBAR } from "../../../../../utils/tableFilters";
+import { useToolbarFilteredRows } from "../../../../../hooks/useToolbarFilteredRows";
 import { formatDateTime } from "../../../../../utils/dateTime";
 
 export default function AuditLogs() {
@@ -16,10 +17,7 @@ export default function AuditLogs() {
   const [error, setError] = useState("");
   const [toolbar, setToolbar] = useState({ ...EMPTY_TOOLBAR });
 
-  const filteredRows = useMemo(
-    () => applyToolbarFilters(rows, toolbar, { dateField: "created_at" }),
-    [rows, toolbar]
-  );
+  const filteredRows = useToolbarFilteredRows(rows, toolbar, { dateField: "created_at" });
 
   useEffect(() => {
     setPage(1);

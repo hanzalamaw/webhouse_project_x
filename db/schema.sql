@@ -1525,6 +1525,8 @@ CREATE TABLE IF NOT EXISTS `pos_outlets` (
   `location` TEXT NULL DEFAULT NULL,
   `city` VARCHAR(60) NULL DEFAULT NULL,
   `status` VARCHAR(45) NOT NULL,
+  `store_open_time` TIME NULL DEFAULT NULL,
+  `store_close_time` TIME NULL DEFAULT NULL,
   `created_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
   `tenant_id` INT NOT NULL,
   `deleted_at` TIMESTAMP NULL DEFAULT NULL,
@@ -1631,17 +1633,17 @@ CREATE TABLE IF NOT EXISTS `pos_sale_items` (
   `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   INDEX `fk_pos_sale_items_pos_sales1_idx` (`pos_sale_id` ASC),
-  INDEX `fk_pos_sale_items_inventory_products1_idx` (`product_id` ASC),
+  INDEX `fk_pos_sale_items_pos_products_idx` (`product_id` ASC),
   INDEX `fk_pos_sale_items_wh_tenants1_idx` (`tenant_id` ASC),
   CONSTRAINT `fk_pos_sale_items_pos_sales1`
     FOREIGN KEY (`pos_sale_id`)
     REFERENCES `pos_sales` (`id`)
     ON DELETE CASCADE
     ON UPDATE CASCADE,
-  CONSTRAINT `fk_pos_sale_items_inventory_products1`
+  CONSTRAINT `fk_pos_sale_items_pos_products`
     FOREIGN KEY (`product_id`)
-    REFERENCES `inventory_products` (`id`)
-    ON DELETE CASCADE
+    REFERENCES `pos_products` (`id`)
+    ON DELETE SET NULL
     ON UPDATE CASCADE,
   CONSTRAINT `fk_pos_sale_items_wh_tenants1`
     FOREIGN KEY (`tenant_id`)

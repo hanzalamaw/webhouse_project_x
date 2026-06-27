@@ -1,11 +1,11 @@
 import { crmController } from "../controllers/crmController.js";
-import { requireTenant } from "../middleware/tenantAuth.js";
+import { tenantRouteAuth } from "../middleware/tenantRouteAuth.js";
 import { createTenantPermissionMiddleware } from "../middleware/tenantPermissions.js";
 import { CRM_MODULE } from "../utils/crmConstants.js";
 
 export function registerCrmRoutes(app, verifyToken) {
   const { loadPermissions, requirePermission } = createTenantPermissionMiddleware();
-  const auth = [verifyToken, requireTenant, loadPermissions];
+  const auth = [...tenantRouteAuth(verifyToken), loadPermissions];
   const base = "/api/crm";
 
   const view = requirePermission(CRM_MODULE, "view");
@@ -26,6 +26,7 @@ export function registerCrmRoutes(app, verifyToken) {
   app.post(`${base}/leads/:id/convert`, ...auth, edit, crmController.convertLead);
   app.delete(`${base}/leads/:id`, ...auth, del, crmController.deleteLead);
 
+  app.get(`${base}/customers/lookup`, ...auth, view, crmController.lookupCustomer);
   app.get(`${base}/customers`, ...auth, view, crmController.listCustomers);
   app.get(`${base}/customers/export`, ...auth, exp, crmController.exportCustomers);
   app.get(`${base}/customers/:id`, ...auth, view, crmController.getCustomer);

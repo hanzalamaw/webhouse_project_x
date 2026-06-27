@@ -71,7 +71,7 @@ export function ConfirmDeleteModal({
         placeholder={confirmPhrase}
         autoFocus
       />
-      {error && <p className="wh-field__error" style={{ marginTop: 12 }}>{error}</p>}
+      {error && <p className="wh-field__error">{error}</p>}
     </Modal>
   );
 }

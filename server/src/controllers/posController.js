@@ -1,4 +1,6 @@
 import { posService } from "../services/posService.js";
+import { crmService } from "../services/crmService.js";
+import { crmRepository } from "../repositories/crmRepository.js";
 import { tryParseEntityId } from "../utils/ids.js";
 
 export const posController = {
@@ -20,7 +22,11 @@ export const posController = {
 
   async listOutlets(req, res) {
     try {
-      res.json({ data: await posService.listOutlets(req.tenantId) });
+      const [data, limits] = await Promise.all([
+        posService.listOutlets(req.tenantId),
+        posService.getStoreLimits(req.tenantId),
+      ]);
+      res.json({ data, limits });
     } catch (e) {
       res.status(500).json({ message: e.message });
     }
@@ -54,6 +60,18 @@ export const posController = {
       const ok = await posService.deleteOutlet(req.tenantId, id);
       if (!ok) return res.status(404).json({ message: "Outlet not found" });
       res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ message: e.message });
+    }
+  },
+
+  async outletDashboard(req, res) {
+    try {
+      const id = tryParseEntityId(req.params.id);
+      if (!id) return res.status(400).json({ message: "Invalid store id" });
+      const data = await posService.outletDashboard(req.tenantId, id);
+      if (!data) return res.status(404).json({ message: "Store not found" });
+      res.json(data);
     } catch (e) {
       res.status(500).json({ message: e.message });
     }
@@ -128,12 +146,32 @@ export const posController = {
     }
   },
 
+  async listTerminalBalances(req, res) {
+    try {
+      res.json({ data: await posService.listTerminalBalances(req.tenantId) });
+    } catch (e) {
+      res.status(500).json({ message: e.message });
+    }
+  },
+
+  async getTerminalLogs(req, res) {
+    try {
+      const id = tryParseEntityId(req.params.id);
+      if (!id) return res.status(400).json({ message: "Invalid terminal id" });
+      const data = await posService.getTerminalLogs(req.tenantId, id);
+      if (!data) return res.status(404).json({ message: "Terminal not found" });
+      res.json(data);
+    } catch (e) {
+      res.status(500).json({ message: e.message });
+    }
+  },
+
   async connectTerminal(req, res) {
     try {
       const result = await posService.connectTerminal(
         req.tenantId,
         req.userId,
-        req.body.device_code
+        req.body
       );
       res.json(result);
     } catch (e) {
@@ -145,11 +183,23 @@ export const posController = {
     try {
       const terminalId = tryParseEntityId(req.params.terminalId);
       if (!terminalId) return res.status(400).json({ message: "Invalid terminal id" });
-      const session = await posService.getTerminalSession(req.tenantId, terminalId);
+      const session = await posService.getTerminalSession(req.tenantId, req.userId, terminalId);
       if (!session?.register) {
         return res.status(404).json({ message: "No active session on this terminal." });
       }
       res.json(session);
+    } catch (e) {
+      res.status(500).json({ message: e.message });
+    }
+  },
+
+  async getTerminalProducts(req, res) {
+    try {
+      const terminalId = tryParseEntityId(req.params.terminalId);
+      if (!terminalId) return res.status(400).json({ message: "Invalid terminal id" });
+      const result = await posService.getTerminalProducts(req.tenantId, terminalId);
+      if (!result) return res.status(404).json({ message: "Terminal not found" });
+      res.json(result);
     } catch (e) {
       res.status(500).json({ message: e.message });
     }
@@ -170,6 +220,34 @@ export const posController = {
     try {
       const sale = await posService.createTerminalSale(req.tenantId, req.userId, req.body);
       res.status(201).json(sale);
+    } catch (e) {
+      res.status(400).json({ message: e.message });
+    }
+  },
+
+  async lookupCustomer(req, res) {
+    try {
+      res.json(await crmService.lookupCustomerByPhone(req.tenantId, req.query.phone));
+    } catch (e) {
+      res.status(400).json({ message: e.message });
+    }
+  },
+
+  async createTerminalCustomer(req, res) {
+    try {
+      const customer = await crmService.createCustomer(req.tenantId, req.userId, req.body);
+      if (req.body.city && customer?.id) {
+        await crmRepository.createAddress(req.tenantId, customer.id, {
+          address_type: "default",
+          address: "",
+          city: req.body.city,
+          state: null,
+          postal_code: null,
+          is_default: true,
+        });
+      }
+      const profile = await crmService.getCustomer(req.tenantId, customer.id);
+      res.status(201).json(profile || customer);
     } catch (e) {
       res.status(400).json({ message: e.message });
     }

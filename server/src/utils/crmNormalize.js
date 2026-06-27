@@ -3,8 +3,10 @@ import {
   LEAD_STATUSES,
   CUSTOMER_TYPES,
   CUSTOMER_STATUSES,
+  ADDRESS_TYPES,
   LEAD_SOURCE_LABELS,
   CUSTOMER_TYPE_LABELS,
+  ADDRESS_TYPE_LABELS,
 } from "./crmConstants.js";
 
 function slugify(value) {
@@ -28,6 +30,15 @@ function buildLabelIndex(labels) {
 
 const SOURCE_INDEX = buildLabelIndex(LEAD_SOURCE_LABELS);
 const TYPE_INDEX = buildLabelIndex(CUSTOMER_TYPE_LABELS);
+const ADDRESS_INDEX = buildLabelIndex(ADDRESS_TYPE_LABELS);
+
+const ADDRESS_LEGACY = {
+  billing: "default",
+  shipping: "office",
+};
+
+const CUSTOMER_PRESETS = CUSTOMER_TYPES.filter((t) => t !== "other");
+const ADDRESS_PRESETS = ADDRESS_TYPES.filter((t) => t !== "other");
 
 const SOURCE_ALIASES = {
   web: "website",
@@ -63,9 +74,22 @@ export function normalizeCustomerType(value, fallback = "retailer") {
   const raw = String(value || "").trim();
   if (!raw) return fallback;
   const key = TYPE_INDEX.get(raw.toLowerCase()) || TYPE_INDEX.get(slugify(raw));
-  if (key && CUSTOMER_TYPES.includes(key)) return key;
-  if (CUSTOMER_TYPES.includes(slugify(raw))) return slugify(raw);
-  throw new Error(`Invalid customer type "${raw}". Use: ${CUSTOMER_TYPES.join(", ")} or labels like Retailer, VIP`);
+  if (key && CUSTOMER_PRESETS.includes(key)) return key;
+  if (CUSTOMER_PRESETS.includes(slugify(raw))) return slugify(raw);
+  if (raw.length > 45) throw new Error("Customer type must be 45 characters or less");
+  return raw;
+}
+
+export function normalizeAddressType(value, fallback = "default") {
+  const raw = String(value || "").trim();
+  if (!raw) return fallback;
+  const slug = slugify(raw);
+  if (ADDRESS_LEGACY[slug]) return ADDRESS_LEGACY[slug];
+  const key = ADDRESS_INDEX.get(raw.toLowerCase()) || ADDRESS_INDEX.get(slug);
+  if (key && ADDRESS_PRESETS.includes(key)) return key;
+  if (ADDRESS_PRESETS.includes(slug)) return slug;
+  if (raw.length > 45) throw new Error("Address type must be 45 characters or less");
+  return raw;
 }
 
 export function normalizeCustomerStatus(value, fallback = "active") {

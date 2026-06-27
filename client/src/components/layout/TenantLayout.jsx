@@ -1,6 +1,7 @@
 import { Outlet, useLocation } from "react-router-dom";
 import { useMemo } from "react";
 import { useAuth } from "../../context/AuthContext";
+import { FiscalYearProvider } from "../../context/FiscalYearContext";
 import { Button } from "../Button";
 import TenantSidebar from "./TenantSidebar";
 import { getModuleBySlug } from "../../portals/tenant-portal/modules/registry";
@@ -22,13 +23,16 @@ export default function TenantLayout() {
 
   if (fullScreen) {
     return (
-      <div className="wh-layout wh-layout--fullscreen">
-        <Outlet />
-      </div>
+      <FiscalYearProvider>
+        <div className="wh-layout wh-layout--fullscreen">
+          <Outlet />
+        </div>
+      </FiscalYearProvider>
     );
   }
 
   return (
+    <FiscalYearProvider>
     <div className="wh-layout">
       <div className="wh-layout-wrapper">
         <TenantSidebar moduleSlug={moduleSlug} />
@@ -49,5 +53,6 @@ export default function TenantLayout() {
         </div>
       </div>
     </div>
+    </FiscalYearProvider>
   );
 }

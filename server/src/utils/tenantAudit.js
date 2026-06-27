@@ -1,4 +1,5 @@
 import { writeDb, readDb } from "../database/db.js";
+import { logWhAudit } from "./whAudit.js";
 
 async function defaultModuleId(tenantId) {
   const [rows] = await readDb.query(
@@ -23,7 +24,16 @@ export async function logTenantAudit({
   skipIfImpersonated = true,
   impersonatedBy = null,
 }) {
-  if (skipIfImpersonated && impersonatedBy) return;
+  if (impersonatedBy) {
+    await logWhAudit({
+      adminUserId: impersonatedBy,
+      action: `tenant_impersonation:${action}`,
+      oldValue: oldValue ? { tenant_id: tenantId, user_id: userId, ...oldValue } : { tenant_id: tenantId, user_id: userId },
+      newValue: newValue ? { tenant_id: tenantId, user_id: userId, ...newValue } : null,
+      ipAddress,
+    });
+    if (skipIfImpersonated) return;
+  }
 
   const resolvedModuleId = moduleId || (await defaultModuleId(tenantId));
 

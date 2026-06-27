@@ -25,41 +25,47 @@ import { formatDateTime } from "../../../../../../utils/dateTime";
 import { formatPKR } from "../../../../../../utils/currency";
 
 import {
-
   MODULE_BASE,
-
-  CUSTOMER_TYPE_LABELS,
-
-  LEAD_SOURCE_LABELS,
-
-  NOTE_TYPES,
-
-  NOTE_TYPE_LABELS,
-
   ADDRESS_TYPES,
-
+  ADDRESS_TYPE_LABELS,
+  LEAD_SOURCE_LABELS,
+  NOTE_TYPES,
+  NOTE_TYPE_LABELS,
   ISSUE_TYPE_LABELS,
-
   ACTIVE_CUSTOMER_DAYS,
-
 } from "../../constants";
+import { TenantsIcon, SupportIcon, LogsIcon } from "../../../../../../components/icons";
+import { TypeWithOtherField } from "../../components/TypeWithOtherField";
+import { formatAddressType, formatCustomerType, resolvePresetOrOther, isDefaultAddressType } from "../../utils/typeFields";
 
 
 
-function StatCard({ label, value }) {
-
+function KpiCard({ label, value, hint, icon, tone = "default" }) {
   return (
-
-    <div className="wh-dash-stat">
-
-      <span className="wh-dash-stat__label">{label}</span>
-
-      <span className="wh-dash-stat__value">{value}</span>
-
+    <div className={`wh-kpi wh-kpi--${tone}`}>
+      <div className="wh-kpi__top">
+        <span className="wh-kpi__label">{label}</span>
+        {icon && <span className="wh-kpi__icon">{icon}</span>}
+      </div>
+      <span className="wh-kpi__value">{value}</span>
+      {hint && <span className="wh-kpi__hint">{hint}</span>}
     </div>
-
   );
+}
 
+function Panel({ title, subtitle, action, flush, children }) {
+  return (
+    <div className="wh-panel">
+      <div className="wh-panel__head">
+        <div>
+          <h3 className="wh-panel__title">{title}</h3>
+          {subtitle && <p className="wh-panel__subtitle">{subtitle}</p>}
+        </div>
+        {action}
+      </div>
+      <div className={`wh-panel__body${flush ? " wh-panel__body--flush" : ""}`}>{children}</div>
+    </div>
+  );
 }
 
 
@@ -85,19 +91,12 @@ export default function CustomerProfile() {
   const [noteForm, setNoteForm] = useState({ note_type: "note", body: "" });
 
   const [addrForm, setAddrForm] = useState({
-
-    address_type: "billing",
-
+    address_type_preset: "default",
+    address_type_custom: "",
     address: "",
-
     city: "",
-
     state: "",
-
     postal_code: "",
-
-    is_default: false,
-
   });
 
   const [deleteAddr, setDeleteAddr] = useState(null);
@@ -187,16 +186,30 @@ export default function CustomerProfile() {
     setError("");
 
     try {
-
+      const address_type = resolvePresetOrOther(
+        addrForm.address_type_preset,
+        addrForm.address_type_custom,
+        "Address type"
+      );
       await apiFetch(`/crm/customers/${customerId}/addresses`, {
-
         method: "POST",
-
-        body: JSON.stringify(addrForm),
-
+        body: JSON.stringify({
+          address_type,
+          address: addrForm.address.trim(),
+          city: addrForm.city.trim() || null,
+          state: addrForm.state.trim() || null,
+          postal_code: addrForm.postal_code.trim() || null,
+          is_default: isDefaultAddressType(address_type),
+        }),
       }, authFetch);
-
-      setAddrForm({ address_type: "billing", address: "", city: "", state: "", postal_code: "", is_default: false });
+      setAddrForm({
+        address_type_preset: "default",
+        address_type_custom: "",
+        address: "",
+        city: "",
+        state: "",
+        postal_code: "",
+      });
 
       setMessage("Address added.");
 
@@ -332,20 +345,38 @@ export default function CustomerProfile() {
 
 
 
-      <div className="wh-dash-grid wh-dash-col-3" style={{ marginBottom: 16 }}>
+      <div className="wh-dash-grid">
+        <div className="wh-dash-col-3">
+          <KpiCard label="Total orders" value={stats.order_count ?? 0} hint="E-commerce orders" icon={<LogsIcon />} tone="accent" />
+        </div>
+        <div className="wh-dash-col-3">
+          <KpiCard label="POS sales" value={stats.pos_sale_count ?? 0} hint="In-store checkouts" icon={<TenantsIcon />} />
+        </div>
+        <div className="wh-dash-col-3">
+          <KpiCard label="Lifetime revenue" value={formatPKR(stats.total_revenue ?? 0)} hint="Orders + POS" tone="success" />
+        </div>
+        <div className="wh-dash-col-3">
+          <KpiCard label="Open complaints" value={stats.complaint_count ?? 0} hint="Needs attention" tone="warning" icon={<SupportIcon />} />
+        </div>
+      </div>
 
-        <StatCard label="Total orders" value={stats.order_count ?? 0} />
-
-        <StatCard label="POS sales" value={stats.pos_sale_count ?? 0} />
-
-        <StatCard label="Lifetime revenue" value={formatPKR(stats.total_revenue ?? 0)} />
-
-        <StatCard label="Open complaints" value={stats.complaint_count ?? 0} />
-
-        <StatCard label="Recent activity" value={stats.recently_active ? `Active (${ACTIVE_CUSTOMER_DAYS}d)` : "Inactive"} />
-
-        <StatCard label="Member since" value={formatDateTime(customer.created_at)} />
-
+      <div className="wh-dash-grid" style={{ marginBottom: 16 }}>
+        <div className="wh-dash-col-3">
+          <KpiCard
+            label="Recent activity"
+            value={stats.recently_active ? `Active (${ACTIVE_CUSTOMER_DAYS}d)` : "Inactive"}
+            hint="Based on orders and POS sales"
+          />
+        </div>
+        <div className="wh-dash-col-3">
+          <KpiCard label="Order revenue" value={formatPKR(stats.order_revenue ?? 0)} hint="From online orders" />
+        </div>
+        <div className="wh-dash-col-3">
+          <KpiCard label="POS revenue" value={formatPKR(stats.pos_revenue ?? 0)} hint="From in-store sales" />
+        </div>
+        <div className="wh-dash-col-3">
+          <KpiCard label="Member since" value={formatDateTime(customer.created_at)} hint="Customer created" />
+        </div>
       </div>
 
 
@@ -360,7 +391,7 @@ export default function CustomerProfile() {
 
             <span className="wh-muted">Type</span>
 
-            <p>{CUSTOMER_TYPE_LABELS[customer.customer_type] || customer.customer_type}</p>
+            <p>{formatCustomerType(customer.customer_type)}</p>
 
           </div>
 
@@ -594,7 +625,7 @@ export default function CustomerProfile() {
 
                   <div className="wh-mini-row__title">
 
-                    {a.address_type}{a.is_default ? " (default)" : ""}
+                    {formatAddressType(a.address_type)}{a.is_default ? " (primary)" : ""}
 
                   </div>
 
@@ -633,24 +664,17 @@ export default function CustomerProfile() {
         {canEdit && (
 
           <form className="wh-form-grid wh-form-grid__actions" onSubmit={addAddress}>
-
-            <FormField id="address_type" label="Type" as="select" value={addrForm.address_type} onChange={(e) => setAddrForm((f) => ({ ...f, address_type: e.target.value }))}>
-
-              {ADDRESS_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-
-            </FormField>
-
-            <FormField id="is_default" label="Default">
-
-              <label>
-
-                <input type="checkbox" checked={addrForm.is_default} onChange={(e) => setAddrForm((f) => ({ ...f, is_default: e.target.checked }))} />
-
-                {" "}Set as default address
-
-              </label>
-
-            </FormField>
+            <TypeWithOtherField
+              id="address_type"
+              label="Address type"
+              preset={addrForm.address_type_preset}
+              custom={addrForm.address_type_custom}
+              onPresetChange={(v) => setAddrForm((f) => ({ ...f, address_type_preset: v }))}
+              onCustomChange={(v) => setAddrForm((f) => ({ ...f, address_type_custom: v }))}
+              options={ADDRESS_TYPES}
+              optionLabels={ADDRESS_TYPE_LABELS}
+              customPlaceholder="e.g. Warehouse"
+            />
 
             <div className="wh-form-grid__full">
 

@@ -11,7 +11,8 @@ import { StatusBadge } from "../../../../../components/Badge";
 import { useAuth } from "../../../../../context/AuthContext";
 import { useModulePermission } from "../../../../../hooks/useModulePermission";
 import { apiFetch, TABLE_PAGE_SIZE } from "../../../../../api/client";
-import { applyToolbarFilters, EMPTY_TOOLBAR } from "../../../../../utils/tableFilters";
+import { EMPTY_TOOLBAR } from "../../../../../utils/tableFilters";
+import { useToolbarFilteredRows } from "../../../../../hooks/useToolbarFilteredRows";
 import { formatDateTime } from "../../../../../utils/dateTime";
 
 const STATUS_OPTIONS = ["active", "inactive"];
@@ -43,10 +44,7 @@ export default function UserManagement() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
 
-  const filteredRows = useMemo(
-    () => applyToolbarFilters(rows, toolbar, { dateField: "last_login_at" }),
-    [rows, toolbar]
-  );
+  const filteredRows = useToolbarFilteredRows(rows, toolbar, { dateField: "last_login_at" });
 
   const assignableRoleOptions = useMemo(
     () =>

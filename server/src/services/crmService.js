@@ -6,7 +6,6 @@ import {
   CUSTOMER_TYPES,
   CUSTOMER_STATUSES,
   NOTE_TYPES,
-  ADDRESS_TYPES,
   COMPLAINT_STATUSES,
   COMPLAINT_PRIORITIES,
   COMPLAINT_ISSUE_TYPES,
@@ -21,6 +20,7 @@ import {
   normalizeLeadStatus,
   normalizeCustomerType,
   normalizeCustomerStatus,
+  normalizeAddressType,
 } from "../utils/crmNormalize.js";
 
 function assertOneOf(value, allowed, label) {
@@ -187,6 +187,15 @@ export const crmService = {
     return crmRepository.getCustomerProfile(tenantId, id);
   },
 
+  async lookupCustomerByPhone(tenantId, phone) {
+    const p = String(phone || "").trim();
+    if (!p) throw new Error("Phone number is required");
+    const match = await crmRepository.findCustomerByPhoneOrEmail(tenantId, p, null);
+    if (!match) return { found: false, customer: null };
+    const customer = await crmRepository.getCustomer(tenantId, match.id);
+    return { found: true, customer };
+  },
+
   async createCustomer(tenantId, userId, body) {
     const customer_name = requireString(body.customer_name, "Customer name");
     const customer_type = normalizeCustomerType(body.customer_type, "retailer");
@@ -260,7 +269,7 @@ export const crmService = {
           const hasDefault = (customer.addresses || []).some((a) => a.is_default);
           if (!hasDefault) {
             await crmRepository.createAddress(tenantId, customerId, {
-              address_type: "billing",
+              address_type: "default",
               address: row.billing_address.trim(),
               city: row.billing_city || null,
               state: row.billing_state || null,
@@ -283,15 +292,23 @@ export const crmService = {
   // Addresses
   async createAddress(tenantId, customerId, body) {
     await assertCustomerExists(tenantId, customerId);
-    assertOneOf(body.address_type, ADDRESS_TYPES, "address type");
+    const address_type = normalizeAddressType(body.address_type, "default");
     requireString(body.address, "Address");
-    return crmRepository.createAddress(tenantId, customerId, body);
+    return crmRepository.createAddress(tenantId, customerId, {
+      ...body,
+      address_type,
+      is_default: Boolean(body.is_default) || address_type === "default",
+    });
   },
 
   async updateAddress(tenantId, addressId, body) {
-    assertOneOf(body.address_type, ADDRESS_TYPES, "address type");
+    const address_type = normalizeAddressType(body.address_type, "default");
     requireString(body.address, "Address");
-    return crmRepository.updateAddress(tenantId, addressId, body);
+    return crmRepository.updateAddress(tenantId, addressId, {
+      ...body,
+      address_type,
+      is_default: Boolean(body.is_default) || address_type === "default",
+    });
   },
 
   deleteAddress(tenantId, addressId) {

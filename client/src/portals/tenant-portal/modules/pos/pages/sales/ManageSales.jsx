@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "../../../../../../context/AuthContext";
 import { apiFetch, fetchAllTableRows, TABLE_PAGE_SIZE } from "../../../../../../api/client";
 import { PageHeader } from "../../../../../../components/PageHeader";
@@ -8,14 +8,15 @@ import { TableToolbar } from "../../../../../../components/TableToolbar";
 import { Modal } from "../../../../../../components/Modal";
 import { Button } from "../../../../../../components/Button";
 import { StatusBadge } from "../../../../../../components/Badge";
-import { applyToolbarFilters, EMPTY_TOOLBAR } from "../../../../../../utils/tableFilters";
+import { EMPTY_TOOLBAR } from "../../../../../../utils/tableFilters";
+import { useToolbarFilteredRows } from "../../../../../../hooks/useToolbarFilteredRows";
 import { formatPKR } from "../../../../../../utils/currency";
 import { formatDateTime } from "../../../../../../utils/dateTime";
 import { PAYMENT_STATUSES } from "../../constants";
 
 const TOOLBAR_FILTERS = [
   { key: "payment_status", label: "Payment", options: PAYMENT_STATUSES },
-  { key: "outlet_name", label: "Outlet" },
+  { key: "outlet_name", label: "Store" },
   { key: "terminal_name", label: "Terminal" },
 ];
 
@@ -29,10 +30,7 @@ export default function ManageSales() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [toolbar, setToolbar] = useState({ ...EMPTY_TOOLBAR, payment_status: "" });
 
-  const filteredRows = useMemo(
-    () => applyToolbarFilters(rows, toolbar, { dateField: "created_at", filters: TOOLBAR_FILTERS }),
-    [rows, toolbar]
-  );
+  const filteredRows = useToolbarFilteredRows(rows, toolbar, { dateField: "created_at", filters: TOOLBAR_FILTERS });
 
   useEffect(() => setPage(1), [toolbar]);
 
@@ -67,7 +65,7 @@ export default function ManageSales() {
 
   const columns = [
     { key: "sale_no", label: "Sale #" },
-    { key: "outlet_name", label: "Outlet" },
+    { key: "outlet_name", label: "Store" },
     { key: "terminal_name", label: "Terminal" },
     { key: "cashier_name", label: "Cashier" },
     { key: "payable_amount", label: "Amount", format: (v) => formatPKR(v) },
@@ -126,7 +124,7 @@ export default function ManageSales() {
         ) : detail ? (
           <>
             <div className="wh-grid-2 wh-inv-expand-grid" style={{ marginBottom: 16 }}>
-              <div><span className="wh-muted">Outlet</span><p>{detail.outlet_name}</p></div>
+              <div><span className="wh-muted">Store</span><p>{detail.outlet_name}</p></div>
               <div><span className="wh-muted">Terminal</span><p>{detail.terminal_name}</p></div>
               <div><span className="wh-muted">Cashier</span><p>{detail.cashier_name}</p></div>
               <div><span className="wh-muted">Customer</span><p>{detail.customer_name || "Walk-in"}</p></div>

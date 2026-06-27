@@ -128,6 +128,14 @@ export const crmController = {
     }
   },
 
+  async lookupCustomer(req, res) {
+    try {
+      res.json(await crmService.lookupCustomerByPhone(req.tenantId, req.query.phone));
+    } catch (e) {
+      res.status(400).json({ message: e.message });
+    }
+  },
+
   async createCustomer(req, res) {
     try {
       const row = await crmService.createCustomer(req.tenantId, req.userId, req.body);

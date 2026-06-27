@@ -27,7 +27,9 @@ async function runStatement(db, statement) {
       msg.includes("Duplicate key name") ||
       msg.includes("already exists") ||
       msg.includes("Duplicate foreign key") ||
-      msg.includes("Unknown table")
+      msg.includes("Unknown table") ||
+      msg.includes("check that it exists") ||
+      msg.includes("Can't DROP")
     ) {
       console.log("SKIP:", statement.slice(0, 60).replace(/\s+/g, " ") + "...");
       return false;
@@ -54,6 +56,10 @@ const db = await createPool();
 try {
   await applyFile(db, "011_pos_terminal_module.sql");
   await applyFile(db, "012_pos_terminal_all_tenants.sql");
+  await applyFile(db, "013_pos_outlet_store_hours.sql");
+  await applyFile(db, "015_pos_outlet_opening_balance.sql");
+  await applyFile(db, "016_pos_inventory.sql");
+  await applyFile(db, "017_pos_sale_items_pos_products_fk.sql");
 
   const [mods] = await db.query(
     "SELECT module_name FROM modules WHERE module_name IN ('POS', 'POS Terminal') AND deleted_at IS NULL"

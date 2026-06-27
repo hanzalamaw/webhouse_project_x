@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "../../../../../../context/AuthContext";
 import { fetchAllTableRows, TABLE_PAGE_SIZE } from "../../../../../../api/client";
 import { PageHeader } from "../../../../../../components/PageHeader";
@@ -6,7 +6,8 @@ import { Card } from "../../../../../../components/Card";
 import { DataTable } from "../../../../../../components/DataTable";
 import { TableToolbar } from "../../../../../../components/TableToolbar";
 import { StatusBadge } from "../../../../../../components/Badge";
-import { applyToolbarFilters, EMPTY_TOOLBAR } from "../../../../../../utils/tableFilters";
+import { EMPTY_TOOLBAR } from "../../../../../../utils/tableFilters";
+import { useToolbarFilteredRows } from "../../../../../../hooks/useToolbarFilteredRows";
 import { formatDateTime } from "../../../../../../utils/dateTime";
 import { MOVEMENT_LABELS, MOVEMENT_TYPES } from "../../constants";
 
@@ -28,14 +29,10 @@ export default function MovementHistory() {
     product_name: "",
   });
 
-  const filteredRows = useMemo(
-    () =>
-      applyToolbarFilters(rows, toolbar, {
-        dateField: "created_at",
-        filters: TOOLBAR_FILTERS,
-      }),
-    [rows, toolbar]
-  );
+  const filteredRows = useToolbarFilteredRows(rows, toolbar, {
+    dateField: "created_at",
+    filters: TOOLBAR_FILTERS,
+  });
 
   useEffect(() => setPage(1), [toolbar]);
 

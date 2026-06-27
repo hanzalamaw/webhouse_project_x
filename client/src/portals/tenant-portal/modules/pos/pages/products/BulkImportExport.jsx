@@ -1,0 +1,181 @@
+import { useState } from "react";
+import { useAuth } from "../../../../../../context/AuthContext";
+import { apiFetch } from "../../../../../../api/client";
+import { PageHeader } from "../../../../../../components/PageHeader";
+import { Card } from "../../../../../../components/Card";
+import { Button } from "../../../../../../components/Button";
+
+const CSV_HEADERS = [
+  "product_name",
+  "sku",
+  "unit",
+  "cost_price",
+  "selling_price",
+  "discount",
+  "tax",
+  "status",
+  "category_name",
+  "outlet_id",
+  "initial_qty",
+  "reserved_qty",
+  "damaged_qty",
+  "stock_notes",
+];
+
+function parseCsv(text) {
+  const lines = text.trim().split(/\r?\n/).filter(Boolean);
+  if (lines.length < 2) return [];
+  const headers = lines[0].split(",").map((h) => h.trim().replace(/^"|"$/g, ""));
+  return lines.slice(1).map((line) => {
+    const values = line.match(/("([^"]|"")*"|[^,]*)/g)?.map((v) => v.trim().replace(/^"|"$/g, "").replace(/""/g, '"')) || [];
+    const row = {};
+    headers.forEach((h, i) => { row[h] = values[i] ?? ""; });
+    return row;
+  });
+}
+
+function toCsv(rows) {
+  const header = CSV_HEADERS.join(",");
+  const body = rows.map((r) =>
+    CSV_HEADERS.map((h) => {
+      const v = r[h] ?? "";
+      return String(v).includes(",") ? `"${String(v).replace(/"/g, '""')}"` : v;
+    }).join(",")
+  );
+  return [header, ...body].join("\n");
+}
+
+export default function BulkImportExport() {
+  const { authFetch } = useAuth();
+  const [importing, setImporting] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState("");
+
+  const handleExport = async () => {
+    setExporting(true);
+    setError("");
+    try {
+      const res = await apiFetch("/pos/inventory/products/export", {}, authFetch);
+      const csv = toCsv(res.data || []);
+      const blob = new Blob([csv], { type: "text/csv" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `pos-products-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImporting(true);
+    setError("");
+    setResult(null);
+    try {
+      const text = await file.text();
+      const rows = parseCsv(text);
+      const res = await apiFetch("/pos/inventory/products/import", { method: "POST", body: JSON.stringify({ rows }) }, authFetch);
+      setResult(res);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setImporting(false);
+      e.target.value = "";
+    }
+  };
+
+  const downloadTemplate = () => {
+    const sample = [{
+      product_name: "Sample Product",
+      sku: "SKU-001",
+      unit: "piece",
+      cost_price: "0",
+      selling_price: "150",
+      discount: "10",
+      tax: "5",
+      status: "active",
+      category_name: "Electronics",
+      outlet_id: "1",
+      initial_qty: "10",
+      reserved_qty: "0",
+      damaged_qty: "0",
+      stock_notes: "Initial import",
+    }];
+    const blob = new Blob([toCsv(sample)], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "pos-import-template.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div className="wh-page wh-inv-import-export">
+      <PageHeader title="Bulk Import / Export" description="Export your POS product catalog or import products from CSV." />
+
+      <div className="wh-inv-import-export__grid">
+        <Card>
+          <h3 className="wh-card__title">Export products</h3>
+          <p className="wh-card__text">
+            Download all POS products with pricing, stock totals, category, and store details as CSV.
+          </p>
+          <div className="wh-card__actions">
+            <Button onClick={handleExport} disabled={exporting}>{exporting ? "Exporting…" : "Export CSV"}</Button>
+          </div>
+        </Card>
+
+        <Card>
+          <h3 className="wh-card__title">Import products</h3>
+          <p className="wh-card__text">
+            Upload a CSV file. Required: product_name, sku, category_name, outlet_id. Optional: unit, cost_price (defaults 0), selling_price, discount, tax, status, initial_qty, reserved_qty, damaged_qty, stock_notes.
+          </p>
+          <p className="wh-card__text wh-muted wh-inv-import-export__note">
+            Total price is calculated as (Selling price − Discount) + Tax. Cost price defaults to zero.
+          </p>
+          <div className="wh-card__actions">
+            <Button variant="secondary" onClick={downloadTemplate}>Download template</Button>
+            <label className="wh-btn wh-btn--primary" style={{ cursor: "pointer" }}>
+              {importing ? "Importing…" : "Choose CSV file"}
+              <input type="file" accept=".csv,text/csv" onChange={handleFile} disabled={importing} style={{ display: "none" }} />
+            </label>
+          </div>
+        </Card>
+      </div>
+
+      <Card className="wh-inv-import-export__ref">
+        <h3 className="wh-card__title">CSV column reference</h3>
+        <ul className="wh-list wh-inv-csv-ref">
+          <li><strong>selling_price</strong> — required for new products</li>
+          <li><strong>cost_price</strong> — optional (defaults to 0)</li>
+          <li><strong>discount, tax</strong> — optional pricing fields (default 0)</li>
+          <li><strong>category_name</strong> — must match an existing category at the store (case-insensitive)</li>
+          <li><strong>outlet_id</strong> — store ID for this product</li>
+          <li><strong>initial_qty</strong> — optional opening stock</li>
+        </ul>
+      </Card>
+
+      {error && <p className="wh-field__error wh-inv-import-export__error">{error}</p>}
+      {result && (
+        <Card className="wh-inv-import-export__results">
+          <h3 className="wh-card__title">Import results</h3>
+          <p className="wh-card__text">Created: {result.created} · Skipped: {result.skipped}</p>
+          {result.errors?.length > 0 && (
+            <ul className="wh-list">
+              {result.errors.map((err, i) => (
+                <li key={i}>Row {err.row}: {err.message}</li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      )}
+    </div>
+  );
+}

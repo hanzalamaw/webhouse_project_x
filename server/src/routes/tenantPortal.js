@@ -3,6 +3,7 @@ import { tenantPortalController, createTenantPortalMiddleware } from "../control
 import { sessionRepository } from "../repositories/sessionRepository.js";
 
 import { createTenantPermissionMiddleware, ADMIN_MODULE } from "../middleware/tenantPermissions.js";
+import { impersonationAudit } from "../middleware/impersonationAudit.js";
 
 
 
@@ -22,7 +23,7 @@ export function registerTenantPortalRoutes(app, verifyToken) {
 
   const { loadPermissions, requirePermission } = createTenantPermissionMiddleware();
 
-  const guard = [verifyToken, requireTenant, requireSession, loadPermissions];
+  const guard = [verifyToken, requireTenant, impersonationAudit, requireSession, loadPermissions];
 
   const view = requirePermission(ADMIN_MODULE, "view");
 

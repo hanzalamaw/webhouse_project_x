@@ -51,6 +51,24 @@ export const posRepository = {
     return rows;
   },
 
+  async countOutlets(tenantId) {
+    const [[row]] = await readDb.query(
+      `SELECT COUNT(*) AS total FROM pos_outlets
+       WHERE tenant_id = ? AND deleted_at IS NULL`,
+      [tenantId]
+    );
+    return Number(row.total || 0);
+  },
+
+  async getTenantStoreLimit(tenantId) {
+    const [rows] = await readDb.query(
+      `SELECT max_stores FROM wh_tenant_limits
+       WHERE tenant_id = ? AND deleted_at IS NULL LIMIT 1`,
+      [tenantId]
+    );
+    return Number(rows[0]?.max_stores || 0);
+  },
+
   async getOutlet(tenantId, id) {
     const [rows] = await readDb.query(
       `SELECT * FROM pos_outlets WHERE id = ? AND ${tw("pos_outlets", tenantId)} LIMIT 1`,
@@ -61,9 +79,18 @@ export const posRepository = {
 
   async createOutlet(tenantId, data) {
     const [result] = await writeDb.query(
-      `INSERT INTO pos_outlets (outlet_name, location, city, status, tenant_id)
-       VALUES (?, ?, ?, ?, ?)`,
-      [data.outlet_name, data.location || null, data.city || null, data.status || "active", tenantId]
+      `INSERT INTO pos_outlets (outlet_name, location, city, status, store_open_time, store_close_time, opening_balance, tenant_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        data.outlet_name,
+        data.location || null,
+        data.city || null,
+        data.status || "active",
+        data.store_open_time || null,
+        data.store_close_time || null,
+        Number(data.opening_balance) || 0,
+        tenantId,
+      ]
     );
     return this.getOutlet(tenantId, result.insertId);
   },
@@ -71,9 +98,20 @@ export const posRepository = {
   async updateOutlet(tenantId, id, data) {
     const [result] = await writeDb.query(
       `UPDATE pos_outlets SET
-         outlet_name = ?, location = ?, city = ?, status = ?
+         outlet_name = ?, location = ?, city = ?, status = ?,
+         store_open_time = ?, store_close_time = ?, opening_balance = ?
        WHERE id = ? AND ${tw("pos_outlets", tenantId)}`,
-      [data.outlet_name, data.location || null, data.city || null, data.status || "active", id, tenantId]
+      [
+        data.outlet_name,
+        data.location || null,
+        data.city || null,
+        data.status || "active",
+        data.store_open_time || null,
+        data.store_close_time || null,
+        Number(data.opening_balance) || 0,
+        id,
+        tenantId,
+      ]
     );
     return result.affectedRows === 1 ? this.getOutlet(tenantId, id) : null;
   },
@@ -100,7 +138,7 @@ export const posRepository = {
 
   async getTerminal(tenantId, id) {
     const [rows] = await readDb.query(
-      `SELECT t.*, o.outlet_name
+      `SELECT t.*, o.outlet_name, o.store_open_time, o.store_close_time, o.opening_balance AS store_opening_balance, o.city AS outlet_city
        FROM pos_terminals t
        INNER JOIN pos_outlets o ON o.id = t.outlet_id AND o.deleted_at IS NULL
        WHERE t.id = ? AND ${tw("t", tenantId)} LIMIT 1`,
@@ -109,13 +147,20 @@ export const posRepository = {
     return rows[0] || null;
   },
 
-  async getTerminalByDeviceCode(tenantId, deviceCode) {
+  async getTerminalByDeviceCode(tenantId, outletId, deviceCode, excludeId = null) {
+    const params = [deviceCode, outletId, tenantId];
+    let exclude = "";
+    if (excludeId) {
+      exclude = " AND t.id <> ?";
+      params.push(excludeId);
+    }
     const [rows] = await readDb.query(
-      `SELECT t.*, o.outlet_name
+      `SELECT t.*, o.outlet_name, o.store_open_time, o.store_close_time, o.opening_balance AS store_opening_balance, o.city AS outlet_city
        FROM pos_terminals t
        INNER JOIN pos_outlets o ON o.id = t.outlet_id AND o.deleted_at IS NULL
-       WHERE t.device_code = ? AND ${tw("t", tenantId)} LIMIT 1`,
-      [deviceCode, tenantId]
+       WHERE t.device_code = ? AND t.outlet_id = ? AND ${tw("t", tenantId)}${exclude}
+       LIMIT 1`,
+      params
     );
     return rows[0] || null;
   },
@@ -201,6 +246,131 @@ export const posRepository = {
     return rows;
   },
 
+  async listTerminalBalances(tenantId) {
+    const [rows] = await readDb.query(
+      `SELECT t.id, t.terminal_name, t.device_code, t.status, t.outlet_id,
+              o.outlet_name,
+              r.id AS register_id,
+              r.opening_balance,
+              r.cash_collected,
+              r.opened_at,
+              CASE WHEN r.id IS NOT NULL AND r.closed_at IS NULL THEN 'open' ELSE 'closed' END AS shift_status
+       FROM pos_terminals t
+       INNER JOIN pos_outlets o ON o.id = t.outlet_id AND o.deleted_at IS NULL
+       LEFT JOIN pos_cash_registers r ON r.terminal_id = t.id
+         AND r.tenant_id = t.tenant_id AND r.deleted_at IS NULL AND r.closed_at IS NULL
+       WHERE ${tw("t", tenantId)}
+       ORDER BY o.outlet_name ASC, t.terminal_name ASC`,
+      [tenantId]
+    );
+    return rows.map((row) => ({
+      ...row,
+      current_balance:
+        row.shift_status === "open"
+          ? Number(row.opening_balance || 0) + Number(row.cash_collected || 0)
+          : null,
+    }));
+  },
+
+  async getTerminalLogs(tenantId, terminalId) {
+    const terminal = await this.getTerminal(tenantId, terminalId);
+    if (!terminal) return null;
+
+    const [registers] = await readDb.query(
+      `SELECT r.*, ob.name AS opened_by_name, cb.name AS closed_by_name
+       FROM pos_cash_registers r
+       INNER JOIN users ob ON ob.id = r.opened_by AND ob.deleted_at IS NULL
+       LEFT JOIN users cb ON cb.id = r.closed_by AND cb.deleted_at IS NULL
+       WHERE r.terminal_id = ? AND ${tw("r", tenantId)}
+       ORDER BY r.opened_at DESC
+       LIMIT 50`,
+      [terminalId, tenantId]
+    );
+
+    const [sales] = await readDb.query(
+      `SELECT s.id, s.sale_no, s.payable_amount, s.payment_status, s.total_amount, s.discount_amount, s.created_at,
+              u.name AS cashier_name, c.customer_name
+       FROM pos_sales s
+       INNER JOIN users u ON u.id = s.created_by AND u.deleted_at IS NULL
+       LEFT JOIN crm_customers c ON c.id = s.crm_customers_id AND c.deleted_at IS NULL
+       WHERE s.terminal_id = ? AND ${tw("s", tenantId)}
+       ORDER BY s.created_at DESC
+       LIMIT 50`,
+      [terminalId, tenantId]
+    );
+
+    const openRegister = await this.getOpenRegister(tenantId, terminalId);
+
+    return { terminal, open_register: openRegister, registers, sales };
+  },
+
+  async outletDashboard(tenantId, outletId) {
+    const outlet = await this.getOutlet(tenantId, outletId);
+    if (!outlet) return null;
+
+    const [[stats]] = await readDb.query(
+      `SELECT
+         (SELECT COUNT(*) FROM pos_terminals WHERE outlet_id = ? AND tenant_id = ? AND deleted_at IS NULL) AS terminal_count,
+         (SELECT COUNT(*) FROM pos_sales WHERE outlet_id = ? AND tenant_id = ? AND deleted_at IS NULL
+            AND DATE(created_at) = CURDATE()) AS sales_today,
+         (SELECT COALESCE(SUM(payable_amount), 0) FROM pos_sales WHERE outlet_id = ? AND tenant_id = ? AND deleted_at IS NULL
+            AND DATE(created_at) = CURDATE()) AS revenue_today,
+         (SELECT COUNT(*) FROM pos_cash_registers r
+            INNER JOIN pos_terminals t ON t.id = r.terminal_id AND t.deleted_at IS NULL
+            WHERE r.outlet_id = ? AND r.tenant_id = ? AND r.deleted_at IS NULL AND r.closed_at IS NULL) AS open_registers,
+         (SELECT COUNT(*) FROM pos_sales WHERE outlet_id = ? AND tenant_id = ? AND deleted_at IS NULL) AS total_sales,
+         (SELECT COALESCE(SUM(payable_amount), 0) FROM pos_sales WHERE outlet_id = ? AND tenant_id = ? AND deleted_at IS NULL) AS total_revenue`,
+      [outletId, tenantId, outletId, tenantId, outletId, tenantId, outletId, tenantId, outletId, tenantId, outletId, tenantId]
+    );
+
+    const [terminals] = await readDb.query(
+      `SELECT t.id, t.terminal_name, t.device_code, t.status, t.created_at
+       FROM pos_terminals t
+       WHERE t.outlet_id = ? AND ${tw("t", tenantId)}
+       ORDER BY t.terminal_name ASC`,
+      [outletId, tenantId]
+    );
+
+    const [recent_sales] = await readDb.query(
+      `SELECT s.id, s.sale_no, s.payable_amount, s.payment_status, s.created_at,
+              t.terminal_name, u.name AS cashier_name
+       FROM pos_sales s
+       INNER JOIN pos_terminals t ON t.id = s.terminal_id AND t.deleted_at IS NULL
+       INNER JOIN users u ON u.id = s.created_by AND u.deleted_at IS NULL
+       WHERE s.outlet_id = ? AND ${tw("s", tenantId)}
+       ORDER BY s.created_at DESC
+       LIMIT 10`,
+      [outletId, tenantId]
+    );
+
+    const [registers] = await readDb.query(
+      `SELECT r.id, r.opening_balance, r.cash_collected, r.closing_balance, r.opened_at, r.closed_at,
+              t.terminal_name, ob.name AS opened_by_name
+       FROM pos_cash_registers r
+       INNER JOIN pos_terminals t ON t.id = r.terminal_id AND t.deleted_at IS NULL
+       INNER JOIN users ob ON ob.id = r.opened_by AND ob.deleted_at IS NULL
+       WHERE r.outlet_id = ? AND ${tw("r", tenantId)}
+       ORDER BY r.opened_at DESC
+       LIMIT 15`,
+      [outletId, tenantId]
+    );
+
+    return {
+      outlet,
+      stats: {
+        terminal_count: Number(stats.terminal_count) || 0,
+        sales_today: Number(stats.sales_today) || 0,
+        revenue_today: Number(stats.revenue_today) || 0,
+        open_registers: Number(stats.open_registers) || 0,
+        total_sales: Number(stats.total_sales) || 0,
+        total_revenue: Number(stats.total_revenue) || 0,
+      },
+      terminals,
+      recent_sales,
+      registers,
+    };
+  },
+
   async getOpenRegister(tenantId, terminalId) {
     const [rows] = await readDb.query(
       `SELECT * FROM pos_cash_registers
@@ -253,19 +423,6 @@ export const posRepository = {
     );
   },
 
-  async listTerminalProducts(tenantId) {
-    const [rows] = await readDb.query(
-      `SELECT p.id, p.product_name, p.sku, p.unit, p.selling_price, p.discount, p.tax, p.status,
-              c.category_name
-       FROM inventory_products p
-       INNER JOIN inventory_categories c ON c.id = p.category_id AND c.deleted_at IS NULL
-       WHERE p.tenant_id = ? AND p.deleted_at IS NULL AND p.status = 'active'
-       ORDER BY p.product_name ASC`,
-      [tenantId]
-    );
-    return rows;
-  },
-
   async nextSaleNo(tenantId) {
     const [[row]] = await readDb.query(
       `SELECT COUNT(*) AS cnt FROM pos_sales WHERE tenant_id = ? AND deleted_at IS NULL`,
@@ -313,8 +470,8 @@ export const posRepository = {
         ]
       );
     }
-    if (data.register_id) {
-      await this.addCashCollected(tenantId, data.register_id, data.payable_amount);
+    if (data.register_id && data.register_cash_amount) {
+      await this.addCashCollected(tenantId, data.register_id, data.register_cash_amount);
     }
     return this.getSale(tenantId, saleId);
   },
