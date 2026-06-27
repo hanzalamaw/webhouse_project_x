@@ -24,6 +24,7 @@ const MODULE_IMAGES = {
   ecommerce: ecommerceImage,
   finance: financeImage,
   "inventory-procurement": inventoryImage,
+  "pos-terminal": posImage,
 };
 
 const MODULE_DESCRIPTIONS = {
@@ -35,6 +36,7 @@ const MODULE_DESCRIPTIONS = {
   ecommerce: "Connect Shopify, WooCommerce and marketplaces.",
   finance: "Expenses, transactions and financial reporting.",
   "inventory-procurement": "Products, warehouses and stock operations.",
+  "pos-terminal": "Cashier checkout — scan-free product grid and shift management.",
 };
 
 function getGreeting() {

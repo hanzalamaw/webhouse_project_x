@@ -7,6 +7,7 @@ import { FormField } from "../../../../../../components/FormField";
 import { Button } from "../../../../../../components/Button";
 import { SearchableSelect } from "../../../../../../components/SearchableSelect";
 import { useInventoryReference } from "../../hooks/useInventoryReference";
+import CreateCategoryModal from "../../components/CreateCategoryModal";
 import { PRODUCT_STATUS, PRODUCT_UNITS, MODULE_BASE } from "../../constants";
 import { formatTotalPrice } from "../../utils/pricing";
 
@@ -85,6 +86,7 @@ export default function CreateProduct() {
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState("");
+  const [createCategoryOpen, setCreateCategoryOpen] = useState(false);
 
   const set = (key, value) => setForm((f) => ({ ...f, [key]: value }));
 
@@ -307,17 +309,26 @@ export default function CreateProduct() {
         <FormBlock step={3} title="Category" description="Assign this product to a category.">
           {refLoading ? (
             <p className="wh-muted">Loading categories…</p>
-          ) : categoryOptions.length === 0 ? (
-            <p className="wh-field__error">No categories found. Create a category first.</p>
           ) : (
-            <SearchableSelect
-              id="category_id"
-              label="Category"
-              options={categoryOptions}
-              value={form.category_id}
-              onChange={(v) => set("category_id", v)}
-              placeholder="Search categories…"
-            />
+            <div className="wh-form-grid">
+              {categoryOptions.length === 0 ? (
+                <p className="wh-field__error wh-form-grid__full">No categories yet. Create one to continue.</p>
+              ) : (
+                <SearchableSelect
+                  id="category_id"
+                  label="Category"
+                  options={categoryOptions}
+                  value={form.category_id}
+                  onChange={(v) => set("category_id", v)}
+                  placeholder="Search categories…"
+                />
+              )}
+              <div style={{ display: "flex", alignItems: "flex-end" }}>
+                <Button type="button" variant="secondary" onClick={() => setCreateCategoryOpen(true)}>
+                  New category
+                </Button>
+              </div>
+            </div>
           )}
         </FormBlock>
 
@@ -455,6 +466,16 @@ export default function CreateProduct() {
           </Button>
         </div>
       </form>
+
+      <CreateCategoryModal
+        open={createCategoryOpen}
+        onClose={() => setCreateCategoryOpen(false)}
+        authFetch={authFetch}
+        onCreated={async (category) => {
+          await reload();
+          if (category?.id) set("category_id", String(category.id));
+        }}
+      />
     </div>
   );
 }

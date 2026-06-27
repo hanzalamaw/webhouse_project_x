@@ -8,6 +8,7 @@ import { registerAuthRoutes } from "./src/routes/auth.js";
 import { registerDashboardRoutes } from "./src/routes/dashboard.js";
 import { registerWhPortalRoutes } from "./src/routes/whPortal.js";
 import { registerInventoryRoutes } from "./src/routes/inventory.js";
+import { registerPosRoutes } from "./src/routes/pos.js";
 import { registerCrmRoutes } from "./src/routes/crm.js";
 import { registerTenantPortalRoutes } from "./src/routes/tenantPortal.js";
 import { purgeSoftDeleted } from "./src/jobs/purgeSoftDeleted.js";
@@ -43,6 +44,7 @@ const startServer = async () => {
   });
   registerInventoryRoutes(app, verifyToken);
   registerCrmRoutes(app, verifyToken);
+  registerPosRoutes(app, verifyToken);
   registerTenantPortalRoutes(app, verifyToken);
 
   app.get("/", (req, res) => {

@@ -17,6 +17,11 @@ import { getNavItems as getOrderManagementNav } from "./order-management/navConf
 
 import PosDashboard from "./pos/pages/Dashboard";
 import { getNavItems as getPosNav } from "./pos/navConfig";
+import { POS_ROUTES } from "./pos/routes.jsx";
+
+import PosTerminalDashboard from "./pos-terminal/pages/Dashboard";
+import { getNavItems as getPosTerminalNav } from "./pos-terminal/navConfig";
+import { POS_TERMINAL_ROUTES } from "./pos-terminal/routes.jsx";
 
 import CrmDashboard from "./crm/pages/Dashboard";
 import { getNavItems as getCrmNav } from "./crm/navConfig";
@@ -38,7 +43,7 @@ function normalizeName(value) {
   return String(value || "").trim().toLowerCase();
 }
 
-/** Canonical tenant-facing modules (fixed set of 8). */
+/** Canonical tenant-facing modules. */
 export const TENANT_MODULE_DEFINITIONS = [
   {
     slug: "admin",
@@ -85,6 +90,7 @@ export const TENANT_MODULE_DEFINITIONS = [
     aliases: [],
     Dashboard: PosDashboard,
     getNavItems: getPosNav,
+    routes: POS_ROUTES,
   },
   {
     slug: "crm",
@@ -123,6 +129,17 @@ export const TENANT_MODULE_DEFINITIONS = [
     Dashboard: InventoryDashboard,
     getNavItems: getInventoryNav,
     routes: INVENTORY_ROUTES,
+  },
+  {
+    slug: "pos-terminal",
+    name: "POS Terminal",
+    displayNumber: 9,
+    letter: "T",
+    aliases: [],
+    fullScreen: true,
+    Dashboard: PosTerminalDashboard,
+    getNavItems: getPosTerminalNav,
+    routes: POS_TERMINAL_ROUTES,
   },
 ];
 

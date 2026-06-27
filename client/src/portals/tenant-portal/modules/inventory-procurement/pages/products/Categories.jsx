@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "../../../../../../context/AuthContext";
 import { apiFetch, fetchAllTableRows, TABLE_PAGE_SIZE } from "../../../../../../api/client";
 import { PageHeader } from "../../../../../../components/PageHeader";
@@ -11,9 +11,8 @@ import { ConfirmDeleteModal } from "../../../../../../components/ConfirmDeleteMo
 import { StatusBadge } from "../../../../../../components/Badge";
 import { PRODUCT_STATUS } from "../../constants";
 import { useInventoryReference } from "../../hooks/useInventoryReference";
+import CreateCategoryModal from "../../components/CreateCategoryModal";
 import ProductPicker from "../../components/ProductPicker";
-
-const EMPTY_FORM = { category_name: "", status: "active", product_ids: [] };
 
 export default function Categories() {
   const { authFetch } = useAuth();
@@ -22,9 +21,6 @@ export default function Categories() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
-  const [form, setForm] = useState(EMPTY_FORM);
-  const [productSearch, setProductSearch] = useState("");
-  const [productCategoryFilter, setProductCategoryFilter] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [expandedId, setExpandedId] = useState(null);
@@ -51,53 +47,7 @@ export default function Categories() {
 
   const closeCreate = () => {
     setCreateOpen(false);
-    setForm(EMPTY_FORM);
-    setProductSearch("");
-    setProductCategoryFilter("");
     setError("");
-  };
-
-  const toggleProduct = (id, target = "create") => {
-    const sid = String(id);
-    if (target === "edit") {
-      setEditRow((r) => ({
-        ...r,
-        product_ids: r.product_ids.includes(sid)
-          ? r.product_ids.filter((x) => x !== sid)
-          : [...r.product_ids, sid],
-      }));
-      return;
-    }
-    setForm((f) => ({
-      ...f,
-      product_ids: f.product_ids.includes(sid)
-        ? f.product_ids.filter((x) => x !== sid)
-        : [...f.product_ids, sid],
-    }));
-  };
-
-  const createCategory = async (e) => {
-    e.preventDefault();
-    if (!form.category_name.trim()) {
-      setError("Category name is required");
-      return;
-    }
-    setSaving(true);
-    setError("");
-    try {
-      await apiFetch(
-        "/inventory/categories",
-        { method: "POST", body: JSON.stringify({ ...form, product_ids: form.product_ids.map(Number) }) },
-        authFetch
-      );
-      closeCreate();
-      await load();
-      await reloadRef();
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setSaving(false);
-    }
   };
 
   const openDetail = async (row) => {
@@ -113,6 +63,16 @@ export default function Categories() {
     } catch {
       setDetail(null);
     }
+  };
+
+  const toggleProduct = (id) => {
+    const sid = String(id);
+    setEditRow((r) => ({
+      ...r,
+      product_ids: r.product_ids.includes(sid)
+        ? r.product_ids.filter((x) => x !== sid)
+        : [...r.product_ids, sid],
+    }));
   };
 
   const openEdit = async (row) => {
@@ -233,36 +193,17 @@ export default function Categories() {
         )}
       </Card>
 
-      <Modal open={createOpen} title="Create category" onClose={closeCreate} wide className="wh-modal--category">
-        <form onSubmit={createCategory} className="wh-form">
-          <div className="wh-form-grid">
-            <FormField id="cat_name" label="Category name" value={form.category_name} onChange={(e) => setForm((f) => ({ ...f, category_name: e.target.value }))} required />
-            <FormField id="cat_status" label="Status" as="select" value={form.status} onChange={(e) => setForm((f) => ({ ...f, status: e.target.value }))}>
-              {PRODUCT_STATUS.map((s) => <option key={s} value={s}>{s}</option>)}
-            </FormField>
-          </div>
-          {products.length > 0 && (
-            <ProductPicker
-              products={products}
-              selectedIds={form.product_ids}
-              onToggle={(id) => toggleProduct(id, "create")}
-              search={productSearch}
-              onSearchChange={setProductSearch}
-              categoryFilter={productCategoryFilter}
-              onCategoryFilterChange={setProductCategoryFilter}
-              showCategoryFilter
-              showWarning
-              showCategoryTag
-              description="Assign products (optional). Products already in another category will be moved."
-            />
-          )}
-          {error && <p className="wh-field__error">{error}</p>}
-          <div className="wh-modal__actions">
-            <Button type="button" variant="secondary" onClick={closeCreate}>Cancel</Button>
-            <Button type="submit" disabled={saving}>{saving ? "Creating…" : "Create Category"}</Button>
-          </div>
-        </form>
-      </Modal>
+      <CreateCategoryModal
+        open={createOpen}
+        onClose={closeCreate}
+        authFetch={authFetch}
+        products={products}
+        showProductPicker
+        onCreated={async () => {
+          await load();
+          await reloadRef();
+        }}
+      />
 
       {editRow && (
         <Modal open title="Edit category" onClose={() => setEditRow(null)} wide className="wh-modal--category">
@@ -273,7 +214,7 @@ export default function Categories() {
           <ProductPicker
             products={products}
             selectedIds={editRow.product_ids}
-            onToggle={(id) => toggleProduct(id, "edit")}
+            onToggle={toggleProduct}
             search={editSearch}
             onSearchChange={setEditSearch}
             categoryFilter={editCategoryFilter}

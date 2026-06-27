@@ -243,6 +243,23 @@ export const inventoryRepository = {
     return rows[0] || null;
   },
 
+  async findCategoryByName(tenantId, categoryName, excludeId = null) {
+    const name = String(categoryName || "").trim();
+    if (!name) return null;
+    const params = [tenantId, name];
+    let sql = `SELECT c.id, c.category_name, c.status, c.created_at, c.tenant_id
+       FROM inventory_categories c
+       WHERE c.tenant_id = ? AND c.deleted_at IS NULL
+         AND LOWER(TRIM(c.category_name)) = LOWER(?)`;
+    if (excludeId != null) {
+      sql += ` AND c.id != ?`;
+      params.push(excludeId);
+    }
+    sql += ` LIMIT 1`;
+    const [rows] = await readDb.query(sql, params);
+    return rows[0] || null;
+  },
+
   async getCategoryProducts(tenantId, categoryId) {
     const [rows] = await readDb.query(
       `SELECT id, product_name, sku, status, category_id

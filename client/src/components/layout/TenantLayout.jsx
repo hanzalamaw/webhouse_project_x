@@ -3,6 +3,7 @@ import { useMemo } from "react";
 import { useAuth } from "../../context/AuthContext";
 import { Button } from "../Button";
 import TenantSidebar from "./TenantSidebar";
+import { getModuleBySlug } from "../../portals/tenant-portal/modules/registry";
 import "./MainLayout.css";
 
 function moduleSlugFromPath(pathname) {
@@ -16,7 +17,16 @@ export default function TenantLayout() {
     () => moduleSlugFromPath(location.pathname),
     [location.pathname]
   );
+  const fullScreen = Boolean(getModuleBySlug(moduleSlug)?.fullScreen);
   const { user, logout } = useAuth();
+
+  if (fullScreen) {
+    return (
+      <div className="wh-layout wh-layout--fullscreen">
+        <Outlet />
+      </div>
+    );
+  }
 
   return (
     <div className="wh-layout">
