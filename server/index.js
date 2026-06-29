@@ -1,5 +1,6 @@
 import express from "express";
 import cors from "cors";
+import cookieParser from "cookie-parser";
 import dotenv from "dotenv";
 import { createPool, closePool } from "./src/db/pool.js";
 import { initDb } from "./src/database/db.js";
@@ -8,12 +9,22 @@ import { registerAuthRoutes } from "./src/routes/auth.js";
 import { registerDashboardRoutes } from "./src/routes/dashboard.js";
 import { registerWhPortalRoutes } from "./src/routes/whPortal.js";
 import { registerInventoryRoutes } from "./src/routes/inventory.js";
+import { registerEcommerceRoutes } from "./src/routes/ecommerce.js";
+import { shopifyWebhookHandler } from "./src/routes/shopifyWebhooks.js";
 import { purgeSoftDeleted } from "./src/jobs/purgeSoftDeleted.js";
 
 dotenv.config();
 
 const app = express();
-app.use(cors());
+app.use(cors({ origin: true, credentials: true }));
+
+app.post(
+  "/api/shopify/webhooks",
+  express.raw({ type: "application/json" }),
+  shopifyWebhookHandler,
+);
+
+app.use(cookieParser());
 app.use(express.json());
 
 const PURGE_INTERVAL_MS = 24 * 60 * 60 * 1000;
@@ -37,6 +48,7 @@ const startServer = async () => {
     jwtRefreshExpiresIn: JWT_REFRESH_EXPIRES_IN,
   });
   registerInventoryRoutes(app, verifyToken);
+  registerEcommerceRoutes(app, verifyToken);
 
   app.get("/", (req, res) => {
     res.send("API running");
