@@ -235,23 +235,45 @@ export default function TenantSidebar({ moduleSlug }) {
   );
 
   const footerBlock = (
-    <div className="wh-sidebar-footer">
-      <button type="button" className="wh-footer-link wh-footer-link--danger" onClick={handleLogout}>
-        <TENANT_FOOTER_ITEMS.logout.icon />
-        {(isExpanded || isMobile) && <span>{TENANT_FOOTER_ITEMS.logout.label}</span>}
-      </button>
-      {(isExpanded || isMobile) ? (
-        <div className="wh-footer-toggle">
-          <TENANT_FOOTER_ITEMS.nightMode.icon />
-          <span>{TENANT_FOOTER_ITEMS.nightMode.label}</span>
-          <Toggle checked={darkMode} onChange={toggleDarkMode} />
-        </div>
-      ) : (
-        <button type="button" className="wh-footer-link" onClick={toggleDarkMode} title="Night Mode">
-          <TENANT_FOOTER_ITEMS.nightMode.icon />
+    <>
+      <div className="wh-sidebar-footer-pre">
+        <button
+          type="button"
+          className="wh-footer-link"
+          onClick={() => handleNavigate(TENANT_FOOTER_ITEMS.allModules.path)}
+          title={!isExpanded && !isMobile ? TENANT_FOOTER_ITEMS.allModules.label : undefined}
+        >
+          <TENANT_FOOTER_ITEMS.allModules.icon />
+          {(isExpanded || isMobile) && <span>{TENANT_FOOTER_ITEMS.allModules.label}</span>}
         </button>
-      )}
-    </div>
+      </div>
+      <div className="wh-sidebar-footer">
+        <button type="button" className="wh-footer-link wh-footer-link--danger" onClick={handleLogout}>
+          <TENANT_FOOTER_ITEMS.logout.icon />
+          {(isExpanded || isMobile) && <span>{TENANT_FOOTER_ITEMS.logout.label}</span>}
+        </button>
+        {(isExpanded || isMobile) ? (
+          <div className="wh-footer-toggle">
+            <TENANT_FOOTER_ITEMS.nightMode.icon />
+            <span>{TENANT_FOOTER_ITEMS.nightMode.label}</span>
+            <Toggle checked={darkMode} onChange={toggleDarkMode} />
+          </div>
+        ) : (
+          <button type="button" className="wh-footer-link" onClick={toggleDarkMode} title="Night Mode">
+            <TENANT_FOOTER_ITEMS.nightMode.icon />
+          </button>
+        )}
+        <button
+          type="button"
+          className="wh-footer-link"
+          onClick={() => handleNavigate(TENANT_FOOTER_ITEMS.helpCenter.path)}
+          title={!isExpanded && !isMobile ? TENANT_FOOTER_ITEMS.helpCenter.label : undefined}
+        >
+          <TENANT_FOOTER_ITEMS.helpCenter.icon />
+          {(isExpanded || isMobile) && <span>{TENANT_FOOTER_ITEMS.helpCenter.label}</span>}
+        </button>
+      </div>
+    </>
   );
 
   if (isMobile) {

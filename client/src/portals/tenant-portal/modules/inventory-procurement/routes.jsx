@@ -9,6 +9,8 @@ import StockOut from "./pages/procurement/StockOut";
 import StockTransfers from "./pages/procurement/StockTransfers";
 import CreateBulkStock from "./pages/procurement/CreateBulkStock";
 import MovementHistory from "./pages/procurement/MovementHistory";
+import ViewStockMovement from "./pages/procurement/ViewStockMovement";
+import ViewStockTransfer from "./pages/procurement/ViewStockTransfer";
 
 export const INVENTORY_ROUTES = [
   { path: "products/create", element: <CreateProduct /> },
@@ -25,5 +27,7 @@ export const INVENTORY_ROUTES = [
   { path: "procurement/stock-out/create", element: <CreateBulkStock /> },
   { path: "procurement/transfers", element: <StockTransfers /> },
   { path: "procurement/transfers/create", element: <CreateBulkStock /> },
+  { path: "procurement/transfers/view/:transferId", element: <ViewStockTransfer /> },
+  { path: "procurement/movements/view/:movementId", element: <ViewStockMovement /> },
   { path: "procurement/movement-history", element: <MovementHistory /> },
 ];

@@ -1,10 +1,12 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { PageHeader } from "../../../../../components/PageHeader";
+import { FormPageAlerts } from "../../../../../components/FormPageLayout";
 import { Card } from "../../../../../components/Card";
 import { DataTable } from "../../../../../components/DataTable";
 import { TableToolbar } from "../../../../../components/TableToolbar";
 import { Button } from "../../../../../components/Button";
 import { Badge } from "../../../../../components/Badge";
+import { ConfirmActionModal } from "../../../../../components/ConfirmActionModal";
 import { useAuth } from "../../../../../context/AuthContext";
 import { useModulePermission } from "../../../../../hooks/useModulePermission";
 import { apiFetch, fetchAllTableRows, TABLE_PAGE_SIZE } from "../../../../../api/client";
@@ -27,6 +29,8 @@ export default function Sessions() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [terminatingId, setTerminatingId] = useState(null);
+  const [terminateTarget, setTerminateTarget] = useState(null);
+  const [terminateError, setTerminateError] = useState("");
   const [toolbar, setToolbar] = useState({ ...EMPTY_TOOLBAR });
 
   const filteredRows = useToolbarFilteredRows(rows, toolbar, { dateField: "login_at" });
@@ -58,12 +62,14 @@ export default function Sessions() {
     setTerminatingId(id);
     setMessage("");
     setError("");
+    setTerminateError("");
     try {
       await apiFetch(`/tenant/sessions/${id}/terminate`, { method: "POST" }, authFetch);
       setMessage("Session terminated.");
+      setTerminateTarget(null);
       await load();
     } catch (err) {
-      setError(err.message || "Failed to terminate session");
+      setTerminateError(err.message || "Failed to terminate session");
     } finally {
       setTerminatingId(null);
     }
@@ -90,7 +96,7 @@ export default function Sessions() {
             variant="danger"
             className="wh-btn--sm"
             disabled={!canTerminate || terminatingId === row.id}
-            onClick={() => terminate(row.id)}
+            onClick={() => setTerminateTarget(row)}
           >
             {terminatingId === row.id ? "…" : "Terminate"}
           </Button>
@@ -103,8 +109,7 @@ export default function Sessions() {
   return (
     <div className="wh-page">
       <PageHeader title="Sessions" description="Active and recent sessions for your organization." />
-      {error && <div className="wh-alert wh-alert--error">{error}</div>}
-      {message && <div className="wh-alert wh-alert--success">{message}</div>}
+      <FormPageAlerts error={error} message={message} />
       <Card className="wh-card--table">
         {loading ? (
           <p className="wh-muted">Loading…</p>
@@ -127,6 +132,25 @@ export default function Sessions() {
           </>
         )}
       </Card>
+
+      <ConfirmActionModal
+        open={Boolean(terminateTarget)}
+        onClose={() => {
+          if (terminatingId) return;
+          setTerminateTarget(null);
+          setTerminateError("");
+        }}
+        onConfirm={() => terminate(terminateTarget.id)}
+        title="End this session?"
+        message={
+          terminateTarget
+            ? `Are you sure you want to end the session for ${terminateTarget.user_name || "this user"}? They will be signed out immediately.`
+            : ""
+        }
+        confirmLabel="End session"
+        loading={Boolean(terminatingId)}
+        error={terminateError}
+      />
     </div>
   );
 }

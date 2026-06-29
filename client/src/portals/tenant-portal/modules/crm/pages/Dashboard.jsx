@@ -7,7 +7,9 @@ import { BarChart, DonutChart, HBars, CHART_COLORS } from "../../../../../compon
 import { StatusBadge } from "../../../../../components/Badge";
 import { formatPKR } from "../../../../../utils/currency";
 import { formatDateTime } from "../../../../../utils/dateTime";
-import { inDateRange } from "../../../../../utils/tableFilters";
+import { DashboardFilter } from "../../../../../components/DashboardFilter";
+import { EMPTY_DASHBOARD_FILTER, filterRowsByDashboard } from "../../../../../utils/dashboardFilter";
+import { useFiscalYear } from "../../../../../context/FiscalYearContext";
 import { MODULE_BASE, CUSTOMER_TYPE_LABELS, LEAD_SOURCE_LABELS } from "../constants";
 import { TenantsIcon, SupportIcon, LogsIcon, ImpersonateIcon } from "../../../../../components/icons";
 
@@ -68,11 +70,8 @@ export default function CrmDashboard() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [allTime, setAllTime] = useState(true);
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
-
-  const range = useMemo(() => ({ allTime, dateFrom, dateTo }), [allTime, dateFrom, dateTo]);
+  const [dashFilter, setDashFilter] = useState({ ...EMPTY_DASHBOARD_FILTER });
+  const fiscalYearStart = useFiscalYear();
 
   useEffect(() => {
     let active = true;
@@ -144,9 +143,8 @@ export default function CrmDashboard() {
 
   const filteredActivities = useMemo(() => {
     const rows = data?.recent_activities || [];
-    if (range.allTime) return rows;
-    return rows.filter((r) => inDateRange(r.created_at, range));
-  }, [data?.recent_activities, range]);
+    return filterRowsByDashboard(rows, "created_at", dashFilter, fiscalYearStart);
+  }, [data?.recent_activities, dashFilter, fiscalYearStart]);
 
   const recentActivities = useMemo(
     () =>
@@ -169,29 +167,12 @@ export default function CrmDashboard() {
 
       {error && <div className="wh-alert wh-alert--error">{error}</div>}
 
-      <div className="wh-dash-filter">
-        <label className="wh-dash-filter__label">
-          <input type="checkbox" checked={allTime} onChange={(e) => setAllTime(e.target.checked)} />
-          All time
-        </label>
-        <div className="wh-dash-filter__dates">
-          <input
-            type="date"
-            value={dateFrom}
-            disabled={allTime}
-            onChange={(e) => setDateFrom(e.target.value)}
-            aria-label="From date"
-          />
-          <span className="wh-dash-filter__sep">to</span>
-          <input
-            type="date"
-            value={dateTo}
-            disabled={allTime}
-            onChange={(e) => setDateTo(e.target.value)}
-            aria-label="To date"
-          />
-        </div>
-      </div>
+      <DashboardFilter
+        rows={data?.recent_activities || []}
+        dateField="created_at"
+        value={dashFilter}
+        onChange={setDashFilter}
+      />
 
       <div className="wh-dash-grid">
         <div className="wh-dash-col-3">

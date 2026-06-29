@@ -19,6 +19,10 @@ export default function StockTransfers() {
   const [error, setError] = useState("");
   const [actionLoading, setActionLoading] = useState(null);
 
+  const openTransfer = (row) => {
+    navigate(`${MODULE_BASE}/procurement/transfers/view/${row.id}`, { state: { transfer: row } });
+  };
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -69,6 +73,7 @@ export default function StockTransfers() {
     {
       label: "Actions",
       filter: false,
+      stopRowClick: true,
       render: (row) => (
         <div className="wh-action-btns">
           {row.transfer_status === "pending" && (
@@ -96,7 +101,14 @@ export default function StockTransfers() {
         {loading ? (
           <p className="wh-muted">Loading…</p>
         ) : (
-          <DataTable columns={columns} rows={rows} page={page} pageSize={TABLE_PAGE_SIZE} onPageChange={setPage} />
+          <DataTable
+            columns={columns}
+            rows={rows}
+            page={page}
+            pageSize={TABLE_PAGE_SIZE}
+            onPageChange={setPage}
+            onRowClick={openTransfer}
+          />
         )}
       </Card>
     </div>

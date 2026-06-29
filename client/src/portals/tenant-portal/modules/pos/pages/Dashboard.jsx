@@ -3,6 +3,9 @@ import { Link } from "react-router-dom";
 import { useAuth } from "../../../../../context/AuthContext";
 import { apiFetch, fetchAllTableRows } from "../../../../../api/client";
 import { PageHeader } from "../../../../../components/PageHeader";
+import { DashboardFilter } from "../../../../../components/DashboardFilter";
+import { EMPTY_DASHBOARD_FILTER, filterRowsByDashboard } from "../../../../../utils/dashboardFilter";
+import { useFiscalYear } from "../../../../../context/FiscalYearContext";
 import { StatusBadge } from "../../../../../components/Badge";
 import { HBars } from "../../../../../components/charts";
 import { formatPKR } from "../../../../../utils/currency";
@@ -44,6 +47,8 @@ export default function PosDashboard() {
   const [sales, setSales] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [dashFilter, setDashFilter] = useState({ ...EMPTY_DASHBOARD_FILTER });
+  const fiscalYearStart = useFiscalYear();
 
   useEffect(() => {
     let active = true;
@@ -73,9 +78,14 @@ export default function PosDashboard() {
   const dash = (n) => (loading ? "—" : n ?? 0);
   const money = (n) => (loading ? "—" : formatPKR(n));
 
+  const filteredSales = useMemo(
+    () => filterRowsByDashboard(sales, "created_at", dashFilter, fiscalYearStart),
+    [sales, dashFilter, fiscalYearStart]
+  );
+
   const salesByStore = useMemo(() => {
     const map = new Map();
-    for (const s of sales) {
+    for (const s of filteredSales) {
       const key = s.outlet_name || "Unknown";
       map.set(key, (map.get(key) || 0) + Number(s.payable_amount || 0));
     }
@@ -83,7 +93,7 @@ export default function PosDashboard() {
       .map(([label, value]) => ({ label, value }))
       .sort((a, b) => b.value - a.value)
       .slice(0, 6);
-  }, [sales]);
+  }, [filteredSales]);
 
   const quickLinks = useMemo(
     () => [
@@ -114,6 +124,8 @@ export default function PosDashboard() {
       />
 
       {error && <p className="wh-field__error">{error}</p>}
+
+      <DashboardFilter rows={sales} dateField="created_at" value={dashFilter} onChange={setDashFilter} />
 
       <div className="wh-dash-grid">
         <div className="wh-dash-col-3">

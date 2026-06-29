@@ -1,10 +1,14 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+﻿import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate, useSearchParams, useParams } from "react-router-dom";
 import { PageHeader } from "../../../../components/PageHeader";
-import { Card } from "../../../../components/Card";
 import { FormField } from "../../../../components/FormField";
 import { Button } from "../../../../components/Button";
-import { StepWizard, useWizardDraft } from "../../../../components/StepWizard";
+import { FormPageLayout, FormPageAlerts, FormActions } from "../../../../components/FormPageLayout";
+import { FormBlock } from "../../../../components/FormBlock";
+import { AccountDetailsModal } from "../../../../components/AccountDetailsModal";
+import { useWizardDraft } from "../../../../components/StepWizard";
+import { useUnsavedChangesGuard } from "../../../../hooks/useUnsavedChangesGuard";
+import { UnsavedChangesDialog } from "../../../../components/UnsavedChangesDialog";
 import { useAuth } from "../../../../context/AuthContext";
 import { useReferenceData, DEFAULT_CURRENCY, DEFAULT_TIMEZONE, formatTimezoneDisplay, formatCurrencyDisplay } from "../../../../hooks/useReferenceData";
 import { SearchableSelect } from "../../../../components/SearchableSelect";
@@ -16,6 +20,7 @@ import {
   BILLING_CYCLES,
 } from "../../../../api/client";
 import { formatPKR } from "../../../../utils/currency";
+import { buildTenantAccountSections } from "../../../../utils/accountDetails";
 import { formatModuleLabel, sortModulesByDisplayOrder } from "../../../tenant-portal/modules/registry";
 import {
   calcBillingTotal,
@@ -125,7 +130,7 @@ function mapTenantToDraft(t) {
   };
 }
 
-function MonthDayFields({ month, day, onChange, idPrefix }) {
+function MonthDayFields({ month, day, onChange, idPrefix, disabled = false }) {
   const daysInMonth = new Date(2000, month, 0).getDate();
   return (
     <div className="wh-month-day-row">
@@ -135,6 +140,7 @@ function MonthDayFields({ month, day, onChange, idPrefix }) {
         value={month}
         onChange={(e) => onChange(Number(e.target.value), day)}
         aria-label="Month"
+        disabled={disabled}
       >
         {MONTHS.map((m) => (
           <option key={m.value} value={m.value}>{m.label}</option>
@@ -146,6 +152,7 @@ function MonthDayFields({ month, day, onChange, idPrefix }) {
         value={day}
         onChange={(e) => onChange(month, Number(e.target.value))}
         aria-label="Day"
+        disabled={disabled}
       >
         {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((d) => (
           <option key={d} value={d}>{d}</option>
@@ -175,7 +182,7 @@ function ReviewRow({ label, value }) {
   return (
     <div className="wh-review-row">
       <span className="wh-review-row__label">{label}</span>
-      <span className="wh-review-row__value">{value ?? "—"}</span>
+      <span className="wh-review-row__value">{value ?? "â€”"}</span>
     </div>
   );
 }
@@ -185,6 +192,11 @@ function moduleCreateUrl(isEdit, tenantId) {
     return `/webhouse-portal/modules/create?returnTo=${encodeURIComponent(`/webhouse-portal/tenants/edit/${tenantId}`)}`;
   }
   return "/webhouse-portal/modules/create?resume=create-tenant";
+}
+
+function stripDraftMeta(draft) {
+  const { step, maxStep, tenant_id, ...rest } = draft;
+  return rest;
 }
 
 function planCreateUrl(isEdit, tenantId) {
@@ -209,6 +221,11 @@ export default function CreateTenant() {
   const [stepError, setStepError] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [detailsSections, setDetailsSections] = useState([]);
+  const [detailsTitle, setDetailsTitle] = useState("");
+  const [phase, setPhase] = useState("form");
+  const [baseline, setBaseline] = useState(null);
   const { currencies, timezones, loading: refLoading } = useReferenceData();
 
   useEffect(() => {
@@ -285,7 +302,9 @@ export default function CreateTenant() {
       try {
         const tenant = await apiFetch(`/tenants/${routeTenantId}`, {}, authFetch);
         if (!active) return;
-        setDraft(mapTenantToDraft(tenant));
+        const mapped = mapTenantToDraft(tenant);
+        setDraft(mapped);
+        setBaseline(JSON.stringify(stripDraftMeta(mapped)));
         setHydrated(true);
       } catch (err) {
         if (active) setError(err.message || "Failed to load tenant");
@@ -370,10 +389,6 @@ export default function CreateTenant() {
   }, [planModules, extraModules]);
 
   const handleCancel = () => {
-    clearDraft();
-    setExtraModules([]);
-    setStepError("");
-    setError("");
     navigate("/webhouse-portal/tenants/manage");
   };
 
@@ -437,12 +452,34 @@ export default function CreateTenant() {
     }));
   };
 
-  const setFiscalEnd = (month, day) => {
+  const isDirty = useMemo(() => {
+    const current = JSON.stringify(stripDraftMeta(draft));
+    if (isEdit) return baseline !== null && current !== baseline;
+    return current !== JSON.stringify(stripDraftMeta(buildInitial()));
+  }, [baseline, draft, isEdit]);
+
+  const { dialogOpen, stayOnPage, leavePage: proceedLeave, reloadPending } = useUnsavedChangesGuard(isDirty, { enabled: hydrated && (isEdit || isDirty) });
+
+  const discardLeave = () => {
+    clearDraft();
+    setExtraModules([]);
+    proceedLeave();
+  };
+
+  const validateAll = () => {
+    for (let i = 0; i < 8; i++) {
+      const err = validateStep(i);
+      if (err) {
+        setStepError(err);
+        return false;
+      }
+    }
     setStepError("");
-    setDraft((d) => ({
-      ...d,
-      organization: { ...d.organization, fiscal_year_end: fiscalToStorage(month, day) },
-    }));
+    return true;
+  };
+
+  const goToReview = () => {
+    if (validateAll()) setPhase("review");
   };
 
   const toggleModule = (id) => {
@@ -471,7 +508,7 @@ export default function CreateTenant() {
         break;
       case 1:
         if (!draft.subscription_plan_id) return "Select a subscription plan.";
-        if (!selectedPlan?.login_portal) return "Selected plan has no ERP portal — set it on the subscription plan.";
+        if (!selectedPlan?.login_portal) return "Selected plan has no ERP portal â€” set it on the subscription plan.";
         break;
       case 2:
         if (!draft.subscription_plan_id) return "Select a subscription plan first.";
@@ -567,11 +604,30 @@ export default function CreateTenant() {
       };
       if (isEdit) {
         await apiFetch(`/tenants/${routeTenantId}/full`, { method: "PUT", body: JSON.stringify(payload) }, authFetch);
+        setBaseline(JSON.stringify(stripDraftMeta(draft)));
+        clearDraft();
+        navigate("/webhouse-portal/tenants/manage");
       } else {
-        await apiFetch("/tenants", { method: "POST", body: JSON.stringify(payload) }, authFetch);
+        const createdPassword = draft.super_admin.password;
+        const created = await apiFetch("/tenants", { method: "POST", body: JSON.stringify(payload) }, authFetch);
+        clearDraft();
+        setDetailsTitle(`Tenant created â€” ${created.company_name || draft.company.company_name}`);
+        setDetailsSections(
+          buildTenantAccountSections({
+            tenant: created,
+            credentials: {
+              name: created.super_admin?.name || draft.super_admin.name,
+              username: created.super_admin?.username || draft.super_admin.username,
+              email: created.super_admin?.email || draft.super_admin.email,
+              password: createdPassword,
+            },
+            modules: created.modules || [],
+            organization: created.organization,
+            payment: created.payment,
+          })
+        );
+        setDetailsOpen(true);
       }
-      clearDraft();
-      navigate("/webhouse-portal/tenants/manage");
     } catch (err) {
       setError(err.message);
     } finally {
@@ -579,327 +635,316 @@ export default function CreateTenant() {
     }
   };
 
-  const steps = [
-    {
-      id: "company",
-      label: "Company",
-      content: (
-        <div className="wh-form-grid">
-          <FormField id="cn" label="Company Name" value={draft.company.company_name} onChange={update("company", "company_name")} required />
-          <FormField id="on" label="Owner Name" value={draft.company.owner_name} onChange={update("company", "owner_name")} required />
-          <FormField id="oe" label="Owner Email" type="email" value={draft.company.owner_email} onChange={update("company", "owner_email")} required />
-          <FormField id="op" label="Owner Phone" value={draft.company.owner_phone} onChange={update("company", "owner_phone")} required />
-          <FormField id="ind" label="Industry" value={draft.company.industry} onChange={update("company", "industry")} required />
-          <FormField id="st" label="Status" as="select" value={draft.company.status} onChange={update("company", "status")}>
-            {TENANT_STATUS.map((s) => (
-              <option key={s} value={s}>{s}</option>
-            ))}
-          </FormField>
-        </div>
-      ),
-    },
-    {
-      id: "plan",
-      label: "Subscription",
-      content: (
-        <>
-          <FormField
-            id="plan"
-            label="Subscription Plan"
-            as="select"
-            value={draft.subscription_plan_id}
-            onChange={(e) => {
-              setStepError("");
-              const planId = e.target.value;
-              setDraft((d) => ({ ...d, subscription_plan_id: planId, module_ids: [] }));
-              setExtraModules([]);
-            }}
-            required
-          >
-            <option value="">Select plan…</option>
-            {plans.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.plan_name} — {formatPKR(p.plan_price)}/mo
-              </option>
-            ))}
-          </FormField>
-          {selectedPlan && (
-            <p>
-              ERP portal (from plan): <strong>{selectedPlan.login_portal?.toUpperCase() || "not set"}</strong>
-            </p>
-          )}
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={() => navigate(planCreateUrl(isEdit, routeTenantId))}
-          >
-            Create new plan
-          </Button>
-        </>
-      ),
-    },
-    {
-      id: "modules",
-      label: "Modules",
-      content: (
-        <>
-          {!draft.subscription_plan_id ? null : displayModules.length === 0 ? null : (
-            <div className="wh-checkbox-grid">
-              {displayModules.map((m) => (
-                <label key={m.id} className="wh-checkbox-item">
-                  <input
-                    type="checkbox"
-                    checked={draft.module_ids.includes(m.id)}
-                    onChange={() => toggleModule(m.id)}
-                  />
-                  {formatModuleLabel(m)}
-                  {!planModules.some((pm) => pm.id === m.id) && (
-                    <span style={{ marginLeft: 6, fontSize: 12 }}>(new)</span>
-                  )}
-                </label>
-              ))}
-            </div>
-          )}
-          <Button type="button" variant="secondary" style={{ marginTop: 12 }} onClick={() => navigate(moduleCreateUrl(isEdit, routeTenantId))}>
-            Create new module
-          </Button>
-        </>
-      ),
-    },
-    {
-      id: "limits",
-      label: "Limits",
-      content: (
-        <div className="wh-form-grid">
-          <FormField id="mu" label="Max Users" type="number" min="1" value={draft.limits.max_users} onChange={update("limits", "max_users")} required />
-          <FormField id="mw" label="Max Warehouses" type="number" min="1" value={draft.limits.max_warehouses} onChange={update("limits", "max_warehouses")} required />
-          <FormField id="ms" label="Max Stores" type="number" min="1" value={draft.limits.max_stores} onChange={update("limits", "max_stores")} required />
-          <FormField id="mo" label="Max Orders / Month" type="number" min="1" value={draft.limits.max_orders_per_month} onChange={update("limits", "max_orders_per_month")} required />
-        </div>
-      ),
-    },
-    {
-      id: "billing",
-      label: "Billing",
-      content: (
-        <>
-          <div className="wh-form-grid">
-            <FormField id="bc" label="Billing Cycle" as="select" value={draft.billing.billing_cycle} onChange={updateBillingCycle}>
-              {BILLING_CYCLES.map((b) => (
-                <option key={b} value={b}>{b}</option>
-              ))}
-            </FormField>
-            <FormField id="sd" label="Start Date" type="date" value={draft.billing.start_date} onChange={updateBillingStart} required />
-            <FormField id="rd" label="Renewal / End Date" type="date" value={draft.billing.renewal_date} onChange={update("billing", "renewal_date")} required />
-            <FormField id="bs" label="Status" as="select" value={draft.billing.status} onChange={update("billing", "status")}>
-              {SUBSCRIPTION_STATUS.map((s) => (
-                <option key={s} value={s}>{s}</option>
-              ))}
-            </FormField>
-            <FormField id="ta" label="Total Amount (Rs.)" type="number" step="0.01" min="0" value={draft.billing.total_amount} onChange={update("billing", "total_amount")} required />
-            <FormField id="ad" label="Amount Due (Rs.)" type="number" step="0.01" min="0" value={draft.billing.amount_due} onChange={update("billing", "amount_due")} required />
-          </div>
-        </>
-      ),
-    },
-    {
-      id: "payment",
-      label: "Payment",
-      content: (
-        <div className="wh-form-grid">
-          <FormField id="bank" label="Bank (Rs.)" type="number" step="0.01" min="0" value={draft.payment.bank} onChange={update("payment", "bank")} />
-          <FormField id="cash" label="Cash (Rs.)" type="number" step="0.01" min="0" value={draft.payment.cash} onChange={update("payment", "cash")} />
-          <FormField id="tr" label="Total Received (Rs.)" type="number" step="0.01" min="0" value={draft.payment.total_received} readOnly />
-          <FormField id="ra" label="Received At" type="date" value={draft.payment.received_at} onChange={update("payment", "received_at")} />
-        </div>
-      ),
-    },
-    {
-      id: "org",
-      label: "Organization",
-      content: (
-        <>
-          <div className="wh-form-grid">
-            <FormField
-              id="ocn"
-              label="Company Name"
-              value={draft.organization.company_name}
-              onChange={update("organization", "company_name")}
-              required
-            />
-            <FormField id="logo" label="Logo URL" value={draft.organization.logo_url} onChange={update("organization", "logo_url")} />
-            <SearchableSelect
-              id="tz"
-              label="Timezone"
-              value={draft.organization.timezone || DEFAULT_TIMEZONE}
-              onChange={(v) => {
-                setStepError("");
-                setDraft((d) => ({ ...d, organization: { ...d.organization, timezone: v || DEFAULT_TIMEZONE } }));
-              }}
-              options={timezones}
-              loading={refLoading}
-            />
-            <SearchableSelect
-              id="cur"
-              label="Currency"
-              value={draft.organization.currency}
-              onChange={(v) => {
-                setStepError("");
-                setDraft((d) => ({ ...d, organization: { ...d.organization, currency: v } }));
-              }}
-              options={currencies}
-              loading={refLoading}
-            />
-            <FormField id="lang" label="Language" as="select" value={draft.organization.language} onChange={update("organization", "language")}>
-              <option value="en">English</option>
-            </FormField>
-            <div className="wh-field">
-              <span className="wh-field__label">Fiscal Year Start</span>
-              <MonthDayFields
-                idPrefix="fys"
-                {...fiscalFromStorage(draft.organization.fiscal_year_start)}
-                onChange={setFiscalStart}
-              />
-            </div>
-            <div className="wh-field">
-              <span className="wh-field__label">Fiscal Year End</span>
-              <MonthDayFields
-                idPrefix="fye"
-                {...fiscalFromStorage(draft.organization.fiscal_year_end)}
-                onChange={setFiscalEnd}
-              />
-            </div>
-          </div>
-        </>
-      ),
-    },
-    {
-      id: "admin",
-      label: "Super Admin",
-      content: (
-        <div className="wh-form-grid">
-          <FormField id="sa_name" label="Display Name" value={draft.super_admin.name} onChange={update("super_admin", "name")} required />
-          <FormField id="sa_user" label="Username" value={draft.super_admin.username} onChange={update("super_admin", "username")} required />
-          <FormField id="sa_email" label="Email" type="email" value={draft.super_admin.email} onChange={update("super_admin", "email")} required />
-          <FormField
-            id="sa_pass"
-            label={isEdit ? "New Password (optional)" : "Password"}
-            type="password"
-            value={draft.super_admin.password}
-            onChange={update("super_admin", "password")}
-            required={!isEdit}
-          />
-        </div>
-      ),
-    },
-    {
-      id: "review",
-      label: "Review",
-      content: (
-        <div className="wh-review">
-          <div className="wh-review-stack">
-          <ReviewBlock step={1} title="Company">
-            <ReviewRow label="Company" value={draft.company.company_name} />
-            <ReviewRow label="Owner" value={draft.company.owner_name} />
-            <ReviewRow label="Email" value={draft.company.owner_email} />
-            <ReviewRow label="Phone" value={draft.company.owner_phone} />
-            <ReviewRow label="Industry" value={draft.company.industry} />
-            <ReviewRow label="Status" value={draft.company.status} />
-          </ReviewBlock>
-          <ReviewBlock step={2} title="Subscription">
-            <ReviewRow label="Plan" value={selectedPlan?.plan_name} />
-            <ReviewRow label="Monthly price" value={selectedPlan ? formatPKR(selectedPlan.plan_price) : "—"} />
-            <ReviewRow label="ERP portal" value={selectedPlan?.login_portal?.toUpperCase()} />
-          </ReviewBlock>
-          <ReviewBlock step={3} title="Modules">
-            <ReviewRow
-              label="Selected"
-              value={
-                displayModules
-                  .filter((m) => draft.module_ids.includes(m.id))
-                  .map((m) => formatModuleLabel(m))
-                  .join(", ") || "—"
-              }
-            />
-          </ReviewBlock>
-          <ReviewBlock step={4} title="Limits">
-            <ReviewRow label="Max users" value={draft.limits.max_users} />
-            <ReviewRow label="Max warehouses" value={draft.limits.max_warehouses} />
-            <ReviewRow label="Max stores" value={draft.limits.max_stores} />
-            <ReviewRow label="Max orders / month" value={draft.limits.max_orders_per_month} />
-          </ReviewBlock>
-          <ReviewBlock step={5} title="Billing">
-            <ReviewRow label="Cycle" value={draft.billing.billing_cycle} />
-            <ReviewRow label="Start date" value={draft.billing.start_date} />
-            <ReviewRow label="Renewal date" value={draft.billing.renewal_date} />
-            <ReviewRow label="Status" value={draft.billing.status} />
-            <ReviewRow label="Total" value={formatPKR(draft.billing.total_amount)} />
-            <ReviewRow label="Amount due" value={formatPKR(draft.billing.amount_due)} />
-          </ReviewBlock>
-          <ReviewBlock step={6} title="Payment">
-            <ReviewRow label="Bank" value={formatPKR(draft.payment.bank)} />
-            <ReviewRow label="Cash" value={formatPKR(draft.payment.cash)} />
-            <ReviewRow label="Total received" value={formatPKR(draft.payment.total_received)} />
-            <ReviewRow label="Received at" value={draft.payment.received_at || "—"} />
-          </ReviewBlock>
-          <ReviewBlock step={7} title="Organization">
-            <ReviewRow label="Company" value={draft.organization.company_name || draft.company.company_name} />
-            <ReviewRow label="Logo URL" value={draft.organization.logo_url || "—"} />
-            <ReviewRow label="Timezone" value={formatTimezoneDisplay(draft.organization.timezone)} />
-            <ReviewRow label="Currency" value={formatCurrencyDisplay(draft.organization.currency, currencies)} />
-            <ReviewRow label="Language" value={draft.organization.language === "en" ? "English" : draft.organization.language || "—"} />
-            <ReviewRow label="Fiscal year start" value={formatFiscalDisplay(draft.organization.fiscal_year_start)} />
-            <ReviewRow label="Fiscal year end" value={formatFiscalDisplay(draft.organization.fiscal_year_end)} />
-          </ReviewBlock>
-          <ReviewBlock step={8} title="Super Admin">
-            <ReviewRow label="Name" value={draft.super_admin.name} />
-            <ReviewRow label="Username" value={draft.super_admin.username} />
-            <ReviewRow label="Email" value={draft.super_admin.email} />
-            <ReviewRow label="Password" value={draft.super_admin.password ? "••••••••" : "—"} />
-          </ReviewBlock>
-          </div>
-        </div>
-      ),
-    },
-  ];
+  const reviewContent = (
+    <div className="wh-review-stack">
+      <ReviewBlock step={1} title="Company">
+        <ReviewRow label="Company" value={draft.company.company_name} />
+        <ReviewRow label="Owner" value={draft.company.owner_name} />
+        <ReviewRow label="Email" value={draft.company.owner_email} />
+        <ReviewRow label="Phone" value={draft.company.owner_phone} />
+        <ReviewRow label="Industry" value={draft.company.industry} />
+        <ReviewRow label="Status" value={draft.company.status} />
+      </ReviewBlock>
+      <ReviewBlock step={2} title="Subscription">
+        <ReviewRow label="Plan" value={selectedPlan?.plan_name} />
+        <ReviewRow label="Monthly price" value={selectedPlan ? formatPKR(selectedPlan.plan_price) : "â€”"} />
+        <ReviewRow label="ERP portal" value={selectedPlan?.login_portal?.toUpperCase()} />
+      </ReviewBlock>
+      <ReviewBlock step={3} title="Modules">
+        <ReviewRow
+          label="Selected"
+          value={
+            displayModules
+              .filter((m) => draft.module_ids.includes(m.id))
+              .map((m) => formatModuleLabel(m))
+              .join(", ") || "â€”"
+          }
+        />
+      </ReviewBlock>
+      <ReviewBlock step={4} title="Limits">
+        <ReviewRow label="Max users" value={draft.limits.max_users} />
+        <ReviewRow label="Max warehouses" value={draft.limits.max_warehouses} />
+        <ReviewRow label="Max stores" value={draft.limits.max_stores} />
+        <ReviewRow label="Max orders / month" value={draft.limits.max_orders_per_month} />
+      </ReviewBlock>
+      <ReviewBlock step={5} title="Billing">
+        <ReviewRow label="Cycle" value={draft.billing.billing_cycle} />
+        <ReviewRow label="Start date" value={draft.billing.start_date} />
+        <ReviewRow label="Renewal date" value={draft.billing.renewal_date} />
+        <ReviewRow label="Status" value={draft.billing.status} />
+        <ReviewRow label="Total" value={formatPKR(draft.billing.total_amount)} />
+        <ReviewRow label="Amount due" value={formatPKR(draft.billing.amount_due)} />
+      </ReviewBlock>
+      <ReviewBlock step={6} title="Payment">
+        <ReviewRow label="Bank" value={formatPKR(draft.payment.bank)} />
+        <ReviewRow label="Cash" value={formatPKR(draft.payment.cash)} />
+        <ReviewRow label="Total received" value={formatPKR(draft.payment.total_received)} />
+        <ReviewRow label="Received at" value={draft.payment.received_at || "â€”"} />
+      </ReviewBlock>
+      <ReviewBlock step={7} title="Organization">
+        <ReviewRow label="Company" value={draft.organization.company_name || draft.company.company_name} />
+        <ReviewRow label="Logo URL" value={draft.organization.logo_url || "â€”"} />
+        <ReviewRow label="Timezone" value={formatTimezoneDisplay(draft.organization.timezone)} />
+        <ReviewRow label="Currency" value={formatCurrencyDisplay(draft.organization.currency, currencies)} />
+        <ReviewRow label="Language" value={draft.organization.language === "en" ? "English" : draft.organization.language || "â€”"} />
+        <ReviewRow label="Fiscal year start" value={formatFiscalDisplay(draft.organization.fiscal_year_start)} />
+        <ReviewRow label="Fiscal year end" value={formatFiscalDisplay(draft.organization.fiscal_year_end)} />
+      </ReviewBlock>
+      <ReviewBlock step={8} title="Super Admin">
+        <ReviewRow label="Name" value={draft.super_admin.name} />
+        <ReviewRow label="Username" value={draft.super_admin.username} />
+        <ReviewRow label="Email" value={draft.super_admin.email} />
+        <ReviewRow label="Password" value={draft.super_admin.password ? "â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢" : "â€”"} />
+      </ReviewBlock>
+    </div>
+  );
 
   return (
     <div className="wh-page">
-      <PageHeader
-        title={isEdit ? "Edit Tenant" : "Create Tenant"}
-        description={isEdit ? "Step-by-step walkthrough to update this client account." : "Step-by-step onboarding for new client accounts."}
-        actions={
-          <div className="wh-page-header__actions">
-            <Button type="button" variant="secondary" onClick={handleCancel}>
-              Cancel
-            </Button>
-            <Button type="button" variant="secondary" onClick={handleReset}>
-              Reset &amp; start over
-            </Button>
-          </div>
-        }
-      />
-      <Card>
-        {!hydrated ? (
-          <p className="wh-muted">Loading tenant…</p>
-        ) : (
-          <>
-        {error && <p className="wh-field__error">{error}</p>}
-        <StepWizard
-          steps={steps}
-          currentStep={draft.step}
-          onStepChange={setStep}
-          onValidateStep={handleValidateStep}
-          stepError={stepError}
-          onSubmit={submit}
-          submitLabel={isEdit ? "Update Tenant" : "Create Tenant"}
-          loading={loading}
-          freeNavigation={isEdit}
-          maxReachableStep={isEdit ? steps.length - 1 : (draft.maxStep ?? draft.step)}
+      <FormPageLayout>
+        <PageHeader
+          title={isEdit ? "Edit Tenant" : "Create Tenant"}
+          description={
+            isEdit
+              ? "Update client account details. Save changes before leaving this page."
+              : "Complete each section below, review, then create the tenant account."
+          }
+          actions={
+            <div className="wh-page-header__actions">
+              <Button type="button" variant="secondary" onClick={handleCancel}>
+                Cancel
+              </Button>
+              <Button type="button" variant="secondary" onClick={handleReset}>
+                Reset &amp; start over
+              </Button>
+            </div>
+          }
         />
-          </>
+        {!hydrated ? (
+          <p className="wh-muted">Loading tenantâ€¦</p>
+        ) : (
+          <form
+            className="wh-form-stack"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (isEdit) submit();
+              else if (phase === "review") submit();
+              else goToReview();
+            }}
+          >
+            <FormPageAlerts error={error || stepError} />
+
+            {!isEdit && phase === "review" ? (
+              <FormBlock title="Review" description="Confirm all tenant details before creating this account.">
+                {reviewContent}
+              </FormBlock>
+            ) : (
+              <>
+                <FormBlock title="Company" description="Basic company and owner information.">
+                  <div className="wh-form-grid">
+                    <FormField id="cn" label="Company Name" value={draft.company.company_name} onChange={update("company", "company_name")} required />
+                    <FormField id="on" label="Owner Name" value={draft.company.owner_name} onChange={update("company", "owner_name")} required />
+                    <FormField id="oe" label="Owner Email" type="email" value={draft.company.owner_email} onChange={update("company", "owner_email")} required />
+                    <FormField id="op" label="Owner Phone" value={draft.company.owner_phone} onChange={update("company", "owner_phone")} required />
+                    <FormField id="ind" label="Industry" value={draft.company.industry} onChange={update("company", "industry")} required />
+                    <FormField id="st" label="Status" as="select" value={draft.company.status} onChange={update("company", "status")}>
+                      {TENANT_STATUS.map((s) => (
+                        <option key={s} value={s}>{s}</option>
+                      ))}
+                    </FormField>
+                  </div>
+                </FormBlock>
+
+                <FormBlock title="Subscription" description="Choose the plan that sets the ERP login portal.">
+                  <div className="wh-form-grid">
+                    <FormField
+                      id="plan"
+                      label="Subscription Plan"
+                      as="select"
+                      value={draft.subscription_plan_id}
+                      onChange={(e) => {
+                        setStepError("");
+                        const planId = e.target.value;
+                        setDraft((d) => ({ ...d, subscription_plan_id: planId, module_ids: [] }));
+                        setExtraModules([]);
+                      }}
+                      required
+                    >
+                      <option value="">Select planâ€¦</option>
+                      {plans.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.plan_name} â€” {formatPKR(p.plan_price)}/mo
+                        </option>
+                      ))}
+                    </FormField>
+                  </div>
+                  {selectedPlan && (
+                    <p className="wh-muted" style={{ marginTop: 8 }}>
+                      ERP portal (from plan): <strong>{selectedPlan.login_portal?.toUpperCase() || "not set"}</strong>
+                    </p>
+                  )}
+                  <Button type="button" variant="secondary" style={{ marginTop: 12 }} onClick={() => navigate(planCreateUrl(isEdit, routeTenantId))}>
+                    Create new plan
+                  </Button>
+                </FormBlock>
+
+                <FormBlock title="Modules" description="Select which modules this tenant can use.">
+                  {!draft.subscription_plan_id ? (
+                    <p className="wh-muted">Select a subscription plan first.</p>
+                  ) : displayModules.length === 0 ? (
+                    <p className="wh-muted">No modules available for this plan.</p>
+                  ) : (
+                    <div className="wh-checkbox-grid">
+                      {displayModules.map((m) => (
+                        <label key={m.id} className="wh-checkbox-item">
+                          <input type="checkbox" checked={draft.module_ids.includes(m.id)} onChange={() => toggleModule(m.id)} />
+                          {formatModuleLabel(m)}
+                          {!planModules.some((pm) => pm.id === m.id) && (
+                            <span style={{ marginLeft: 6, fontSize: 12 }}>(new)</span>
+                          )}
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                  <Button type="button" variant="secondary" style={{ marginTop: 12 }} onClick={() => navigate(moduleCreateUrl(isEdit, routeTenantId))}>
+                    Create new module
+                  </Button>
+                </FormBlock>
+
+                <FormBlock title="Limits" description="Usage caps for this tenant account.">
+                  <div className="wh-form-grid">
+                    <FormField id="mu" label="Max Users" type="number" min="1" value={draft.limits.max_users} onChange={update("limits", "max_users")} required />
+                    <FormField id="mw" label="Max Warehouses" type="number" min="1" value={draft.limits.max_warehouses} onChange={update("limits", "max_warehouses")} required />
+                    <FormField id="ms" label="Max Stores" type="number" min="1" value={draft.limits.max_stores} onChange={update("limits", "max_stores")} required />
+                    <FormField id="mo" label="Max Orders / Month" type="number" min="1" value={draft.limits.max_orders_per_month} onChange={update("limits", "max_orders_per_month")} required />
+                  </div>
+                </FormBlock>
+
+                <FormBlock title="Billing" description="Subscription billing dates and amounts.">
+                  <div className="wh-form-grid">
+                    <FormField id="bc" label="Billing Cycle" as="select" value={draft.billing.billing_cycle} onChange={updateBillingCycle}>
+                      {BILLING_CYCLES.map((b) => (
+                        <option key={b} value={b}>{b}</option>
+                      ))}
+                    </FormField>
+                    <FormField id="sd" label="Start Date" type="date" value={draft.billing.start_date} onChange={updateBillingStart} required />
+                    <FormField id="rd" label="Renewal / End Date" type="date" value={draft.billing.renewal_date} onChange={update("billing", "renewal_date")} required />
+                    <FormField id="bs" label="Status" as="select" value={draft.billing.status} onChange={update("billing", "status")}>
+                      {SUBSCRIPTION_STATUS.map((s) => (
+                        <option key={s} value={s}>{s}</option>
+                      ))}
+                    </FormField>
+                    <FormField id="ta" label="Total Amount (Rs.)" type="number" step="0.01" min="0" value={draft.billing.total_amount} onChange={update("billing", "total_amount")} required />
+                    <FormField id="ad" label="Amount Due (Rs.)" type="number" step="0.01" min="0" value={draft.billing.amount_due} onChange={update("billing", "amount_due")} required />
+                  </div>
+                </FormBlock>
+
+                <FormBlock title="Payment" description="Initial payment received for this tenant.">
+                  <div className="wh-form-grid">
+                    <FormField id="bank" label="Bank (Rs.)" type="number" step="0.01" min="0" value={draft.payment.bank} onChange={update("payment", "bank")} />
+                    <FormField id="cash" label="Cash (Rs.)" type="number" step="0.01" min="0" value={draft.payment.cash} onChange={update("payment", "cash")} />
+                    <FormField id="tr" label="Total Received (Rs.)" type="number" step="0.01" min="0" value={draft.payment.total_received} readOnly />
+                    <FormField id="ra" label="Received At" type="date" value={draft.payment.received_at} onChange={update("payment", "received_at")} />
+                  </div>
+                </FormBlock>
+
+                <FormBlock title="Organization" description="Tenant workspace settings shown inside the ERP.">
+                  <div className="wh-form-grid">
+                    <FormField id="ocn" label="Company Name" value={draft.organization.company_name} onChange={update("organization", "company_name")} required />
+                    <FormField id="logo" label="Logo URL" value={draft.organization.logo_url} onChange={update("organization", "logo_url")} />
+                    <SearchableSelect
+                      id="tz"
+                      label="Timezone"
+                      value={draft.organization.timezone || DEFAULT_TIMEZONE}
+                      onChange={(v) => {
+                        setStepError("");
+                        setDraft((d) => ({ ...d, organization: { ...d.organization, timezone: v || DEFAULT_TIMEZONE } }));
+                      }}
+                      options={timezones}
+                      loading={refLoading}
+                    />
+                    <SearchableSelect
+                      id="cur"
+                      label="Currency"
+                      value={draft.organization.currency}
+                      onChange={(v) => {
+                        setStepError("");
+                        setDraft((d) => ({ ...d, organization: { ...d.organization, currency: v } }));
+                      }}
+                      options={currencies}
+                      loading={refLoading}
+                    />
+                    <FormField id="lang" label="Language" as="select" value={draft.organization.language} onChange={update("organization", "language")}>
+                      <option value="en">English</option>
+                    </FormField>
+                    <div className="wh-field">
+                      <span className="wh-field__label">Fiscal Year Start</span>
+                      <MonthDayFields idPrefix="fys" {...fiscalFromStorage(draft.organization.fiscal_year_start)} onChange={setFiscalStart} />
+                    </div>
+                    <div className="wh-field">
+                      <span className="wh-field__label">Fiscal Year End</span>
+                      <MonthDayFields
+                        idPrefix="fye"
+                        {...fiscalFromStorage(draft.organization.fiscal_year_end)}
+                        onChange={() => {}}
+                        disabled
+                      />
+                      <p className="wh-muted" style={{ marginTop: 6 }}>Calculated automatically from fiscal year start.</p>
+                    </div>
+                  </div>
+                </FormBlock>
+
+                <FormBlock title="Super Admin" description="Primary login for the tenant workspace.">
+                  <div className="wh-form-grid">
+                    <FormField id="sa_name" label="Display Name" value={draft.super_admin.name} onChange={update("super_admin", "name")} required />
+                    <FormField id="sa_user" label="Username" value={draft.super_admin.username} onChange={update("super_admin", "username")} required />
+                    <FormField id="sa_email" label="Email" type="email" value={draft.super_admin.email} onChange={update("super_admin", "email")} required />
+                    <FormField
+                      id="sa_pass"
+                      label={isEdit ? "New Password (optional)" : "Password"}
+                      type="password"
+                      value={draft.super_admin.password}
+                      onChange={update("super_admin", "password")}
+                      required={!isEdit}
+                    />
+                  </div>
+                </FormBlock>
+              </>
+            )}
+
+            <FormActions>
+              {isEdit ? (
+                <Button type="submit" disabled={loading}>
+                  {loading ? "Savingâ€¦" : "Save changes"}
+                </Button>
+              ) : phase === "review" ? (
+                <>
+                  <Button type="button" variant="secondary" onClick={() => setPhase("form")}>
+                    Back
+                  </Button>
+                  <Button type="submit" disabled={loading}>
+                    {loading ? "Creatingâ€¦" : "Create tenant"}
+                  </Button>
+                </>
+              ) : (
+                <Button type="submit">Review</Button>
+              )}
+            </FormActions>
+          </form>
         )}
-      </Card>
+      </FormPageLayout>
+
+      <AccountDetailsModal
+        open={detailsOpen}
+        onClose={() => {
+          setDetailsOpen(false);
+          navigate("/webhouse-portal/tenants/manage");
+        }}
+        title={detailsTitle}
+        sections={detailsSections}
+      />
+
+      <UnsavedChangesDialog open={dialogOpen} onStay={stayOnPage} onDiscard={discardLeave} reloadPending={reloadPending} />
     </div>
   );
 }

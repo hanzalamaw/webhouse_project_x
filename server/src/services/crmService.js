@@ -101,7 +101,10 @@ export const crmService = {
     const lead_name = requireString(body.lead_name ?? existing.lead_name, "Lead name");
     const status = normalizeLeadStatus(body.status ?? existing.status, existing.status);
     const source = normalizeLeadSource(body.source ?? existing.source ?? "manual", existing.source || "manual");
-    const assigned_to = await assertCrmAssignee(tenantId, body.assigned_to ?? existing.assigned_to);
+    const assigned_to = await assertCrmAssignee(
+      tenantId,
+      body.assigned_to !== undefined ? body.assigned_to : existing.assigned_to
+    );
     return crmRepository.updateLead(tenantId, userId, id, { ...existing, ...body, lead_name, status, source, assigned_to });
   },
 
@@ -291,22 +294,22 @@ export const crmService = {
   // Addresses
   async createAddress(tenantId, customerId, body) {
     await assertCustomerExists(tenantId, customerId);
-    const address_type = normalizeAddressType(body.address_type, "default");
+    const address_type = normalizeAddressType(body.address_type, "office");
     requireString(body.address, "Address");
     return crmRepository.createAddress(tenantId, customerId, {
       ...body,
       address_type,
-      is_default: Boolean(body.is_default) || address_type === "default",
+      is_default: address_type === "default",
     });
   },
 
   async updateAddress(tenantId, addressId, body) {
-    const address_type = normalizeAddressType(body.address_type, "default");
+    const address_type = normalizeAddressType(body.address_type, "office");
     requireString(body.address, "Address");
     return crmRepository.updateAddress(tenantId, addressId, {
       ...body,
       address_type,
-      is_default: Boolean(body.is_default) || address_type === "default",
+      is_default: address_type === "default",
     });
   },
 
@@ -359,7 +362,10 @@ export const crmService = {
     assertOneOf(body.status ?? existing.status, COMPLAINT_STATUSES, "complaint status");
     assertOneOf(body.priority ?? existing.priority, COMPLAINT_PRIORITIES, "priority");
     assertOneOf(body.issue_type ?? existing.issue_type, COMPLAINT_ISSUE_TYPES, "issue type");
-    const assigned_to = await assertCrmAssignee(tenantId, body.assigned_to ?? existing.assigned_to);
+    const assigned_to = await assertCrmAssignee(
+      tenantId,
+      body.assigned_to !== undefined ? body.assigned_to : existing.assigned_to
+    );
     return crmRepository.updateComplaint(tenantId, userId, id, { ...existing, ...body, subject, assigned_to });
   },
 

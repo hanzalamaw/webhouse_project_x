@@ -16,6 +16,13 @@ export default function StockIn() {
   const [rows, setRows] = useState([]);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
+  const backPath = `${MODULE_BASE}/procurement/stock-in`;
+
+  const openMovement = (row) => {
+    navigate(`${MODULE_BASE}/procurement/movements/view/${row.id}`, {
+      state: { movement: row, backPath },
+    });
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -54,7 +61,7 @@ export default function StockIn() {
         {loading ? (
           <p className="wh-muted">Loading…</p>
         ) : (
-          <DataTable columns={columns} rows={rows} page={page} pageSize={TABLE_PAGE_SIZE} onPageChange={setPage} />
+          <DataTable columns={columns} rows={rows} page={page} pageSize={TABLE_PAGE_SIZE} onPageChange={setPage} onRowClick={openMovement} />
         )}
       </Card>
     </div>

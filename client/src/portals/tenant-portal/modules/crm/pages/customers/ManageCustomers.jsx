@@ -101,12 +101,9 @@ export default function ManageCustomers() {
         title="Customers"
         description={`Customer profiles with tags and status. Click a row to view details. Recently active = ordered in the last ${ACTIVE_CUSTOMER_DAYS} days.`}
         actions={
-          <div className="wh-action-btns">
-            <Button variant="secondary" onClick={() => navigate(`${MODULE_BASE}/import-export`)}>
-              Import / Export
-            </Button>
-            <Button onClick={() => navigate(`${MODULE_BASE}/customers/create`)} disabled={!canCreate}>Add Customer</Button>
-          </div>
+          <Button onClick={() => navigate(`${MODULE_BASE}/customers/create`)} disabled={!canCreate}>
+            Add Customer
+          </Button>
         }
       />
       {error && <div className="wh-alert wh-alert--error">{error}</div>}

@@ -11,14 +11,6 @@ import {
   parseCsv,
   downloadCsv,
 } from "../utils/csv";
-import {
-  LEAD_SOURCES,
-  LEAD_STATUSES,
-  CUSTOMER_TYPES,
-  CUSTOMER_STATUSES,
-  LEAD_SOURCE_LABELS,
-  CUSTOMER_TYPE_LABELS,
-} from "../constants";
 
 const LEAD_TEMPLATE_ROW = {
   lead_name: "Jane Doe",
@@ -263,26 +255,6 @@ export default function ImportExport() {
       </div>
 
       <ImportResultCard title="Customer import results" result={customerResult} />
-
-      <Card className="wh-inv-import-export__ref">
-        <h3 className="wh-card__title">CSV column reference</h3>
-        <p className="wh-card__title" style={{ fontSize: "var(--text-base)", marginBottom: 8 }}>Leads</p>
-        <ul className="wh-list wh-inv-csv-ref">
-          <li><strong>lead_name</strong> — required on import</li>
-          <li><strong>source</strong> — {LEAD_SOURCES.map((s) => LEAD_SOURCE_LABELS[s] || s).join(", ")}</li>
-          <li><strong>status</strong> — {LEAD_STATUSES.filter((s) => s !== "converted").join(", ")}</li>
-          <li><strong>assigned_to_name</strong> — must match a CRM team member&apos;s display name</li>
-        </ul>
-        <p className="wh-card__title" style={{ fontSize: "var(--text-base)", marginTop: 16, marginBottom: 8 }}>Customers</p>
-        <ul className="wh-list wh-inv-csv-ref">
-          <li><strong>customer_name</strong> — required on import</li>
-          <li><strong>customer_type</strong> — {CUSTOMER_TYPES.map((t) => CUSTOMER_TYPE_LABELS[t] || t).join(", ")}</li>
-          <li><strong>status</strong> — {CUSTOMER_STATUSES.join(", ")}</li>
-          <li><strong>tags</strong> — separate multiple tags with |</li>
-          <li><strong>billing_address, billing_city, billing_state, billing_postal_code</strong> — optional default address on import</li>
-          <li>Matching <strong>phone</strong> or <strong>email</strong> updates an existing customer instead of creating a duplicate</li>
-        </ul>
-      </Card>
     </div>
   );
 }

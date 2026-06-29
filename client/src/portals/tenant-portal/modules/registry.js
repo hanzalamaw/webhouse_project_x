@@ -8,6 +8,7 @@ import AdminOrganizationSettings from "./admin/pages/OrganizationSettings";
 import AdminPlanSubscription from "./admin/pages/PlanSubscription";
 import AdminActivityAlerts from "./admin/pages/ActivityAlerts";
 import AdminHelpCenter from "./admin/pages/HelpCenter";
+import { ADMIN_ROUTES } from "./admin/routes.jsx";
 
 import LogisticsDashboard from "./logistics-partners/pages/Dashboard";
 import { getNavItems as getLogisticsNav } from "./logistics-partners/navConfig";
@@ -53,6 +54,7 @@ export const TENANT_MODULE_DEFINITIONS = [
     aliases: [],
     Dashboard: AdminDashboard,
     getNavItems: getAdminNav,
+    routes: ADMIN_ROUTES,
     sections: [
       { path: "user-management", title: "User Management", Component: AdminUserManagement },
       { path: "roles-and-permissions", title: "Roles & Permissions", Component: AdminRolesAndPermissions },

@@ -3,6 +3,9 @@ import { Link } from "react-router-dom";
 import { useAuth } from "../../../../../context/AuthContext";
 import { apiFetch } from "../../../../../api/client";
 import { PageHeader } from "../../../../../components/PageHeader";
+import { DashboardFilter } from "../../../../../components/DashboardFilter";
+import { EMPTY_DASHBOARD_FILTER, filterRowsByDashboard } from "../../../../../utils/dashboardFilter";
+import { useFiscalYear } from "../../../../../context/FiscalYearContext";
 import { BarChart, DonutChart, HBars, CHART_COLORS } from "../../../../../components/charts";
 import { StatusBadge } from "../../../../../components/Badge";
 import { formatPKR } from "../../../../../utils/currency";
@@ -78,6 +81,8 @@ export default function InventoryDashboard() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
+  const [dashFilter, setDashFilter] = useState({ ...EMPTY_DASHBOARD_FILTER });
+  const fiscalYearStart = useFiscalYear();
 
   useEffect(() => {
     apiFetch("/inventory/dashboard", {}, authFetch)
@@ -95,6 +100,15 @@ export default function InventoryDashboard() {
   const stats = data?.stats || {};
   const movements = data?.recent_movements || [];
   const transfers = data?.recent_transfers || [];
+
+  const filteredMovements = useMemo(
+    () => filterRowsByDashboard(movements, "created_at", dashFilter, fiscalYearStart),
+    [movements, dashFilter, fiscalYearStart]
+  );
+  const filteredTransfers = useMemo(
+    () => filterRowsByDashboard(transfers, "created_at", dashFilter, fiscalYearStart),
+    [transfers, dashFilter, fiscalYearStart]
+  );
   const movementTrend = data?.movement_trend || [];
   const movementsByType = data?.movements_by_type || [];
   const stockByCategory = data?.stock_by_category || [];
@@ -215,6 +229,13 @@ export default function InventoryDashboard() {
       />
 
       {loadError && <p className="wh-field__error">{loadError}</p>}
+
+      <DashboardFilter
+        rows={[...movements, ...transfers]}
+        dateField="created_at"
+        value={dashFilter}
+        onChange={setDashFilter}
+      />
 
       {/* Catalog & locations */}
       <div className="wh-dash-grid">
@@ -452,11 +473,11 @@ export default function InventoryDashboard() {
               </Link>
             }
           >
-            {movements.length === 0 ? (
-              <p className="wh-panel__empty">No movements recorded yet.</p>
+            {filteredMovements.length === 0 ? (
+              <p className="wh-panel__empty">No movements in this range.</p>
             ) : (
               <div className="wh-mini-list">
-                {movements.map((m) => (
+                {filteredMovements.map((m) => (
                   <div key={m.id} className="wh-mini-row">
                     <div className="wh-mini-row__main">
                       <div className="wh-mini-row__title">
@@ -485,11 +506,11 @@ export default function InventoryDashboard() {
               </Link>
             }
           >
-            {transfers.length === 0 ? (
-              <p className="wh-panel__empty">No transfers yet.</p>
+            {filteredTransfers.length === 0 ? (
+              <p className="wh-panel__empty">No transfers in this range.</p>
             ) : (
               <div className="wh-mini-list">
-                {transfers.map((t) => (
+                {filteredTransfers.map((t) => (
                   <div key={t.id} className="wh-mini-row">
                     <div className="wh-mini-row__main">
                       <div className="wh-mini-row__title">{t.product_name}</div>

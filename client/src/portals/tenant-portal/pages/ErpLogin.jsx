@@ -6,6 +6,7 @@ import { FormField } from "../../../components/FormField";
 import { Button } from "../../../components/Button";
 import { Modal } from "../../../components/Modal";
 import { formatDateTime } from "../../../utils/dateTime";
+import { friendlyError } from "../../../utils/friendlyError";
 import "../../wh-portal/pages/Login.css";
 
 const PORTAL_LABELS = { erp1: "ERP 1", erp2: "ERP 2", erp3: "ERP 3" };
@@ -45,7 +46,7 @@ export default function ErpLogin({ portal }) {
       navigate("/app");
       return { ok: true };
     }
-    setError(data.message || "Invalid credentials");
+    setError(friendlyError(data.message, response.status));
     return { error: true };
   };
 
@@ -61,7 +62,7 @@ export default function ErpLogin({ portal }) {
     try {
       await doLogin(false);
     } catch {
-      setError("Could not connect to server.");
+      setError(friendlyError("Failed to fetch"));
     } finally {
       setIsSubmitting(false);
     }
@@ -74,7 +75,7 @@ export default function ErpLogin({ portal }) {
       const result = await doLogin(true);
       if (!result?.conflict) setConflict(null);
     } catch {
-      setError("Could not connect to server.");
+      setError(friendlyError("Failed to fetch"));
     } finally {
       setIsSubmitting(false);
     }

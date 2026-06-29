@@ -33,8 +33,9 @@ const TYPE_INDEX = buildLabelIndex(CUSTOMER_TYPE_LABELS);
 const ADDRESS_INDEX = buildLabelIndex(ADDRESS_TYPE_LABELS);
 
 const ADDRESS_LEGACY = {
-  billing: "default",
+  billing: "office",
   shipping: "office",
+  default: "office",
 };
 
 const CUSTOMER_PRESETS = CUSTOMER_TYPES.filter((t) => t !== "other");
@@ -48,16 +49,19 @@ const SOURCE_ALIASES = {
   csv: "csv_import",
 };
 
-export function normalizeLeadSource(value, fallback = "csv_import") {
+const SOURCE_PRESETS = LEAD_SOURCES.filter((s) => s !== "other" && s !== "csv_import");
+
+export function normalizeLeadSource(value, fallback = "manual") {
   const raw = String(value || "").trim();
   if (!raw) return fallback;
   const alias = SOURCE_ALIASES[slugify(raw)];
   if (alias) return alias;
   const key = SOURCE_INDEX.get(raw.toLowerCase()) || SOURCE_INDEX.get(slugify(raw));
-  if (key && LEAD_SOURCES.includes(key)) return key;
+  if (key && SOURCE_PRESETS.includes(key)) return key;
   const slug = slugify(raw);
-  if (LEAD_SOURCES.includes(slug)) return slug;
-  throw new Error(`Invalid lead source "${raw}". Use: ${LEAD_SOURCES.join(", ")} or labels like Website, WhatsApp, Manual`);
+  if (SOURCE_PRESETS.includes(slug)) return slug;
+  if (raw.length > 100) throw new Error("Lead source must be 100 characters or less");
+  return raw;
 }
 
 export function normalizeLeadStatus(value, fallback = "new", { forImport = false } = {}) {
@@ -80,7 +84,7 @@ export function normalizeCustomerType(value, fallback = "retailer") {
   return raw;
 }
 
-export function normalizeAddressType(value, fallback = "default") {
+export function normalizeAddressType(value, fallback = "office") {
   const raw = String(value || "").trim();
   if (!raw) return fallback;
   const slug = slugify(raw);

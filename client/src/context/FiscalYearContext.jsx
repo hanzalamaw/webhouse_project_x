@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { useAuth } from "./AuthContext";
 import { apiFetch } from "../api/client";
 
@@ -8,21 +8,31 @@ export function FiscalYearProvider({ children }) {
   const { user, authFetch } = useAuth();
   const [fiscalYearStart, setFiscalYearStart] = useState(null);
 
-  useEffect(() => {
+  const loadFiscalYear = useCallback(() => {
     if (user?.portal !== "tenant") {
       setFiscalYearStart(null);
-      return;
+      return Promise.resolve();
     }
-    let active = true;
-    apiFetch("/tenant/organization-settings", {}, authFetch)
-      .then((data) => {
-        if (active) setFiscalYearStart(data?.fiscal_year_start || null);
+    return apiFetch("/tenant/organization-settings", {}, authFetch)
+      .then((res) => {
+        setFiscalYearStart(res.data?.fiscal_year_start || null);
       })
       .catch(() => {
-        if (active) setFiscalYearStart(null);
+        setFiscalYearStart(null);
       });
-    return () => { active = false; };
   }, [user?.portal, authFetch]);
+
+  useEffect(() => {
+    loadFiscalYear();
+  }, [loadFiscalYear]);
+
+  useEffect(() => {
+    const handler = () => {
+      loadFiscalYear();
+    };
+    window.addEventListener("tenant-org-updated", handler);
+    return () => window.removeEventListener("tenant-org-updated", handler);
+  }, [loadFiscalYear]);
 
   return (
     <FiscalYearContext.Provider value={fiscalYearStart}>

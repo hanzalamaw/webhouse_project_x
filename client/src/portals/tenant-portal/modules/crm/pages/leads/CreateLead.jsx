@@ -9,6 +9,7 @@ import { Button } from "../../../../../../components/Button";
 import { SearchableSelect } from "../../../../../../components/SearchableSelect";
 import { FormBlock } from "../../../../../../components/FormBlock";
 import { FormPageLayout, FormActions } from "../../../../../../components/FormPageLayout";
+import { TypeWithOtherField } from "../../components/TypeWithOtherField";
 import {
   MODULE_BASE,
   LEAD_SOURCES,
@@ -16,17 +17,22 @@ import {
   LEAD_SOURCE_LABELS,
   LEAD_STATUS_LABELS,
 } from "../../constants";
+import { splitPresetOrOther, resolvePresetOrOther } from "../../utils/typeFields";
 import { useCrmReference } from "../../hooks/useCrmReference";
+
+const LEAD_SOURCE_OPTIONS = LEAD_SOURCES.filter((s) => s !== "csv_import");
+const NO_ASSIGNEE = "";
 
 const EMPTY = {
   lead_name: "",
   phone: "",
   email: "",
   company_name: "",
-  source: "manual",
+  source_preset: "manual",
+  source_custom: "",
   status: "new",
   notes: "",
-  assigned_to: "",
+  assigned_to: NO_ASSIGNEE,
 };
 
 export default function CreateLead() {
@@ -57,15 +63,17 @@ export default function CreateLead() {
           setError("Converted leads cannot be edited.");
           return;
         }
+        const sourceParts = splitPresetOrOther(row.source, LEAD_SOURCE_OPTIONS);
         setForm({
           lead_name: row.lead_name || "",
           phone: row.phone || "",
           email: row.email || "",
           company_name: row.company_name || "",
-          source: row.source || "manual",
+          source_preset: sourceParts.preset,
+          source_custom: sourceParts.custom,
           status: row.status || "new",
           notes: row.notes || "",
-          assigned_to: row.assigned_to ? String(row.assigned_to) : "",
+          assigned_to: row.assigned_to ? String(row.assigned_to) : NO_ASSIGNEE,
         });
       })
       .catch((e) => setError(e.message))
@@ -79,8 +87,13 @@ export default function CreateLead() {
     setError("");
     try {
       const body = {
-        ...form,
         lead_name: form.lead_name.trim(),
+        phone: form.phone,
+        email: form.email,
+        company_name: form.company_name,
+        source: resolvePresetOrOther(form.source_preset, form.source_custom, "Source"),
+        status: form.status,
+        notes: form.notes,
         assigned_to: form.assigned_to ? Number(form.assigned_to) : null,
       };
       if (isEdit) {
@@ -161,18 +174,18 @@ export default function CreateLead() {
 
           <FormBlock title="Lead details" description="Source, pipeline status, assignment, and notes.">
             <div className="wh-form-grid">
-              <FormField
+              <TypeWithOtherField
                 id="source"
                 label="Source"
-                as="select"
-                value={form.source}
-                onChange={(e) => setForm((f) => ({ ...f, source: e.target.value }))}
+                preset={form.source_preset}
+                custom={form.source_custom}
+                onPresetChange={(v) => setForm((f) => ({ ...f, source_preset: v }))}
+                onCustomChange={(v) => setForm((f) => ({ ...f, source_custom: v }))}
+                options={LEAD_SOURCE_OPTIONS}
+                optionLabels={LEAD_SOURCE_LABELS}
                 disabled={disabled}
-              >
-                {LEAD_SOURCES.map((s) => (
-                  <option key={s} value={s}>{LEAD_SOURCE_LABELS[s] || s}</option>
-                ))}
-              </FormField>
+                customPlaceholder="e.g. Trade show, LinkedIn"
+              />
               <FormField
                 id="status"
                 label="Status"
@@ -193,6 +206,8 @@ export default function CreateLead() {
                 options={assigneeOptions}
                 placeholder="Search team members…"
                 emptyMessage="No CRM users found"
+                allowEmpty
+                emptyOptionLabel="No one"
                 disabled={disabled}
               />
               <div className="wh-form-grid__full">

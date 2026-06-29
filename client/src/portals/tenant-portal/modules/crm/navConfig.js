@@ -1,6 +1,5 @@
 import {
   DashboardIcon,
-  ModuleIcon,
   TenantsIcon,
   SupportIcon,
   LogsIcon,
@@ -10,7 +9,6 @@ import { MODULE_BASE } from "./constants";
 /** Flat menu aligned with Admin module layout. */
 export function getNavItems() {
   return [
-    { id: "all-modules", label: "All Modules", path: "/app", icon: ModuleIcon },
     { id: "dashboard", label: "Dashboard", path: `${MODULE_BASE}/dashboard`, icon: DashboardIcon },
     { id: "leads", label: "Leads", path: `${MODULE_BASE}/leads/manage`, icon: LogsIcon },
     { id: "customers", label: "Customers", path: `${MODULE_BASE}/customers/manage`, icon: TenantsIcon },

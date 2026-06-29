@@ -2,16 +2,17 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { PageHeader } from "../../../../components/PageHeader";
 import { Card } from "../../../../components/Card";
+import { AccountDetailsModal } from "../../../../components/AccountDetailsModal";
 import { DataTable } from "../../../../components/DataTable";
 import { TableToolbar } from "../../../../components/TableToolbar";
 import { ConfirmDeleteModal } from "../../../../components/ConfirmDeleteModal";
 import { Button } from "../../../../components/Button";
-import { Modal } from "../../../../components/Modal";
 import { StatusBadge } from "../../../../components/Badge";
 import { useAuth } from "../../../../context/AuthContext";
 import { apiFetch, fetchAllTableRows, TABLE_PAGE_SIZE } from "../../../../api/client";
 import { applyToolbarFilters, EMPTY_TOOLBAR } from "../../../../utils/tableFilters";
 import { formatDateTime } from "../../../../utils/dateTime";
+import { buildTenantAccountSections } from "../../../../utils/accountDetails";
 
 const TENANT_TOOLBAR_FILTERS = [
   { key: "status", label: "Status" },
@@ -30,10 +31,11 @@ export default function ManageTenant() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [deleteRow, setDeleteRow] = useState(null);
-  const [credentialsRow, setCredentialsRow] = useState(null);
-  const [credentials, setCredentials] = useState(null);
-  const [credentialsLoading, setCredentialsLoading] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [detailsTitle, setDetailsTitle] = useState("");
+  const [detailsSections, setDetailsSections] = useState([]);
+  const [detailsLoading, setDetailsLoading] = useState(false);
+  const [detailsError, setDetailsError] = useState("");
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
   const [toolbar, setToolbar] = useState({
@@ -73,37 +75,53 @@ export default function ManageTenant() {
 
   const resolveTenantId = (row) => row?.tenant_id ?? row?.id;
 
+  const openView = (row) => {
+    const tenantId = resolveTenantId(row);
+    if (!tenantId) return;
+    navigate(`/webhouse-portal/tenants/view/${tenantId}`);
+  };
+
   const openEdit = (row) => {
     const tenantId = resolveTenantId(row);
     if (!tenantId) return;
     navigate(`/webhouse-portal/tenants/edit/${tenantId}`);
   };
 
-  const openCredentials = async (row) => {
+  const openDetails = async (row) => {
     const tenantId = resolveTenantId(row);
     if (!tenantId) return;
-    setCredentialsRow(row);
-    setCredentials(null);
-    setShowPassword(false);
-    setCredentialsLoading(true);
+    setDetailsTitle(`Tenant details — ${row.company_name || ""}`);
+    setDetailsSections([]);
+    setDetailsError("");
+    setDetailsOpen(true);
+    setDetailsLoading(true);
     try {
       const data = await apiFetch(`/tenants/${tenantId}/credentials`, {}, authFetch);
-      setCredentials(data);
-    } catch {
-      setCredentials({ error: "Could not load credentials." });
+      setDetailsSections(
+        buildTenantAccountSections({
+          tenant: data.tenant,
+          credentials: data.credentials,
+          modules: data.modules,
+          organization: data.organization,
+          payment: data.payment,
+        })
+      );
+    } catch (err) {
+      setDetailsError(err.message || "Could not load tenant details.");
     } finally {
-      setCredentialsLoading(false);
+      setDetailsLoading(false);
     }
   };
 
-  const closeCredentials = () => {
-    setCredentialsRow(null);
-    setCredentials(null);
-    setShowPassword(false);
+  const closeDetails = () => {
+    setDetailsOpen(false);
+    setDetailsSections([]);
+    setDetailsError("");
   };
 
   const columns = [
     { key: "company_name", label: "Company" },
+    { key: "super_admin_username", label: "Username", format: (v) => v || "—" },
     { key: "owner_name", label: "Owner" },
     { key: "owner_email", label: "Email" },
     { key: "owner_phone", label: "Phone" },
@@ -138,9 +156,10 @@ export default function ManageTenant() {
     {
       label: "Actions",
       filter: false,
+      stopRowClick: true,
       render: (row) => (
         <div className="wh-action-btns">
-          <Button variant="secondary" className="wh-btn--sm" onClick={() => openCredentials(row)}>Password</Button>
+          <Button variant="secondary" className="wh-btn--sm" onClick={() => openDetails(row)}>Details</Button>
           <Button variant="secondary" className="wh-btn--sm" onClick={() => openEdit(row)}>Edit</Button>
           <Button variant="danger" className="wh-btn--sm" onClick={() => setDeleteRow(row)}>Delete</Button>
         </div>
@@ -171,54 +190,20 @@ export default function ManageTenant() {
               page={page}
               pageSize={TABLE_PAGE_SIZE}
               onPageChange={setPage}
+              onRowClick={openView}
             />
           </>
         )}
       </Card>
 
-      <Modal
-        open={!!credentialsRow}
-        onClose={closeCredentials}
-        title={`Super Admin — ${credentialsRow?.company_name || ""}`}
-        footer={
-          <Button variant="secondary" onClick={closeCredentials}>Close</Button>
-        }
-      >
-        {credentialsLoading && <p className="wh-muted">Loading…</p>}
-        {!credentialsLoading && credentials?.error && (
-          <p className="wh-field__error">{credentials.error}</p>
-        )}
-        {!credentialsLoading && credentials && !credentials.error && (
-          <div className="wh-modal__kv">
-            <div className="wh-modal__kv-row">
-              <span className="wh-modal__kv-label">Name</span>
-              <span className="wh-modal__kv-value">{credentials.name}</span>
-            </div>
-            <div className="wh-modal__kv-row">
-              <span className="wh-modal__kv-label">Username</span>
-              <span className="wh-modal__kv-value">{credentials.username || credentials.email}</span>
-            </div>
-            <div className="wh-modal__kv-row">
-              <span className="wh-modal__kv-label">Email</span>
-              <span className="wh-modal__kv-value">{credentials.email}</span>
-            </div>
-            <div className="wh-modal__kv-row">
-              <span className="wh-modal__kv-label">Password</span>
-              <span className="wh-modal__kv-value">
-                {showPassword ? credentials.password || "—" : "••••••••"}
-              </span>
-            </div>
-            <Button
-              type="button"
-              variant="secondary"
-              className="wh-btn--sm"
-              onClick={() => setShowPassword((v) => !v)}
-            >
-              {showPassword ? "Hide password" : "Show password"}
-            </Button>
-          </div>
-        )}
-      </Modal>
+      <AccountDetailsModal
+        open={detailsOpen}
+        onClose={closeDetails}
+        title={detailsTitle}
+        sections={detailsSections}
+        loading={detailsLoading}
+        error={detailsError}
+      />
 
       <ConfirmDeleteModal
         open={!!deleteRow}

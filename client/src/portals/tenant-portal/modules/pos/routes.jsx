@@ -15,6 +15,8 @@ import StockOut from "./pages/procurement/StockOut";
 import StockTransfers from "./pages/procurement/StockTransfers";
 import CreateBulkStock from "./pages/procurement/CreateBulkStock";
 import MovementHistory from "./pages/procurement/MovementHistory";
+import ViewStockMovement from "./pages/procurement/ViewStockMovement";
+import ViewStockTransfer from "./pages/procurement/ViewStockTransfer";
 import { MODULE_BASE } from "./constants";
 
 function RedirectOutletEdit() {
@@ -38,6 +40,8 @@ export const POS_ROUTES = [
   { path: "procurement/stock-out/create", element: <CreateBulkStock /> },
   { path: "procurement/transfers", element: <StockTransfers /> },
   { path: "procurement/transfers/create", element: <CreateBulkStock /> },
+  { path: "procurement/transfers/view/:transferId", element: <ViewStockTransfer /> },
+  { path: "procurement/movements/view/:movementId", element: <ViewStockMovement /> },
   { path: "procurement/movement-history", element: <MovementHistory /> },
   { path: "registers/terminal/:terminalId", element: <TerminalLogsView /> },
   { path: "outlets", element: <Navigate to={`${MODULE_BASE}/stores/manage`} replace /> },

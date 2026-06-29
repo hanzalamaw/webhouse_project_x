@@ -2,7 +2,7 @@ export const CRM_MODULE = "CRM";
 
 export const ACTIVE_CUSTOMER_DAYS = 30;
 
-export const LEAD_SOURCES = ["website", "whatsapp", "referral", "campaign", "manual", "csv_import"];
+export const LEAD_SOURCES = ["website", "whatsapp", "referral", "campaign", "manual", "csv_import", "other"];
 export const LEAD_STATUSES = ["new", "contacted", "qualified", "lost", "converted"];
 
 export const CUSTOMER_TYPES = ["retailer", "wholesaler", "distributor", "corporate", "vip", "other"];
@@ -22,6 +22,7 @@ export const LEAD_SOURCE_LABELS = {
   campaign: "Campaign",
   manual: "Manual",
   csv_import: "CSV Import",
+  other: "Other",
 };
 
 export const CUSTOMER_TYPE_LABELS = {

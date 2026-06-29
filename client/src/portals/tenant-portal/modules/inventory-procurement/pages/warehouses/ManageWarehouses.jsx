@@ -64,6 +64,7 @@ export default function ManageWarehouses() {
     {
       label: "Actions",
       filter: false,
+      stopRowClick: true,
       render: (row) => (
         <div className="wh-action-btns">
           <Button variant="secondary" className="wh-btn--sm" onClick={() => navigate(`${MODULE_BASE}/warehouses/edit/${row.id}`)}>Edit</Button>
@@ -102,7 +103,14 @@ export default function ManageWarehouses() {
         {loading ? (
           <p className="wh-muted">Loading…</p>
         ) : (
-          <DataTable columns={columns} rows={rows} page={page} pageSize={TABLE_PAGE_SIZE} onPageChange={setPage} />
+          <DataTable
+            columns={columns}
+            rows={rows}
+            page={page}
+            pageSize={TABLE_PAGE_SIZE}
+            onPageChange={setPage}
+            onRowClick={(row) => navigate(`${MODULE_BASE}/warehouses/edit/${row.id}`)}
+          />
         )}
       </Card>
 

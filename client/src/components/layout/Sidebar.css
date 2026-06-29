@@ -246,6 +246,13 @@
   overflow: hidden;
 }
 
+.wh-sidebar-footer-pre {
+  padding: 8px 8px 6px;
+  flex-shrink: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
 .wh-footer-link {
   display: flex;
   align-items: center;

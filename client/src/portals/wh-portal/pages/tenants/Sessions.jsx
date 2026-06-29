@@ -5,6 +5,7 @@ import { DataTable } from "../../../../components/DataTable";
 import { TableToolbar } from "../../../../components/TableToolbar";
 import { Button } from "../../../../components/Button";
 import { Badge } from "../../../../components/Badge";
+import { ConfirmActionModal } from "../../../../components/ConfirmActionModal";
 import { useAuth } from "../../../../context/AuthContext";
 import { apiFetch, fetchAllTableRows, TABLE_PAGE_SIZE } from "../../../../api/client";
 import { applyToolbarFilters, EMPTY_TOOLBAR } from "../../../../utils/tableFilters";
@@ -22,6 +23,8 @@ export default function Sessions() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [terminatingId, setTerminatingId] = useState(null);
+  const [terminateTarget, setTerminateTarget] = useState(null);
+  const [terminateError, setTerminateError] = useState("");
   const [message, setMessage] = useState("");
   const [toolbar, setToolbar] = useState({ ...EMPTY_TOOLBAR });
 
@@ -55,13 +58,15 @@ export default function Sessions() {
   const terminate = async (id) => {
     setMessage("");
     setError("");
+    setTerminateError("");
     setTerminatingId(id);
     try {
       await apiFetch(`/sessions/${id}/terminate`, { method: "POST" }, authFetch);
       setMessage("Session terminated.");
+      setTerminateTarget(null);
       await load();
     } catch (err) {
-      setError(err.message || "Failed to terminate session");
+      setTerminateError(err.message || "Failed to terminate session");
     } finally {
       setTerminatingId(null);
     }
@@ -90,7 +95,7 @@ export default function Sessions() {
             variant="danger"
             className="wh-btn--sm"
             disabled={terminatingId === row.id}
-            onClick={() => terminate(row.id)}
+            onClick={() => setTerminateTarget(row)}
           >
             {terminatingId === row.id ? "Terminating…" : "Terminate"}
           </Button>
@@ -132,6 +137,25 @@ export default function Sessions() {
           </>
         )}
       </Card>
+
+      <ConfirmActionModal
+        open={Boolean(terminateTarget)}
+        onClose={() => {
+          if (terminatingId) return;
+          setTerminateTarget(null);
+          setTerminateError("");
+        }}
+        onConfirm={() => terminate(terminateTarget.id)}
+        title="End this session?"
+        message={
+          terminateTarget
+            ? `Are you sure you want to end the session for ${terminateTarget.user_name || "this user"} (${terminateTarget.company_name || "tenant"})? They will be signed out immediately.`
+            : ""
+        }
+        confirmLabel="End session"
+        loading={Boolean(terminatingId)}
+        error={terminateError}
+      />
     </div>
   );
 }

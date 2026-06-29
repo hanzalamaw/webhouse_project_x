@@ -90,6 +90,7 @@ export default function ManageLeads() {
     {
       label: "Actions",
       filter: false,
+      stopRowClick: true,
       render: (row) => (
         <div className="wh-action-btns">
           {row.status === "converted" && row.converted_customer_id && (
@@ -116,16 +117,7 @@ export default function ManageLeads() {
       <PageHeader
         title="Leads"
         description="Capture and manage potential customers. Convert qualified leads into customer profiles."
-        actions={
-          <div className="wh-action-btns">
-            {canCreate && (
-              <Button variant="secondary" onClick={() => navigate(`${MODULE_BASE}/import-export`)}>
-                Import / Export
-              </Button>
-            )}
-            <Button onClick={() => navigate(`${MODULE_BASE}/leads/create`)} disabled={!canCreate}>Add Lead</Button>
-          </div>
-        }
+        actions={<Button onClick={() => navigate(`${MODULE_BASE}/leads/create`)} disabled={!canCreate}>Add Lead</Button>}
       />
       {error && <div className="wh-alert wh-alert--error">{error}</div>}
       {message && <div className="wh-alert wh-alert--success">{message}</div>}
@@ -135,7 +127,14 @@ export default function ManageLeads() {
         ) : (
           <>
             <TableToolbar rows={rows} value={toolbar} onChange={setToolbar} dateField="created_at" filters={TOOLBAR_FILTERS} searchPlaceholder="Search leads…" />
-            <DataTable columns={columns} rows={filteredRows} page={page} pageSize={TABLE_PAGE_SIZE} onPageChange={setPage} />
+            <DataTable
+              columns={columns}
+              rows={filteredRows}
+              page={page}
+              pageSize={TABLE_PAGE_SIZE}
+              onPageChange={setPage}
+              onRowClick={(row) => navigate(`${MODULE_BASE}/leads/view/${row.id}`)}
+            />
           </>
         )}
       </Card>

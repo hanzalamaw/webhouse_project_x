@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { PageHeader } from "../../../../../components/PageHeader";
+import { FormPageAlerts } from "../../../../../components/FormPageLayout";
 import { Card } from "../../../../../components/Card";
 import { DataTable } from "../../../../../components/DataTable";
 import { TableToolbar } from "../../../../../components/TableToolbar";
@@ -52,7 +53,7 @@ export default function AuditLogs() {
   return (
     <div className="wh-page">
       <PageHeader title="Audit Logs" description="Tenant activity log. Impersonation actions appear in WebHouse logs only." />
-      {error && <div className="wh-alert wh-alert--error">{error}</div>}
+      <FormPageAlerts error={error} />
       <Card className="wh-card--table">
         {loading ? (
           <p className="wh-muted">Loading…</p>

@@ -43,9 +43,13 @@ export function registerTenantPortalRoutes(app, verifyToken) {
 
   app.get("/api/tenant/users", ...guard, view, tenantPortalController.usersList);
 
+  app.get("/api/tenant/users/:id", ...guard, view, tenantPortalController.usersGet);
+
   app.post("/api/tenant/users", ...guard, create, tenantPortalController.usersCreate);
 
   app.put("/api/tenant/users/:id", ...guard, edit, tenantPortalController.usersUpdate);
+
+  app.get("/api/tenant/users/:id/credentials", ...guard, view, tenantPortalController.usersCredentials);
 
 
 

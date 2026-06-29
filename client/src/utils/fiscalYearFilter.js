@@ -4,10 +4,11 @@ export function getFiscalYearForDate(date, fiscalYearStart) {
   const { month, day } = fiscalFromStorage(fiscalYearStart);
   const d = date instanceof Date ? date : new Date(date);
   if (Number.isNaN(d.getTime())) return null;
-  const boundary = new Date(d.getFullYear(), month - 1, day);
-  boundary.setHours(0, 0, 0, 0);
-  if (d < boundary) return d.getFullYear() - 1;
-  return d.getFullYear();
+  const y = d.getFullYear();
+  const m = d.getMonth() + 1;
+  const dom = d.getDate();
+  if (m < month || (m === month && dom < day)) return y - 1;
+  return y;
 }
 
 export function getFiscalYearStartDate(fiscalYearLabel, fiscalYearStart) {

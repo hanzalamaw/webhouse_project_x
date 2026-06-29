@@ -9,6 +9,8 @@ import { useAuth } from "../../../../context/AuthContext";
 import { fetchAllTableRows, TABLE_PAGE_SIZE } from "../../../../api/client";
 import { applyToolbarFilters, EMPTY_TOOLBAR } from "../../../../utils/tableFilters";
 import { formatDateTime } from "../../../../utils/dateTime";
+import { formatSessionIp } from "../../../../utils/sessionDisplay";
+import { formatWhAuditAction, formatTenantAuditAction } from "../../../../utils/auditActionLabels";
 
 const LOG_TOOLBAR_FILTERS = [{ key: "action", label: "Action" }];
 
@@ -68,15 +70,28 @@ export default function Logs() {
 
   const whColumns = [
     { key: "created_at", label: "Time", format: formatDateTime },
-    { key: "action", label: "Action" },
+    {
+      key: "action",
+      label: "What happened",
+      format: (v) => formatWhAuditAction(v),
+    },
     { key: "admin_name", label: "Admin" },
-    { key: "ip_address", label: "IP" },
+    {
+      key: "ip_address",
+      label: "IP",
+      format: (v) => formatSessionIp(v),
+    },
     {
       label: "Details",
       filter: false,
+      stopRowClick: true,
       render: (row) => (
-        <button type="button" className="wh-btn wh-btn--secondary wh-btn--sm" onClick={() => setExpanded(expanded === row.id ? null : row.id)}>
-          {expanded === row.id ? "Hide" : "View diff"}
+        <button
+          type="button"
+          className="wh-btn wh-btn--secondary wh-btn--sm"
+          onClick={() => setExpanded(expanded === row.id ? null : row.id)}
+        >
+          {expanded === row.id ? "Hide" : "View changes"}
         </button>
       ),
     },
@@ -84,16 +99,29 @@ export default function Logs() {
 
   const tenantColumns = [
     { key: "created_at", label: "Time", format: formatDateTime },
-    { key: "action", label: "Action" },
+    {
+      key: "action",
+      label: "What happened",
+      format: (v) => formatTenantAuditAction(v),
+    },
     { key: "user_name", label: "User" },
     { key: "module_name", label: "Module" },
-    { key: "ip_address", label: "IP" },
+    {
+      key: "ip_address",
+      label: "IP",
+      format: (v) => formatSessionIp(v),
+    },
     {
       label: "Details",
       filter: false,
+      stopRowClick: true,
       render: (row) => (
-        <button type="button" className="wh-btn wh-btn--secondary wh-btn--sm" onClick={() => setExpanded(expanded === row.id ? null : row.id)}>
-          {expanded === row.id ? "Hide" : "View diff"}
+        <button
+          type="button"
+          className="wh-btn wh-btn--secondary wh-btn--sm"
+          onClick={() => setExpanded(expanded === row.id ? null : row.id)}
+        >
+          {expanded === row.id ? "Hide" : "View changes"}
         </button>
       ),
     },
@@ -128,7 +156,10 @@ export default function Logs() {
         ) : (
           <>
             <TableToolbar
-              rows={rows}
+              rows={rows.map((r) => ({
+                ...r,
+                action: mode === "wh" ? formatWhAuditAction(r.action) : formatTenantAuditAction(r.action),
+              }))}
               value={toolbar}
               onChange={setToolbar}
               dateField="created_at"

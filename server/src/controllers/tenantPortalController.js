@@ -53,6 +53,16 @@ export const tenantPortalController = {
     }
   },
 
+  async usersGet(req, res) {
+    try {
+      const data = await tenantPortalService.getUser(req.tenantId, Number(req.params.id));
+      if (!data) return res.status(404).json({ message: "User not found" });
+      res.json({ data });
+    } catch (e) {
+      res.status(500).json({ message: e.message });
+    }
+  },
+
   async usersCreate(req, res) {
     try {
       const data = await tenantPortalService.createUser(req, req.body);
@@ -69,6 +79,16 @@ export const tenantPortalController = {
       res.json({ data });
     } catch (e) {
       res.status(e.status || 500).json({ message: e.message });
+    }
+  },
+
+  async usersCredentials(req, res) {
+    try {
+      const data = await tenantPortalService.getUserCredentials(req.tenantId, Number(req.params.id));
+      if (!data) return res.status(404).json({ message: "User not found" });
+      res.json(data);
+    } catch (e) {
+      res.status(500).json({ message: e.message });
     }
   },
 

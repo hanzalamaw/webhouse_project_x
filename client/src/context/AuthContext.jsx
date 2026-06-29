@@ -1,7 +1,7 @@
 import { createContext, useState, useContext, useEffect, useCallback, useRef } from "react";
 import { API_BASE } from "../config/api";
 import { ImpersonationGhostIndicator } from "../components/ImpersonationGhostIndicator";
-import { isTokenExpired } from "../utils/authToken";
+import { isTokenExpired, isStoredAuthExpired } from "../utils/authToken";
 import {
   readStoredSession,
   persistSession,
@@ -42,28 +42,69 @@ export const AuthProvider = ({ children }) => {
     const userSnapshot = portalOrUser?.portal ? portalOrUser : user;
     clearStoredSession(userSnapshot);
     setUser(null);
+    setLoading(false);
     window.location.href = getLoginPath(userSnapshot);
   }, [user]);
 
-  const ensureFreshTokens = useCallback((storedUser) => {
-    const token = getActiveToken();
-    const refreshToken = getActiveRefreshToken();
-    if (!token || !refreshToken) {
-      clearSessionAndLogout(storedUser);
-      return false;
+  const refreshAccessToken = useCallback(async (refreshToken) => {
+    if (!refreshToken || isTokenExpired(refreshToken)) return null;
+    try {
+      const refreshRes = await fetch(`${API_BASE}/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refreshToken }),
+      });
+      if (!refreshRes.ok) return null;
+      const data = await refreshRes.json().catch(() => ({}));
+      return data?.token || null;
+    } catch {
+      return null;
     }
-    if (isTokenExpired(refreshToken)) {
-      clearSessionAndLogout(storedUser);
-      return false;
+  }, []);
+
+  const resolveAccessToken = useCallback(async (storedUser) => {
+    const session = readStoredSession();
+    if (!session || isStoredAuthExpired(session)) {
+      return null;
     }
-    return true;
-  }, [clearSessionAndLogout]);
+
+    const { sessionStartedAt, lastActivityAt } = readSessionTimestamps();
+    if (isLocalSessionExpired(sessionStartedAt, lastActivityAt, storedUser)) {
+      return null;
+    }
+
+    let accessToken = session.token;
+    if (isTokenExpired(accessToken)) {
+      const refreshed = await refreshAccessToken(session.refreshToken);
+      if (!refreshed) return null;
+      updateActiveToken(refreshed);
+      accessToken = refreshed;
+    }
+
+    return accessToken;
+  }, [refreshAccessToken]);
 
   const authFetch = useCallback(async (url, options = {}) => {
     const epoch = sessionEpochRef.current;
+    const session = readStoredSession();
+    if (!session?.user || isStoredAuthExpired(session)) {
+      clearSessionAndLogout(session?.user);
+      return new Response(null, { status: 401 });
+    }
+
+    let token = getActiveToken();
+    if (!token || isTokenExpired(token)) {
+      const refreshed = await refreshAccessToken(getActiveRefreshToken());
+      if (!refreshed) {
+        clearSessionAndLogout(session.user);
+        return new Response(null, { status: 401 });
+      }
+      updateActiveToken(refreshed);
+      token = refreshed;
+    }
+
     touchSessionActivity();
-    const token = getActiveToken();
-    const headers = { ...options.headers, ...(token ? { Authorization: `Bearer ${token}` } : {}) };
+    const headers = { ...options.headers, Authorization: `Bearer ${token}` };
     let res = await fetch(url, { ...options, headers });
 
     if (epoch !== sessionEpochRef.current) return res;
@@ -71,32 +112,26 @@ export const AuthProvider = ({ children }) => {
     if (res.status === 401) {
       const refreshToken = getActiveRefreshToken();
       if (!refreshToken || isTokenExpired(refreshToken)) {
-        clearSessionAndLogout();
+        clearSessionAndLogout(session.user);
         return res;
       }
-      const refreshRes = await fetch(`${API_BASE}/refresh`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refreshToken }),
-      });
+      const refreshed = await refreshAccessToken(refreshToken);
       if (epoch !== sessionEpochRef.current) return res;
-      if (!refreshRes.ok) {
-        clearSessionAndLogout();
+      if (!refreshed) {
+        clearSessionAndLogout(session.user);
         return res;
       }
-      const data = await refreshRes.json().catch(() => ({}));
-      if (!data?.token) {
-        clearSessionAndLogout();
-        return res;
-      }
-      updateActiveToken(data.token);
+      updateActiveToken(refreshed);
       res = await fetch(url, {
         ...options,
-        headers: { ...options.headers, Authorization: `Bearer ${data.token}` },
+        headers: { ...options.headers, Authorization: `Bearer ${refreshed}` },
       });
+      if (res.status === 401) {
+        clearSessionAndLogout(session.user);
+      }
     }
     return res;
-  }, [clearSessionAndLogout]);
+  }, [clearSessionAndLogout, refreshAccessToken]);
 
   const validateStoredSession = useCallback(async () => {
     const epoch = bumpSessionEpoch();
@@ -107,115 +142,90 @@ export const AuthProvider = ({ children }) => {
       return;
     }
 
-    const { user: storedUser, token } = session;
-    const { sessionStartedAt, lastActivityAt } = readSessionTimestamps();
-    if (isLocalSessionExpired(sessionStartedAt, lastActivityAt, storedUser)) {
+    const { user: storedUser } = session;
+    if (isStoredAuthExpired(session)) {
       clearSessionAndLogout(storedUser);
       return;
     }
 
-    if (!ensureFreshTokens(storedUser)) return;
-
-    setUser(storedUser);
+    const accessToken = await resolveAccessToken(storedUser);
+    if (epoch !== sessionEpochRef.current) return;
+    if (!accessToken) {
+      clearSessionAndLogout(storedUser);
+      return;
+    }
 
     const mePath = storedUser.portal === "tenant" ? `${API_BASE}/tenant/me` : `${API_BASE}/me`;
 
-    const tryMe = (accessToken) =>
-      fetch(mePath, { headers: { Authorization: `Bearer ${accessToken}` } });
-
     try {
-      let res = await tryMe(token);
-
+      const res = await fetch(mePath, { headers: { Authorization: `Bearer ${accessToken}` } });
       if (epoch !== sessionEpochRef.current) return;
 
-      if (res.status === 401) {
-        const refreshToken = getActiveRefreshToken();
-        if (!refreshToken || isTokenExpired(refreshToken)) {
-          clearSessionAndLogout(storedUser);
-          return;
-        }
-        const refreshRes = await fetch(`${API_BASE}/refresh`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ refreshToken }),
-        });
-        if (epoch !== sessionEpochRef.current) return;
-        if (!refreshRes.ok) {
-          clearSessionAndLogout(storedUser);
-          return;
-        }
-        const data = await refreshRes.json().catch(() => ({}));
-        if (!data?.token) {
-          clearSessionAndLogout(storedUser);
-          return;
-        }
-        updateActiveToken(data.token);
-        res = await tryMe(data.token);
-        if (epoch !== sessionEpochRef.current) return;
-      }
-
       if (!res.ok) {
-        if (res.status === 401 || res.status === 403) {
-          if (getActiveToken() === token) {
-            clearSessionAndLogout(storedUser);
-          }
-        } else {
-          setLoading(false);
-        }
+        clearSessionAndLogout(storedUser);
         return;
       }
 
       const data = await res.json();
       if (epoch !== sessionEpochRef.current) return;
-      if (data?.user) {
-        const merged = mergeTenantUserFromApi(data.user, storedUser);
-        setUser(merged);
-        updateActiveUser(merged);
-        touchSessionActivity();
+      if (!data?.user) {
+        clearSessionAndLogout(storedUser);
+        return;
       }
+
+      const merged = mergeTenantUserFromApi(data.user, storedUser);
+      setUser(merged);
+      updateActiveUser(merged);
+      touchSessionActivity();
     } catch {
       if (epoch === sessionEpochRef.current) {
-        const { sessionStartedAt: s, lastActivityAt: a } = readSessionTimestamps();
-        if (isLocalSessionExpired(s, a, storedUser)) {
-          clearSessionAndLogout(storedUser);
-        } else {
-          setLoading(false);
-        }
+        clearSessionAndLogout(storedUser);
       }
+      return;
     } finally {
       if (epoch === sessionEpochRef.current) {
         setLoading(false);
       }
     }
-  }, [clearSessionAndLogout, ensureFreshTokens]);
+  }, [clearSessionAndLogout, resolveAccessToken]);
 
   useEffect(() => {
     validateStoredSession();
 
     const onFocus = () => {
       const session = readStoredSession();
-      if (!session) return;
+      if (!session?.user) return;
+      if (isStoredAuthExpired(session)) {
+        clearSessionAndLogout(session.user);
+        return;
+      }
       const { sessionStartedAt, lastActivityAt } = readSessionTimestamps();
       if (isLocalSessionExpired(sessionStartedAt, lastActivityAt, session.user)) {
         clearSessionAndLogout(session.user);
         return;
       }
-      if (!ensureFreshTokens(session.user)) return;
-      if (isTokenExpired(getActiveToken())) {
+      const token = getActiveToken();
+      if (!token || isTokenExpired(token)) {
         validateStoredSession();
       }
     };
 
     const onActivity = () => touchSessionActivity();
 
-    const idleCheck = window.setInterval(() => {
+    const sessionCheck = () => {
       const session = readStoredSession();
       if (!session?.user) return;
+      if (isStoredAuthExpired(session)) {
+        clearSessionAndLogout(session.user);
+        return;
+      }
       const { sessionStartedAt, lastActivityAt } = readSessionTimestamps();
       if (isLocalSessionExpired(sessionStartedAt, lastActivityAt, session.user)) {
         clearSessionAndLogout(session.user);
       }
-    }, 60_000);
+    };
+
+    const idleCheck = window.setInterval(sessionCheck, 60_000);
 
     const activityEvents = ["mousedown", "keydown", "scroll", "touchstart"];
     activityEvents.forEach((ev) => window.addEventListener(ev, onActivity, { passive: true }));

@@ -1,811 +1,269 @@
 import { useState, useEffect, useCallback } from "react";
-
 import { useNavigate, useParams } from "react-router-dom";
-
 import { useAuth } from "../../../../../../context/AuthContext";
-
 import { useModulePermission } from "../../../../../../hooks/useModulePermission";
-
-import { apiFetch } from "../../../../../../api/client";
-
+import { apiFetch, TABLE_PAGE_SIZE } from "../../../../../../api/client";
 import { PageHeader } from "../../../../../../components/PageHeader";
-
-import { Card } from "../../../../../../components/Card";
-
-import { FormField } from "../../../../../../components/FormField";
-
 import { Button } from "../../../../../../components/Button";
-
-import { ConfirmDeleteModal } from "../../../../../../components/ConfirmDeleteModal";
-
+import { DataTable } from "../../../../../../components/DataTable";
 import { StatusBadge } from "../../../../../../components/Badge";
-
-import { formatDateTime } from "../../../../../../utils/dateTime";
-
+import {
+  ProfileHero,
+  EntityPanel,
+  ActivityTimeline,
+  LogsIcon,
+  SupportIcon,
+  TenantsIcon,
+  SinceIcon,
+} from "../../../../../../components/EntityView";
+import { formatDateTime, formatDate } from "../../../../../../utils/dateTime";
 import { formatPKR } from "../../../../../../utils/currency";
-
 import {
   MODULE_BASE,
-  ADDRESS_TYPES,
-  ADDRESS_TYPE_LABELS,
   LEAD_SOURCE_LABELS,
-  NOTE_TYPES,
-  NOTE_TYPE_LABELS,
-  ISSUE_TYPE_LABELS,
   ACTIVE_CUSTOMER_DAYS,
+  ISSUE_TYPE_LABELS,
 } from "../../constants";
-import { TenantsIcon, SupportIcon, LogsIcon } from "../../../../../../components/icons";
-import { TypeWithOtherField } from "../../components/TypeWithOtherField";
-import { formatAddressType, formatCustomerType, resolvePresetOrOther, isDefaultAddressType } from "../../utils/typeFields";
+import { formatCustomerType } from "../../utils/typeFields";
 
-
-
-function KpiCard({ label, value, hint, icon, tone = "default" }) {
-  return (
-    <div className={`wh-kpi wh-kpi--${tone}`}>
-      <div className="wh-kpi__top">
-        <span className="wh-kpi__label">{label}</span>
-        {icon && <span className="wh-kpi__icon">{icon}</span>}
-      </div>
-      <span className="wh-kpi__value">{value}</span>
-      {hint && <span className="wh-kpi__hint">{hint}</span>}
-    </div>
-  );
+function formatLocation(addresses) {
+  const list = addresses || [];
+  const primary = list.find((a) => a.is_default) || list[0];
+  if (!primary) return null;
+  return [primary.city, primary.state].filter(Boolean).join(", ") || primary.address || null;
 }
-
-function Panel({ title, subtitle, action, flush, children }) {
-  return (
-    <div className="wh-panel">
-      <div className="wh-panel__head">
-        <div>
-          <h3 className="wh-panel__title">{title}</h3>
-          {subtitle && <p className="wh-panel__subtitle">{subtitle}</p>}
-        </div>
-        {action}
-      </div>
-      <div className={`wh-panel__body${flush ? " wh-panel__body--flush" : ""}`}>{children}</div>
-    </div>
-  );
-}
-
-
 
 export default function CustomerProfile() {
-
   const { customerId } = useParams();
-
   const { authFetch } = useAuth();
-
-  const { canCreate, canEdit, canDelete } = useModulePermission("crm");
-
+  const { canCreate, canEdit } = useModulePermission("crm");
   const navigate = useNavigate();
-
   const [customer, setCustomer] = useState(null);
-
   const [loading, setLoading] = useState(true);
-
   const [error, setError] = useState("");
-
-  const [message, setMessage] = useState("");
-
-  const [noteForm, setNoteForm] = useState({ note_type: "note", body: "" });
-
-  const [addrForm, setAddrForm] = useState({
-    address_type_preset: "default",
-    address_type_custom: "",
-    address: "",
-    city: "",
-    state: "",
-    postal_code: "",
-  });
-
-  const [deleteAddr, setDeleteAddr] = useState(null);
-
-  const [saving, setSaving] = useState(false);
-
-
+  const [ordersPage, setOrdersPage] = useState(1);
+  const [posPage, setPosPage] = useState(1);
 
   const load = useCallback(async () => {
-
     setLoading(true);
-
     setError("");
-
     try {
-
       setCustomer(await apiFetch(`/crm/customers/${customerId}`, {}, authFetch));
-
     } catch (e) {
-
       setCustomer(null);
-
       setError(e.message || "Customer not found");
-
     } finally {
-
       setLoading(false);
-
     }
-
   }, [authFetch, customerId]);
-
-
 
   useEffect(() => { load().catch(() => {}); }, [load]);
 
-
-
-  const addNote = async (e) => {
-
-    e.preventDefault();
-
-    if (!canCreate || !noteForm.body.trim()) return;
-
-    setSaving(true);
-
-    setError("");
-
-    try {
-
-      await apiFetch(`/crm/customers/${customerId}/notes`, {
-
-        method: "POST",
-
-        body: JSON.stringify(noteForm),
-
-      }, authFetch);
-
-      setNoteForm({ note_type: "note", body: "" });
-
-      setMessage("Note appended.");
-
-      await load();
-
-    } catch (err) {
-
-      setError(err.message);
-
-    } finally {
-
-      setSaving(false);
-
-    }
-
-  };
-
-
-
-  const addAddress = async (e) => {
-
-    e.preventDefault();
-
-    if (!canEdit) return;
-
-    setSaving(true);
-
-    setError("");
-
-    try {
-      const address_type = resolvePresetOrOther(
-        addrForm.address_type_preset,
-        addrForm.address_type_custom,
-        "Address type"
-      );
-      await apiFetch(`/crm/customers/${customerId}/addresses`, {
-        method: "POST",
-        body: JSON.stringify({
-          address_type,
-          address: addrForm.address.trim(),
-          city: addrForm.city.trim() || null,
-          state: addrForm.state.trim() || null,
-          postal_code: addrForm.postal_code.trim() || null,
-          is_default: isDefaultAddressType(address_type),
-        }),
-      }, authFetch);
-      setAddrForm({
-        address_type_preset: "default",
-        address_type_custom: "",
-        address: "",
-        city: "",
-        state: "",
-        postal_code: "",
-      });
-
-      setMessage("Address added.");
-
-      await load();
-
-    } catch (err) {
-
-      setError(err.message);
-
-    } finally {
-
-      setSaving(false);
-
-    }
-
-  };
-
-
-
-  const confirmDeleteAddress = async () => {
-
-    if (!deleteAddr) return;
-
-    setSaving(true);
-
-    try {
-
-      await apiFetch(`/crm/customers/${customerId}/addresses/${deleteAddr.id}`, { method: "DELETE" }, authFetch);
-
-      setDeleteAddr(null);
-
-      setMessage("Address removed.");
-
-      await load();
-
-    } catch (err) {
-
-      setError(err.message);
-
-    } finally {
-
-      setSaving(false);
-
-    }
-
-  };
-
-
-
   if (loading) {
-
     return (
-
       <div className="wh-page wh-page--wide">
-
-        <p className="wh-muted">Loading…</p>
-
+        <p className="wh-muted">Loading customer…</p>
       </div>
-
     );
-
   }
-
-
 
   if (!customer) {
-
     return (
-
       <div className="wh-page wh-page--wide">
-
         <div className="wh-alert wh-alert--error">{error || "Customer not found"}</div>
-
         <Button variant="secondary" onClick={() => navigate(`${MODULE_BASE}/customers/manage`)}>Back to customers</Button>
-
       </div>
-
     );
-
   }
 
-
-
   const stats = customer.stats || {};
+  const totalSpent = stats.total_revenue ?? 0;
+  const orderCount = stats.order_count ?? 0;
+  const orders = customer.orders || [];
+  const posSales = customer.pos_sales || [];
+  const complaints = customer.complaints || [];
+  const activities = (customer.activities || []).map((a) => ({
+    ...a,
+    created_at: formatDateTime(a.created_at),
+  }));
 
+  const orderColumns = [
+    { key: "order_no", label: "Order ID", format: (v) => `#${v}` },
+    { key: "created_at", label: "Date", format: formatDateTime },
+    { key: "order_status", label: "Status", render: (r) => <StatusBadge status={r.order_status} /> },
+    { key: "payment_status", label: "Payment", format: (v) => v || "—" },
+    { key: "payable_amount", label: "Amount", format: (v) => formatPKR(v) },
+  ];
 
+  const posColumns = [
+    { key: "sale_no", label: "Sale ID", format: (v) => `#${v}` },
+    { key: "created_at", label: "Date", format: formatDateTime },
+    { key: "payment_status", label: "Status", render: (r) => <StatusBadge status={r.payment_status} /> },
+    { key: "payable_amount", label: "Amount", format: (v) => formatPKR(v) },
+  ];
 
   return (
-
-    <div className="wh-page wh-page--wide">
-
+    <div className="wh-page wh-page--wide wh-entity-view">
       <PageHeader
-
         title={customer.customer_name}
-
-        description={customer.company_name || "Customer profile"}
-
+        description={customer.company_name || "Customer overview"}
         actions={
-
           <div className="wh-action-btns">
-
             <Button variant="secondary" onClick={() => navigate(`${MODULE_BASE}/customers/manage`)}>All customers</Button>
-
             {canEdit && (
-
               <Button variant="secondary" onClick={() => navigate(`${MODULE_BASE}/customers/edit/${customerId}`)}>
-
-                Edit Customer
-
+                Edit customer
               </Button>
-
             )}
-
             {canCreate && (
-
-              <Button onClick={() => navigate(`${MODULE_BASE}/complaints/create`)}>
-
-                Add Complaint
-
-              </Button>
-
+              <Button onClick={() => navigate(`${MODULE_BASE}/complaints/create`)}>Add complaint</Button>
             )}
-
           </div>
-
         }
-
       />
 
-      {error && <div className="wh-alert wh-alert--error">{error}</div>}
+      <ProfileHero
+        className="wh-entity-profile--customer"
+        variant="split"
+        name={customer.customer_name}
+        subtitle={[formatCustomerType(customer.customer_type), customer.company_name].filter(Boolean).join(" · ")}
+        status={customer.status}
+        contact={[
+          { label: "Phone", value: customer.phone, icon: "phone" },
+          { label: "Location", value: formatLocation(customer.addresses), icon: "location" },
+          { label: "Email", value: customer.email, icon: "email" },
+        ]}
+        kpis={[
+          {
+            label: "Total orders",
+            value: String(orderCount),
+            hint: stats.recently_active ? `Active · ${ACTIVE_CUSTOMER_DAYS}d` : "Inactive",
+            tone: "accent",
+            icon: <LogsIcon />,
+          },
+          {
+            label: "Total spent",
+            value: formatPKR(totalSpent),
+            hint: `${stats.pos_sale_count ?? 0} POS sales`,
+            tone: "success",
+            icon: <TenantsIcon />,
+          },
+          {
+            label: "Order revenue",
+            value: formatPKR(stats.order_revenue ?? 0),
+            hint: `${orderCount} orders`,
+            icon: <LogsIcon />,
+          },
+          {
+            label: "POS revenue",
+            value: formatPKR(stats.pos_revenue ?? 0),
+            hint: `${stats.pos_sale_count ?? 0} sales`,
+            icon: <TenantsIcon />,
+          },
+          {
+            label: "Customer since",
+            value: stats.first_order_at ? formatDate(stats.first_order_at) : "—",
+            hint: stats.first_order_at ? "First order date" : "No orders yet",
+            icon: <SinceIcon />,
+            valueVariant: "date",
+          },
+          {
+            label: "Open complaints",
+            value: stats.complaint_count ?? 0,
+            hint: "Needs attention",
+            tone: "warning",
+            icon: <SupportIcon />,
+          },
+        ]}
+      />
 
-      {message && <div className="wh-alert wh-alert--success">{message}</div>}
+      {customer.converted_from_lead && (
+        <div className="wh-entity-banner">
+          Converted from lead <strong>{customer.converted_from_lead.lead_name}</strong>
+          {" · "}
+          {LEAD_SOURCE_LABELS[customer.converted_from_lead.source] || customer.converted_from_lead.source}
+          {" · "}
+          {formatDateTime(customer.converted_from_lead.converted_at)}
+        </div>
+      )}
 
+      <EntityPanel title="Order overview" subtitle="Recent e-commerce orders for this customer" flush>
+        {orders.length ? (
+          <DataTable
+            columns={orderColumns}
+            rows={orders}
+            page={ordersPage}
+            pageSize={TABLE_PAGE_SIZE}
+            onPageChange={setOrdersPage}
+          />
+        ) : (
+          <p className="wh-panel__empty">No orders linked to this customer.</p>
+        )}
+      </EntityPanel>
 
+      <EntityPanel title="POS sales" subtitle="In-store transactions linked to this customer" flush>
+        {posSales.length ? (
+          <DataTable
+            columns={posColumns}
+            rows={posSales}
+            page={posPage}
+            pageSize={TABLE_PAGE_SIZE}
+            onPageChange={setPosPage}
+          />
+        ) : (
+          <p className="wh-panel__empty">No POS sales linked to this customer.</p>
+        )}
+      </EntityPanel>
 
       <div className="wh-dash-grid">
-        <div className="wh-dash-col-3">
-          <KpiCard label="Total orders" value={stats.order_count ?? 0} hint="E-commerce orders" icon={<LogsIcon />} tone="accent" />
+        <div className="wh-dash-col-6">
+          <EntityPanel title="Activity log" subtitle="CRM audit trail for this customer">
+            <ActivityTimeline items={activities} />
+          </EntityPanel>
         </div>
-        <div className="wh-dash-col-3">
-          <KpiCard label="POS sales" value={stats.pos_sale_count ?? 0} hint="In-store checkouts" icon={<TenantsIcon />} />
-        </div>
-        <div className="wh-dash-col-3">
-          <KpiCard label="Lifetime revenue" value={formatPKR(stats.total_revenue ?? 0)} hint="Orders + POS" tone="success" />
-        </div>
-        <div className="wh-dash-col-3">
-          <KpiCard label="Open complaints" value={stats.complaint_count ?? 0} hint="Needs attention" tone="warning" icon={<SupportIcon />} />
-        </div>
-      </div>
-
-      <div className="wh-dash-grid" style={{ marginBottom: 16 }}>
-        <div className="wh-dash-col-3">
-          <KpiCard
-            label="Recent activity"
-            value={stats.recently_active ? `Active (${ACTIVE_CUSTOMER_DAYS}d)` : "Inactive"}
-            hint="Based on orders and POS sales"
-          />
-        </div>
-        <div className="wh-dash-col-3">
-          <KpiCard label="Order revenue" value={formatPKR(stats.order_revenue ?? 0)} hint="From online orders" />
-        </div>
-        <div className="wh-dash-col-3">
-          <KpiCard label="POS revenue" value={formatPKR(stats.pos_revenue ?? 0)} hint="From in-store sales" />
-        </div>
-        <div className="wh-dash-col-3">
-          <KpiCard label="Member since" value={formatDateTime(customer.created_at)} hint="Customer created" />
-        </div>
-      </div>
-
-
-
-      <Card>
-
-        <h3 className="wh-card__title">Overview</h3>
-
-        <div className="wh-grid-2">
-
-          <div>
-
-            <span className="wh-muted">Type</span>
-
-            <p>{formatCustomerType(customer.customer_type)}</p>
-
-          </div>
-
-          <div>
-
-            <span className="wh-muted">Status</span>
-
-            <p><StatusBadge status={customer.status} /></p>
-
-          </div>
-
-          <div>
-
-            <span className="wh-muted">Phone</span>
-
-            <p>{customer.phone || "—"}</p>
-
-          </div>
-
-          <div>
-
-            <span className="wh-muted">Email</span>
-
-            <p>{customer.email || "—"}</p>
-
-          </div>
-
-          <div>
-
-            <span className="wh-muted">Tags</span>
-
-            <p>{(customer.tags || []).map((t) => t.tag_name).join(", ") || "—"}</p>
-
-          </div>
-
-          <div>
-
-            <span className="wh-muted">Last updated</span>
-
-            <p>{formatDateTime(customer.updated_at)}</p>
-
-          </div>
-
-          {customer.converted_from_lead && (
-
-            <div style={{ gridColumn: "1 / -1" }}>
-
-              <span className="wh-muted">Converted from lead</span>
-
-              <p>
-
-                {customer.converted_from_lead.lead_name}
-
-                {" · "}
-
-                {LEAD_SOURCE_LABELS[customer.converted_from_lead.source] || customer.converted_from_lead.source}
-
-                {" · "}
-
-                {formatDateTime(customer.converted_from_lead.converted_at)}
-
-              </p>
-
-            </div>
-
-          )}
-
-        </div>
-
-      </Card>
-
-
-
-      <div className="wh-dash-grid wh-dash-col-2" style={{ marginTop: 16 }}>
-
-        <Card>
-
-          <h3 className="wh-card__title">Recent orders</h3>
-
-          {(customer.orders || []).length ? (
-
-            <div className="wh-mini-list">
-
-              {customer.orders.map((o) => (
-
-                <div className="wh-mini-row" key={o.id}>
-
-                  <div className="wh-mini-row__main">
-
-                    <div className="wh-mini-row__title">{o.order_no}</div>
-
-                    <div className="wh-mini-row__sub">
-
-                      {o.order_status} · {o.payment_status} · {formatPKR(o.payable_amount)}
-
+        <div className="wh-dash-col-6">
+          <EntityPanel
+            title="Complaints"
+            subtitle={`${complaints.length} recorded`}
+            action={
+              canCreate ? (
+                <Button variant="secondary" className="wh-btn--sm" onClick={() => navigate(`${MODULE_BASE}/complaints/create`)}>
+                  New
+                </Button>
+              ) : null
+            }
+            flush
+          >
+            {complaints.length ? (
+              <div className="wh-mini-list">
+                {complaints.map((c) => (
+                  <div className="wh-mini-row" key={c.id}>
+                    <div className="wh-mini-row__main">
+                      <div className="wh-mini-row__title">{c.subject}</div>
+                      <div className="wh-mini-row__sub">
+                        {ISSUE_TYPE_LABELS[c.issue_type] || c.issue_type}
+                        {" · "}
+                        <StatusBadge status={c.status} />
+                        {" · "}
+                        {formatDateTime(c.created_at)}
+                      </div>
                     </div>
-
-                    <div className="wh-mini-row__sub">{formatDateTime(o.created_at)}</div>
-
+                    <Button
+                      variant="secondary"
+                      className="wh-btn--sm"
+                      onClick={() => navigate(`${MODULE_BASE}/complaints/view/${c.id}`)}
+                    >
+                      View
+                    </Button>
                   </div>
-
-                </div>
-
-              ))}
-
-            </div>
-
-          ) : (
-
-            <p className="wh-muted">No orders linked to this customer.</p>
-
-          )}
-
-        </Card>
-
-
-
-        <Card>
-
-          <h3 className="wh-card__title">Recent POS sales</h3>
-
-          {(customer.pos_sales || []).length ? (
-
-            <div className="wh-mini-list">
-
-              {customer.pos_sales.map((s) => (
-
-                <div className="wh-mini-row" key={s.id}>
-
-                  <div className="wh-mini-row__main">
-
-                    <div className="wh-mini-row__title">{s.sale_no}</div>
-
-                    <div className="wh-mini-row__sub">{s.payment_status} · {formatPKR(s.payable_amount)}</div>
-
-                    <div className="wh-mini-row__sub">{formatDateTime(s.created_at)}</div>
-
-                  </div>
-
-                </div>
-
-              ))}
-
-            </div>
-
-          ) : (
-
-            <p className="wh-muted">No POS sales linked to this customer.</p>
-
-          )}
-
-        </Card>
-
+                ))}
+              </div>
+            ) : (
+              <p className="wh-panel__empty">No complaints recorded.</p>
+            )}
+          </EntityPanel>
+        </div>
       </div>
-
-
-
-      <Card style={{ marginTop: 16 }}>
-
-        <h3 className="wh-card__title">Complaints & support</h3>
-
-        {(customer.complaints || []).length ? (
-
-          <div className="wh-mini-list">
-
-            {customer.complaints.map((c) => (
-
-              <div className="wh-mini-row" key={c.id}>
-
-                <div className="wh-mini-row__main">
-
-                  <div className="wh-mini-row__title">{c.subject}</div>
-
-                  <div className="wh-mini-row__sub">
-
-                    {ISSUE_TYPE_LABELS[c.issue_type] || c.issue_type}
-
-                    {" · "}
-
-                    <StatusBadge status={c.status} />
-
-                    {" · "}
-
-                    {c.priority}
-
-                  </div>
-
-                  <div className="wh-mini-row__sub">{formatDateTime(c.created_at)}</div>
-
-                </div>
-
-                {canEdit && (
-
-                  <Button variant="secondary" className="wh-btn--sm" onClick={() => navigate(`${MODULE_BASE}/complaints/edit/${c.id}`)}>
-
-                    Edit
-
-                  </Button>
-
-                )}
-
-              </div>
-
-            ))}
-
-          </div>
-
-        ) : (
-
-          <p className="wh-muted">No complaints recorded.</p>
-
-        )}
-
-      </Card>
-
-
-
-      <Card style={{ marginTop: 16 }}>
-
-        <h3 className="wh-card__title">Addresses</h3>
-
-        {(customer.addresses || []).length ? (
-
-          <div className="wh-mini-list">
-
-            {(customer.addresses || []).map((a) => (
-
-              <div className="wh-mini-row" key={a.id}>
-
-                <div className="wh-mini-row__main">
-
-                  <div className="wh-mini-row__title">
-
-                    {formatAddressType(a.address_type)}{a.is_default ? " (primary)" : ""}
-
-                  </div>
-
-                  <div className="wh-mini-row__sub">
-
-                    {a.address}
-
-                    {a.city ? `, ${a.city}` : ""}
-
-                    {a.state ? `, ${a.state}` : ""}
-
-                    {a.postal_code ? ` ${a.postal_code}` : ""}
-
-                  </div>
-
-                </div>
-
-                {canDelete && (
-
-                  <Button variant="danger" className="wh-btn--sm" onClick={() => setDeleteAddr(a)}>Delete</Button>
-
-                )}
-
-              </div>
-
-            ))}
-
-          </div>
-
-        ) : (
-
-          <p className="wh-muted">No addresses yet.</p>
-
-        )}
-
-        {canEdit && (
-
-          <form className="wh-form-grid wh-form-grid__actions" onSubmit={addAddress}>
-            <TypeWithOtherField
-              id="address_type"
-              label="Address type"
-              preset={addrForm.address_type_preset}
-              custom={addrForm.address_type_custom}
-              onPresetChange={(v) => setAddrForm((f) => ({ ...f, address_type_preset: v }))}
-              onCustomChange={(v) => setAddrForm((f) => ({ ...f, address_type_custom: v }))}
-              options={ADDRESS_TYPES}
-              optionLabels={ADDRESS_TYPE_LABELS}
-              customPlaceholder="e.g. Warehouse"
-            />
-
-            <div className="wh-form-grid__full">
-
-              <FormField id="address" label="Address" as="textarea" rows={2} value={addrForm.address} onChange={(e) => setAddrForm((f) => ({ ...f, address: e.target.value }))} />
-
-            </div>
-
-            <FormField id="city" label="City" value={addrForm.city} onChange={(e) => setAddrForm((f) => ({ ...f, city: e.target.value }))} />
-
-            <FormField id="state" label="State" value={addrForm.state} onChange={(e) => setAddrForm((f) => ({ ...f, state: e.target.value }))} />
-
-            <FormField id="postal_code" label="Postal Code" value={addrForm.postal_code} onChange={(e) => setAddrForm((f) => ({ ...f, postal_code: e.target.value }))} />
-
-            <div className="wh-form-grid__full">
-
-              <Button type="submit" disabled={saving}>Add Address</Button>
-
-            </div>
-
-          </form>
-
-        )}
-
-      </Card>
-
-
-
-      <Card style={{ marginTop: 16 }}>
-
-        <h3 className="wh-card__title">Notes & remarks</h3>
-
-        {customer.note ? (
-
-          <div className="wh-card__text" style={{ whiteSpace: "pre-wrap" }}>{customer.note}</div>
-
-        ) : (
-
-          <p className="wh-muted">No notes yet.</p>
-
-        )}
-
-        {canCreate && (
-
-          <form className="wh-form-grid wh-form-grid__actions" onSubmit={addNote} style={{ marginTop: 16 }}>
-
-            <FormField id="note_type" label="Type" as="select" value={noteForm.note_type} onChange={(e) => setNoteForm((f) => ({ ...f, note_type: e.target.value }))}>
-
-              {NOTE_TYPES.map((t) => <option key={t} value={t}>{NOTE_TYPE_LABELS[t] || t}</option>)}
-
-            </FormField>
-
-            <div className="wh-form-grid__full">
-
-              <FormField id="note_body" label="Add note" as="textarea" rows={3} value={noteForm.body} onChange={(e) => setNoteForm((f) => ({ ...f, body: e.target.value }))} />
-
-            </div>
-
-            <div className="wh-form-grid__full">
-
-              <Button type="submit" disabled={saving}>Append Note</Button>
-
-            </div>
-
-          </form>
-
-        )}
-
-      </Card>
-
-
-
-      <Card style={{ marginTop: 16 }}>
-
-        <h3 className="wh-card__title">Activity timeline</h3>
-
-        {(customer.activities || []).length ? (
-
-          <div className="wh-mini-list">
-
-            {customer.activities.map((a) => (
-
-              <div className="wh-mini-row" key={a.id}>
-
-                <div className="wh-mini-row__main">
-
-                  <div className="wh-mini-row__title">{a.summary}</div>
-
-                  <div className="wh-mini-row__sub">
-
-                    {a.action}{a.user_name ? ` · ${a.user_name}` : ""} · {formatDateTime(a.created_at)}
-
-                  </div>
-
-                </div>
-
-              </div>
-
-            ))}
-
-          </div>
-
-        ) : (
-
-          <p className="wh-muted">No activity recorded yet.</p>
-
-        )}
-
-      </Card>
-
-
-
-      <ConfirmDeleteModal
-
-        open={!!deleteAddr}
-
-        title="Delete address"
-
-        recordName={deleteAddr?.address_type || "this address"}
-
-        onConfirm={confirmDeleteAddress}
-
-        onClose={() => setDeleteAddr(null)}
-
-        loading={saving}
-
-      />
-
     </div>
-
   );
-
 }
-
-

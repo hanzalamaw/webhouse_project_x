@@ -10,6 +10,8 @@ export function SearchableSelect({
   loading = false,
   disabled = false,
   emptyMessage = "No matches",
+  allowEmpty = false,
+  emptyOptionLabel = "No one",
 }) {
   const autoId = useId();
   const id = idProp || autoId;
@@ -18,20 +20,25 @@ export function SearchableSelect({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
 
+  const listOptions = useMemo(() => {
+    if (!allowEmpty) return options;
+    return [{ value: "", label: emptyOptionLabel }, ...options.filter((o) => o.value !== "")];
+  }, [allowEmpty, emptyOptionLabel, options]);
+
   const selected = useMemo(
-    () => options.find((o) => o.value === value) || null,
-    [options, value]
+    () => (value === "" || value == null ? null : listOptions.find((o) => o.value === value) || null),
+    [listOptions, value]
   );
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return options;
-    return options.filter(
+    if (!q) return listOptions;
+    return listOptions.filter(
       (o) =>
         o.value.toLowerCase().includes(q) ||
         (o.label && o.label.toLowerCase().includes(q))
     );
-  }, [options, query]);
+  }, [listOptions, query]);
 
   useEffect(() => {
     if (!open) setQuery("");
@@ -47,7 +54,7 @@ export function SearchableSelect({
     return () => document.removeEventListener("mousedown", onDocClick);
   }, []);
 
-  const displayValue = open ? query : selected?.label || value || "";
+  const displayValue = open ? query : (selected?.label || "");
 
   const pick = (option) => {
     onChange(option.value);
@@ -75,7 +82,7 @@ export function SearchableSelect({
           onFocus={() => {
             if (!disabled && !loading) {
               setOpen(true);
-              setQuery(selected?.label || value || "");
+              setQuery(selected?.label || "");
             }
           }}
           onChange={(e) => {
@@ -100,7 +107,7 @@ export function SearchableSelect({
             if (disabled || loading) return;
             setOpen((v) => !v);
             if (!open) {
-              setQuery(selected?.label || value || "");
+              setQuery(selected?.label || "");
               inputRef.current?.focus();
             }
           }}

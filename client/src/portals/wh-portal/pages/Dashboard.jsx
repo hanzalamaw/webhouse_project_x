@@ -6,7 +6,8 @@ import { BarChart, DonutChart, HBars } from "../../../components/charts";
 import { StatusBadge } from "../../../components/Badge";
 import { formatPKR } from "../../../utils/currency";
 import { formatDate } from "../../../utils/dateTime";
-import { inDateRange } from "../../../utils/tableFilters";
+import { DashboardFilter } from "../../../components/DashboardFilter";
+import { EMPTY_DASHBOARD_FILTER, filterRowsByDashboard } from "../../../utils/dashboardFilter";
 import {
   TenantsIcon,
   SubscriptionIcon,
@@ -58,8 +59,7 @@ function countBy(rows, field) {
 }
 
 function filterByRange(rows, field, range) {
-  if (range.allTime) return rows;
-  return rows.filter((r) => inDateRange(r[field], range));
+  return filterRowsByDashboard(rows, field, range, null);
 }
 
 function KpiCard({ label, value, hint, icon, tone = "default" }) {
@@ -99,16 +99,12 @@ export default function Dashboard() {
   const [plans, setPlans] = useState([]);
   const [modules, setModules] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [allTime, setAllTime] = useState(true);
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
+  const [dashFilter, setDashFilter] = useState({ ...EMPTY_DASHBOARD_FILTER });
 
-  const range = useMemo(() => ({ allTime, dateFrom, dateTo }), [allTime, dateFrom, dateTo]);
-
-  const fTenants = useMemo(() => filterByRange(tenants, "created_at", range), [tenants, range]);
-  const fPayments = useMemo(() => filterByRange(payments, "received_at", range), [payments, range]);
-  const fTickets = useMemo(() => filterByRange(tickets, "created_at", range), [tickets, range]);
-  const fSessions = useMemo(() => filterByRange(sessions, "login_at", range), [sessions, range]);
+  const fTenants = useMemo(() => filterByRange(tenants, "created_at", dashFilter), [tenants, dashFilter]);
+  const fPayments = useMemo(() => filterByRange(payments, "received_at", dashFilter), [payments, dashFilter]);
+  const fTickets = useMemo(() => filterByRange(tickets, "created_at", dashFilter), [tickets, dashFilter]);
+  const fSessions = useMemo(() => filterByRange(sessions, "login_at", dashFilter), [sessions, dashFilter]);
 
   useEffect(() => {
     let active = true;
@@ -232,33 +228,12 @@ export default function Dashboard() {
         description="Platform overview — tenants, subscriptions, revenue and operational health."
       />
 
-      <div className="wh-dash-filter">
-        <label className="wh-dash-filter__label">
-          <input
-            type="checkbox"
-            checked={allTime}
-            onChange={(e) => setAllTime(e.target.checked)}
-          />
-          All time
-        </label>
-        <div className="wh-dash-filter__dates">
-          <input
-            type="date"
-            value={dateFrom}
-            disabled={allTime}
-            onChange={(e) => setDateFrom(e.target.value)}
-            aria-label="From date"
-          />
-          <span className="wh-dash-filter__sep">to</span>
-          <input
-            type="date"
-            value={dateTo}
-            disabled={allTime}
-            onChange={(e) => setDateTo(e.target.value)}
-            aria-label="To date"
-          />
-        </div>
-      </div>
+      <DashboardFilter
+        rows={[...tenants, ...payments, ...tickets, ...sessions]}
+        dateField="created_at"
+        value={dashFilter}
+        onChange={setDashFilter}
+      />
 
       {/* KPI row */}
       <div className="wh-dash-grid">
@@ -273,9 +248,9 @@ export default function Dashboard() {
         </div>
         <div className="wh-dash-col-3">
           <KpiCard
-            label={allTime ? "Revenue (All Time)" : "Revenue"}
+            label={dashFilter.allTime && !dashFilter.year ? "Revenue (All Time)" : "Revenue"}
             value={money(revenueTotal)}
-            hint={allTime ? "All recorded payments" : "Payments in selected range"}
+            hint={dashFilter.allTime && !dashFilter.year ? "All recorded payments" : "Payments in selected range"}
             icon={<SubscriptionIcon />}
             tone="success"
           />

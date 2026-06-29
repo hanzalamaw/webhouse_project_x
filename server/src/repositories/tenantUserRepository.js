@@ -21,7 +21,7 @@ export const tenantUserRepository = {
 
   async findAllByTenant(tenantId) {
     const [rows] = await readDb.query(
-      `SELECT u.id, u.name, u.email, u.username, u.phone, u.status, u.last_login_at, u.role_id,
+      `SELECT u.id, u.name, u.email, u.username, u.phone, u.status, u.last_login_at, u.created_at, u.role_id,
               r.role_name
        FROM users u
        LEFT JOIN roles r ON r.id = u.role_id AND r.deleted_at IS NULL
@@ -34,8 +34,19 @@ export const tenantUserRepository = {
 
   async findById(tenantId, userId) {
     const [rows] = await readDb.query(
-      `SELECT u.id, u.name, u.email, u.username, u.phone, u.status, u.last_login_at, u.role_id,
+      `SELECT u.id, u.name, u.email, u.username, u.phone, u.status, u.last_login_at, u.created_at, u.role_id,
               r.role_name
+       FROM users u
+       LEFT JOIN roles r ON r.id = u.role_id AND r.deleted_at IS NULL
+       WHERE u.tenant_id = ? AND u.id = ? AND u.deleted_at IS NULL LIMIT 1`,
+      [tenantId, userId]
+    );
+    return rows[0] || null;
+  },
+
+  async findCredentialsById(tenantId, userId) {
+    const [rows] = await readDb.query(
+      `SELECT u.id, u.name, u.email, u.username, u.password, r.role_name
        FROM users u
        LEFT JOIN roles r ON r.id = u.role_id AND r.deleted_at IS NULL
        WHERE u.tenant_id = ? AND u.id = ? AND u.deleted_at IS NULL LIMIT 1`,

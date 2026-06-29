@@ -22,6 +22,10 @@ function applyImpliedPermissions(matrix) {
   return next;
 }
 
+function moduleHasAll(perms) {
+  return ACTIONS.every((a) => perms.has(a));
+}
+
 export default function RolesAndPermissions() {
   const { authFetch } = useAuth();
   const { canCreate, canEdit } = useModulePermission("admin");
@@ -71,7 +75,7 @@ export default function RolesAndPermissions() {
   }, [roles, selectedId, loadRole]);
 
   const togglePermission = (moduleId, action) => {
-    if (!detail) return;
+    if (!detail || isSuperAdminRole || !canEdit) return;
     const key = String(moduleId);
     const current = new Set(detail.permissions?.[key] || []);
     if (current.has(action)) current.delete(action);
@@ -81,6 +85,26 @@ export default function RolesAndPermissions() {
       [key]: ACTIONS.filter((a) => current.has(a)),
     });
     setDetail({ ...detail, permissions: updated });
+  };
+
+  const setModulePermissions = (moduleId, actions) => {
+    if (!detail || isSuperAdminRole || !canEdit) return;
+    const key = String(moduleId);
+    const updated = applyImpliedPermissions({
+      ...detail.permissions,
+      [key]: [...actions],
+    });
+    setDetail({ ...detail, permissions: updated });
+  };
+
+  const toggleAllForModule = (moduleId) => {
+    const key = String(moduleId);
+    const perms = new Set(detail.permissions?.[key] || []);
+    if (moduleHasAll(perms)) {
+      setModulePermissions(moduleId, []);
+    } else {
+      setModulePermissions(moduleId, ACTIONS);
+    }
   };
 
   const saveRole = async () => {
@@ -240,6 +264,7 @@ export default function RolesAndPermissions() {
                   <thead>
                     <tr>
                       <th>Module</th>
+                      <th>All</th>
                       {ACTIONS.map((a) => (
                         <th key={a}>{a}</th>
                       ))}
@@ -248,15 +273,25 @@ export default function RolesAndPermissions() {
                   <tbody>
                     {modules.map((mod) => {
                       const perms = new Set(detail.permissions?.[String(mod.id)] || []);
+                      const allOn = moduleHasAll(perms);
                       return (
                         <tr key={mod.id}>
                           <td>{mod.module_name}</td>
+                          <td>
+                            <input
+                              type="checkbox"
+                              checked={allOn}
+                              disabled={isSuperAdminRole || !canEdit}
+                              onChange={() => toggleAllForModule(mod.id)}
+                              aria-label={`All permissions for ${mod.module_name}`}
+                            />
+                          </td>
                           {ACTIONS.map((action) => (
                             <td key={action}>
                               <input
                                 type="checkbox"
-                                checked={perms.has(action)}
-                                  disabled={isSuperAdminRole || !canEdit}
+                                checked={allOn || perms.has(action)}
+                                disabled={isSuperAdminRole || !canEdit || allOn}
                                 onChange={() => togglePermission(mod.id, action)}
                               />
                             </td>

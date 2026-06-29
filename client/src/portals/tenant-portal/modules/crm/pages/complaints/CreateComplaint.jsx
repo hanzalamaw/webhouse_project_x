@@ -199,6 +199,8 @@ export default function CreateComplaint() {
                 options={assigneeOptions}
                 placeholder="Search team members…"
                 emptyMessage="No CRM users found"
+                allowEmpty
+                emptyOptionLabel="No one"
               />
               {isEdit && (
                 <div className="wh-form-grid__full">

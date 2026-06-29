@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { PageHeader } from "../../../../../components/PageHeader";
+import { FormPageAlerts } from "../../../../../components/FormPageLayout";
 import { Card } from "../../../../../components/Card";
 import { DataTable } from "../../../../../components/DataTable";
 import { TableToolbar } from "../../../../../components/TableToolbar";
@@ -90,7 +91,7 @@ export default function ActivityAlerts() {
         title="Activity Alerts"
         description="Important security and configuration events for your organization."
       />
-      {error && <div className="wh-alert wh-alert--error">{error}</div>}
+      <FormPageAlerts error={error} />
       <Card className="wh-card--table">
         {loading ? (
           <p className="wh-muted">Loading…</p>

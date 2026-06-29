@@ -11,6 +11,7 @@ import { createActivityAlert } from "../utils/activityAlerts.js";
 import { paginatedResponse, parsePagination } from "../utils/pagination.js";
 import { isSuperAdminRole, isSuperAdminRoleName, isSuperAdminUser } from "../utils/tenantRoles.js";
 import { assertUsernameAvailable } from "../utils/usernamePolicy.js";
+import { decrypt } from "../utils/cipher.js";
 
 function auditCtx(req) {
   return {
@@ -47,6 +48,10 @@ export const tenantPortalService = {
     return { data: users, limits: { max_users: limits.max_users, active_count: activeCount } };
   },
 
+  async getUser(tenantId, userId) {
+    return tenantUserRepository.findById(tenantId, userId);
+  },
+
   async createUser(req, body) {
     const ctx = auditCtx(req);
     const limits = await tenantUserRepository.getLimits(ctx.tenantId);
@@ -77,6 +82,27 @@ export const tenantPortalService = {
     const user = await tenantUserRepository.findById(ctx.tenantId, id);
     await logTenantAudit({ ...ctx, action: "user_create", newValue: user });
     return user;
+  },
+
+  async getUserCredentials(tenantId, userId) {
+    const tenant = await tenantRepository.findById(tenantId);
+    if (!tenant) return null;
+    const user = await tenantUserRepository.findCredentialsById(tenantId, userId);
+    if (!user) return null;
+    let password = null;
+    try {
+      password = decrypt(user.password);
+    } catch {
+      password = null;
+    }
+    return {
+      name: user.name,
+      email: user.email,
+      username: user.username || user.email,
+      role_name: user.role_name,
+      login_portal: tenant.login_portal,
+      password,
+    };
   },
 
   async updateUser(req, userId, body) {

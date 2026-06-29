@@ -1,4 +1,5 @@
 import { API_BASE } from "../config/api";
+import { friendlyError } from "../utils/friendlyError";
 
 export async function apiFetch(path, options = {}, authFetch = fetch) {
   const url = path.startsWith("http") ? path : `${API_BASE}${path.startsWith("/") ? path : `/${path}`}`;
@@ -7,7 +8,9 @@ export async function apiFetch(path, options = {}, authFetch = fetch) {
     ...options,
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.message || `Request failed (${res.status})`);
+  if (!res.ok) {
+    throw new Error(friendlyError(data.message, res.status));
+  }
   return data;
 }
 

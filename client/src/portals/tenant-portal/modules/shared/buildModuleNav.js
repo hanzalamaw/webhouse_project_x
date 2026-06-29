@@ -2,23 +2,15 @@ import {
   DashboardIcon,
   TenantsIcon,
   ImpersonateIcon,
-  ModuleIcon,
   LogsIcon,
   SubscriptionIcon,
   SupportIcon,
-  HelpIcon,
 } from "../../../../components/icons";
 
 /** Shared sidebar sections — each module navConfig can extend or replace later. */
 export function buildModuleNav(slug) {
   const base = `/app/m/${slug}`;
   return [
-    {
-      id: "all-modules",
-      label: "All Modules",
-      path: "/app",
-      icon: ModuleIcon,
-    },
     {
       id: "dashboard",
       label: "Dashboard",
@@ -66,12 +58,6 @@ export function buildModuleNav(slug) {
       label: "Activity Alerts",
       path: `${base}/activity-alerts`,
       icon: SupportIcon,
-    },
-    {
-      id: "help-center",
-      label: "Help Center",
-      path: `${base}/help-center`,
-      icon: HelpIcon,
     },
   ];
 }

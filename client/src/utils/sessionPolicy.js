@@ -1,7 +1,7 @@
 /** 1 hour idle timeout */
 export const SESSION_IDLE_MS = 60 * 60 * 1000;
-/** 7 day absolute session cap */
-export const SESSION_MAX_MS = 7 * 24 * 60 * 60 * 1000;
+/** Match JWT_REFRESH_EXPIRES_IN default (8h) */
+export const SESSION_MAX_MS = 8 * 60 * 60 * 1000;
 
 export function isWhAdminUser(user) {
   return user?.portal === "wh_admin";
@@ -17,7 +17,7 @@ export function isLocalSessionExpired(sessionStartedAt, lastActivityAt, user) {
   const now = Date.now();
   const started = Number(sessionStartedAt) || 0;
   const lastActive = Number(lastActivityAt) || started;
-  if (!started) return false;
+  if (!started) return true;
   if (now - started > SESSION_MAX_MS) return true;
   if (now - lastActive > SESSION_IDLE_MS) return true;
   return false;

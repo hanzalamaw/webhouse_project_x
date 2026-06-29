@@ -127,11 +127,33 @@ export const tenantService = {
     return {
       tenant_id: id,
       company_name: tenant.company_name,
+      owner_name: tenant.owner_name,
+      owner_email: tenant.owner_email,
+      owner_phone: tenant.owner_phone,
+      industry: tenant.industry,
+      status: tenant.status,
+      login_portal: tenant.login_portal,
+      plan_name: tenant.plan_name,
+      billing_cycle: tenant.billing_cycle,
+      total_amount: tenant.total_amount,
+      amount_due: tenant.amount_due,
+      max_users: tenant.max_users,
+      max_warehouses: tenant.max_warehouses,
+      max_stores: tenant.max_stores,
+      max_orders_per_month: tenant.max_orders_per_month,
       name: user.name,
       email: user.email,
       username: user.username || user.email,
       password,
     };
+  },
+
+  async getAccountDetails(id) {
+    const tenantFull = await this.getById(id);
+    if (!tenantFull) return null;
+    const credentials = await this.getSuperAdminCredentials(id);
+    const { modules, organization, payment, super_admin, ...tenant } = tenantFull;
+    return { tenant, credentials, modules: modules || [], organization, payment };
   },
 
   async remove(id, audit) {

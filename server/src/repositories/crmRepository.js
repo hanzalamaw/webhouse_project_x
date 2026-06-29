@@ -354,13 +354,14 @@ export const crmRepository = {
          (SELECT COUNT(*) FROM pos_sales WHERE crm_customers_id = ? AND tenant_id = ? AND deleted_at IS NULL) AS pos_sale_count,
          (SELECT COALESCE(SUM(payable_amount), 0) FROM pos_sales WHERE crm_customers_id = ? AND tenant_id = ? AND deleted_at IS NULL) AS pos_revenue,
          (SELECT COUNT(*) FROM crm_customer_complaints WHERE customer_id = ? AND tenant_id = ? AND deleted_at IS NULL) AS complaint_count,
+         (SELECT MIN(created_at) FROM orders WHERE customer_id = ? AND tenant_id = ? AND deleted_at IS NULL) AS first_order_at,
          CASE WHEN (
            EXISTS (SELECT 1 FROM orders o WHERE o.customer_id = ? AND o.tenant_id = ? AND o.deleted_at IS NULL
                      AND o.created_at >= DATE_SUB(NOW(), INTERVAL ? DAY))
            OR EXISTS (SELECT 1 FROM pos_sales ps WHERE ps.crm_customers_id = ? AND ps.tenant_id = ? AND ps.deleted_at IS NULL
                      AND ps.created_at >= DATE_SUB(NOW(), INTERVAL ? DAY))
          ) THEN 1 ELSE 0 END AS recently_active`,
-      [id, tenantId, id, tenantId, id, tenantId, id, tenantId, id, tenantId, id, tenantId, activeDays, id, tenantId, activeDays]
+      [id, tenantId, id, tenantId, id, tenantId, id, tenantId, id, tenantId, id, tenantId, id, tenantId, activeDays, id, tenantId, activeDays]
     );
 
     return {
@@ -378,6 +379,7 @@ export const crmRepository = {
         complaint_count: Number(stats.complaint_count) || 0,
         recently_active: Boolean(stats.recently_active),
         total_revenue: (Number(stats.order_revenue) || 0) + (Number(stats.pos_revenue) || 0),
+        first_order_at: stats.first_order_at || null,
       },
     };
   },
@@ -523,13 +525,50 @@ export const crmRepository = {
   },
 
   // ── Addresses ──────────────────────────────────────────────────────────────
+  async countDefaultAddresses(tenantId, customerId) {
+    const [[row]] = await readDb.query(
+      `SELECT COUNT(*) AS total FROM crm_customer_addresses
+       WHERE customer_id = ? AND tenant_id = ? AND deleted_at IS NULL AND is_default = 1`,
+      [customerId, tenantId]
+    );
+    return Number(row.total || 0);
+  },
+
+  async clearDefaultAddresses(tenantId, customerId, exceptId = null) {
+    const params = [customerId, tenantId];
+    let sql = `UPDATE crm_customer_addresses SET is_default = 0
+       WHERE customer_id = ? AND tenant_id = ? AND deleted_at IS NULL`;
+    if (exceptId != null) {
+      sql += ` AND id != ?`;
+      params.push(exceptId);
+    }
+    await writeDb.query(sql, params);
+  },
+
+  async promoteDefaultAddress(tenantId, customerId) {
+    const [rows] = await readDb.query(
+      `SELECT id FROM crm_customer_addresses
+       WHERE customer_id = ? AND tenant_id = ? AND deleted_at IS NULL
+       ORDER BY id ASC LIMIT 1`,
+      [customerId, tenantId]
+    );
+    if (!rows[0]) return;
+    await this.clearDefaultAddresses(tenantId, customerId);
+    await writeDb.query(
+      `UPDATE crm_customer_addresses SET is_default = 1
+       WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL`,
+      [rows[0].id, tenantId]
+    );
+  },
+
   async createAddress(tenantId, customerId, data) {
-    if (data.is_default) {
-      await writeDb.query(
-        `UPDATE crm_customer_addresses SET is_default = 0
-         WHERE customer_id = ? AND tenant_id = ? AND deleted_at IS NULL`,
-        [customerId, tenantId]
-      );
+    const existingDefaults = await this.countDefaultAddresses(tenantId, customerId);
+    let isDefault = Boolean(data.is_default);
+    if (!existingDefaults && !isDefault) {
+      isDefault = true;
+    }
+    if (isDefault) {
+      await this.clearDefaultAddresses(tenantId, customerId);
     }
     const [result] = await writeDb.query(
       `INSERT INTO crm_customer_addresses
@@ -541,7 +580,7 @@ export const crmRepository = {
         data.city || null,
         data.state || null,
         data.postal_code || null,
-        data.is_default ? 1 : 0,
+        isDefault ? 1 : 0,
         customerId,
         tenantId,
       ]
@@ -554,19 +593,36 @@ export const crmRepository = {
   },
 
   async updateAddress(tenantId, addressId, data) {
-    if (data.is_default) {
-      const [addr] = await readDb.query(
-        `SELECT customer_id FROM crm_customer_addresses WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL`,
+    const [addr] = await readDb.query(
+      `SELECT customer_id FROM crm_customer_addresses WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL`,
+      [addressId, tenantId]
+    );
+    if (!addr[0]) return null;
+    const customerId = addr[0].customer_id;
+
+    let isDefault = Boolean(data.is_default);
+    if (isDefault) {
+      await this.clearDefaultAddresses(tenantId, customerId, addressId);
+    } else {
+      const defaultCount = await this.countDefaultAddresses(tenantId, customerId);
+      const [[self]] = await readDb.query(
+        `SELECT is_default FROM crm_customer_addresses WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL`,
         [addressId, tenantId]
       );
-      if (addr[0]) {
-        await writeDb.query(
-          `UPDATE crm_customer_addresses SET is_default = 0
-           WHERE customer_id = ? AND tenant_id = ? AND deleted_at IS NULL`,
-          [addr[0].customer_id, tenantId]
+      const wasDefault = Boolean(self?.is_default);
+      if (wasDefault && defaultCount <= 1) {
+        const [[{ remaining }]] = await readDb.query(
+          `SELECT COUNT(*) AS remaining FROM crm_customer_addresses
+           WHERE customer_id = ? AND tenant_id = ? AND deleted_at IS NULL AND id != ?`,
+          [customerId, tenantId, addressId]
         );
+        if (Number(remaining) > 0) {
+          throw new Error("Customer must have one default address. Set another address as default first.");
+        }
+        isDefault = true;
       }
     }
+
     await writeDb.query(
       `UPDATE crm_customer_addresses SET
          address_type = ?, address = ?, city = ?, state = ?, postal_code = ?, is_default = ?
@@ -577,7 +633,7 @@ export const crmRepository = {
         data.city || null,
         data.state || null,
         data.postal_code || null,
-        data.is_default ? 1 : 0,
+        isDefault ? 1 : 0,
         addressId,
         tenantId,
       ]
@@ -590,12 +646,25 @@ export const crmRepository = {
   },
 
   async deleteAddress(tenantId, addressId) {
+    const [addr] = await readDb.query(
+      `SELECT customer_id, is_default FROM crm_customer_addresses
+       WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL`,
+      [addressId, tenantId]
+    );
+    if (!addr[0]) return false;
+    const { customer_id: customerId, is_default: wasDefault } = addr[0];
+
     const [result] = await writeDb.query(
       `UPDATE crm_customer_addresses SET deleted_at = NOW()
        WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL`,
       [addressId, tenantId]
     );
-    return result.affectedRows === 1;
+    if (result.affectedRows !== 1) return false;
+
+    if (wasDefault) {
+      await this.promoteDefaultAddress(tenantId, customerId);
+    }
+    return true;
   },
 
   // ── Notes ────────────────────────────────────────────────────────────────────

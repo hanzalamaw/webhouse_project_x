@@ -1,5 +1,6 @@
 import { writeDb, readDb } from "../database/db.js";
 import { logWhAudit } from "./whAudit.js";
+import { getAuditContext } from "./auditContext.js";
 
 async function defaultModuleId(tenantId) {
   const [rows] = await readDb.query(
@@ -24,13 +25,17 @@ export async function logTenantAudit({
   skipIfImpersonated = true,
   impersonatedBy = null,
 }) {
-  if (impersonatedBy) {
+  const ctx = getAuditContext();
+  const resolvedImpersonatedBy = impersonatedBy ?? ctx?.impersonatedBy ?? null;
+  const resolvedIp = ipAddress ?? ctx?.ip ?? null;
+
+  if (resolvedImpersonatedBy) {
     await logWhAudit({
-      adminUserId: impersonatedBy,
+      adminUserId: resolvedImpersonatedBy,
       action: `tenant_impersonation:${action}`,
       oldValue: oldValue ? { tenant_id: tenantId, user_id: userId, ...oldValue } : { tenant_id: tenantId, user_id: userId },
       newValue: newValue ? { tenant_id: tenantId, user_id: userId, ...newValue } : null,
-      ipAddress,
+      ipAddress: resolvedIp,
     });
     if (skipIfImpersonated) return;
   }
@@ -45,7 +50,7 @@ export async function logTenantAudit({
       action,
       oldValue ? JSON.stringify(oldValue) : null,
       newValue ? JSON.stringify(newValue) : null,
-      ipAddress,
+      resolvedIp,
       deviceInfo,
       tenantId,
       resolvedModuleId,

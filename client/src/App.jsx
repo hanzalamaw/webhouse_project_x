@@ -1,10 +1,11 @@
-import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, Outlet } from "react-router-dom";
+import { createBrowserRouter, RouterProvider, Navigate, useLocation, Outlet } from "react-router-dom";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { ThemeProvider } from "./context/ThemeContext";
 import MainLayout from "./components/layout/MainLayout";
 import Login from "./portals/wh-portal/pages/Login";
 import Dashboard from "./portals/wh-portal/pages/Dashboard";
 import CreateTenant from "./portals/wh-portal/pages/tenants/CreateTenant";
+import TenantView from "./portals/wh-portal/pages/tenants/TenantView";
 import ManageTenant from "./portals/wh-portal/pages/tenants/ManageTenant";
 import Sessions from "./portals/wh-portal/pages/tenants/Sessions";
 import Transaction from "./portals/wh-portal/pages/tenants/Transaction";
@@ -27,7 +28,7 @@ import {
   MODULE_SECTION_ROUTES,
 } from "./portals/tenant-portal/modules/registry";
 
-const WhProtectedRoute = ({ children }) => {
+function WhProtectedRoute({ children }) {
   const { user, loading } = useAuth();
   const location = useLocation();
   if (loading) return null;
@@ -37,9 +38,9 @@ const WhProtectedRoute = ({ children }) => {
     return <Navigate to={`/webhouse-portal?redirect=${redirect}`} replace />;
   }
   return children;
-};
+}
 
-const TenantProtectedRoute = ({ children }) => {
+function TenantProtectedRoute({ children }) {
   const { user, loading } = useAuth();
   if (loading) return null;
   if (user?.portal === "wh_admin") return <Navigate to="/webhouse-portal/dashboard" replace />;
@@ -47,7 +48,7 @@ const TenantProtectedRoute = ({ children }) => {
     return <Navigate to="/erp1" replace />;
   }
   return children;
-};
+}
 
 function WhLoginGate() {
   const { user, loading } = useAuth();
@@ -61,109 +62,108 @@ function WhLoginGate() {
   return <Login />;
 }
 
-function AppRoutes() {
-  return (
-    <Routes>
-      <Route path="/" element={<Navigate to="/webhouse-portal" replace />} />
-      <Route path="/login" element={<Navigate to="/webhouse-portal" replace />} />
-      <Route path="/webhouse-portal" element={<WhLoginGate />} />
-      <Route path="/webhouse-portal/impersonate/session" element={<ImpersonationHandoff />} />
-      <Route path="/erp1" element={<ErpLogin portal="erp1" />} />
-      <Route path="/erp2" element={<ErpLogin portal="erp2" />} />
-      <Route path="/erp3" element={<ErpLogin portal="erp3" />} />
+function buildTenantModuleRouteChildren(mod) {
+  const ModDashboard = mod.Dashboard;
+  const children = [
+    { index: true, element: <Navigate to="dashboard" replace /> },
+    { path: "dashboard", element: <ModDashboard /> },
+  ];
 
-      <Route
-        element={
-          <WhProtectedRoute>
-            <MainLayout />
-          </WhProtectedRoute>
-        }
-      >
-        <Route path="/webhouse-portal/dashboard" element={<Dashboard />} />
-        <Route path="/webhouse-portal/subscriptions/create" element={<CreateSubscription />} />
-        <Route path="/webhouse-portal/subscriptions/manage" element={<ManageSubscriptions />} />
-        <Route path="/webhouse-portal/modules" element={<ManageModules />} />
-        <Route path="/webhouse-portal/modules/manage" element={<Navigate to="/webhouse-portal/modules" replace />} />
-        <Route path="/webhouse-portal/modules/create" element={<CreateModule />} />
-        <Route path="/webhouse-portal/logs" element={<Logs />} />
-        <Route path="/webhouse-portal/tenants/create" element={<CreateTenant />} />
-        <Route path="/webhouse-portal/tenants/edit/:tenantId" element={<CreateTenant />} />
-        <Route path="/webhouse-portal/tenants/manage" element={<ManageTenant />} />
-        <Route path="/webhouse-portal/tenants/sessions" element={<Sessions />} />
-        <Route path="/webhouse-portal/tenants/transactions" element={<Transaction />} />
-        <Route path="/webhouse-portal/support/create" element={<CreateTicket />} />
-        <Route path="/webhouse-portal/support/manage" element={<ManageTickets />} />
-        <Route path="/webhouse-portal/impersonation" element={<Impersonation />} />
-      </Route>
+  if (mod.routes?.length) {
+    const sorted = [...mod.routes].sort((a, b) => b.path.length - a.path.length);
+    for (const section of sorted) {
+      children.push({ path: section.path, element: section.element });
+    }
+  } else {
+    for (const section of mod.sections || MODULE_SECTION_ROUTES) {
+      const SectionComponent = section.Component;
+      children.push({
+        path: section.path,
+        element: SectionComponent ? (
+          <SectionComponent />
+        ) : (
+          <ModulePlaceholder
+            title={`${mod.name} — ${section.title}`}
+            description="This section will be built soon."
+          />
+        ),
+      });
+    }
+  }
 
-      <Route
-        element={
-          <TenantProtectedRoute>
-            <Outlet />
-          </TenantProtectedRoute>
-        }
-      >
-        <Route path="/app" element={<ModuleHub />} />
-        {TENANT_MODULE_DEFINITIONS.map((mod) => {
-          const Dashboard = mod.Dashboard;
-          return (
-            <Route
-              key={mod.slug}
-              path={`/app/m/${mod.slug}`}
-              element={
-                <TenantModuleGuard moduleSlug={mod.slug}>
-                  <TenantLayout />
-                </TenantModuleGuard>
-              }
-            >
-              <Route index element={<Navigate to="dashboard" replace />} />
-              <Route path="dashboard" element={<Dashboard />} />
-              {(mod.routes || []).map((section) => (
-                <Route key={section.path} path={section.path} element={section.element} />
-              ))}
-              {!mod.routes &&
-                (mod.sections || MODULE_SECTION_ROUTES).map((section) => {
-                const SectionComponent = section.Component;
-                return (
-                    <Route
-                      key={section.path}
-                      path={section.path}
-                      element={
-                        SectionComponent ? (
-                        <SectionComponent />
-                      ) : (
-                        <ModulePlaceholder
-                            title={`${mod.name} — ${section.title}`}
-                            description="This section will be built soon."
-                          />
-                        )
-                    }
-                    />
-                );
-              })}
-              {mod.slug === "admin" && (
-                <>
-                  <Route path="roles-management" element={<Navigate to="roles-and-permissions" replace />} />
-                  <Route path="permissions-management" element={<Navigate to="roles-and-permissions" replace />} />
-                </>
-                )}
-            </Route>
-          );
-        })}
-      </Route>
+  if (mod.slug === "admin") {
+    children.push(
+      { path: "roles-management", element: <Navigate to="roles-and-permissions" replace /> },
+      { path: "permissions-management", element: <Navigate to="roles-and-permissions" replace /> }
+    );
+  }
 
-      <Route path="*" element={<Navigate to="/webhouse-portal" replace />} />
-    </Routes>
-  );
+  return children;
 }
+
+const router = createBrowserRouter([
+  { path: "/", element: <Navigate to="/webhouse-portal" replace /> },
+  { path: "/login", element: <Navigate to="/webhouse-portal" replace /> },
+  { path: "/webhouse-portal", element: <WhLoginGate /> },
+  { path: "/webhouse-portal/impersonate/session", element: <ImpersonationHandoff /> },
+  { path: "/erp1", element: <ErpLogin portal="erp1" /> },
+  { path: "/erp2", element: <ErpLogin portal="erp2" /> },
+  { path: "/erp3", element: <ErpLogin portal="erp3" /> },
+  {
+    element: (
+      <WhProtectedRoute>
+        <MainLayout />
+      </WhProtectedRoute>
+    ),
+    children: [
+      { path: "/webhouse-portal/dashboard", element: <Dashboard /> },
+      { path: "/webhouse-portal/subscriptions/create", element: <CreateSubscription /> },
+      { path: "/webhouse-portal/subscriptions/edit/:planId", element: <CreateSubscription /> },
+      { path: "/webhouse-portal/subscriptions/manage", element: <ManageSubscriptions /> },
+      { path: "/webhouse-portal/modules", element: <ManageModules /> },
+      { path: "/webhouse-portal/modules/manage", element: <Navigate to="/webhouse-portal/modules" replace /> },
+      { path: "/webhouse-portal/modules/create", element: <CreateModule /> },
+      { path: "/webhouse-portal/modules/edit/:moduleId", element: <CreateModule /> },
+      { path: "/webhouse-portal/logs", element: <Logs /> },
+      { path: "/webhouse-portal/tenants/create", element: <CreateTenant /> },
+      { path: "/webhouse-portal/tenants/edit/:tenantId", element: <CreateTenant /> },
+      { path: "/webhouse-portal/tenants/view/:tenantId", element: <TenantView /> },
+      { path: "/webhouse-portal/tenants/manage", element: <ManageTenant /> },
+      { path: "/webhouse-portal/tenants/sessions", element: <Sessions /> },
+      { path: "/webhouse-portal/tenants/transactions", element: <Transaction /> },
+      { path: "/webhouse-portal/support/create", element: <CreateTicket /> },
+      { path: "/webhouse-portal/support/edit/:ticketId", element: <CreateTicket /> },
+      { path: "/webhouse-portal/support/manage", element: <ManageTickets /> },
+      { path: "/webhouse-portal/impersonation", element: <Impersonation /> },
+    ],
+  },
+  {
+    element: (
+      <TenantProtectedRoute>
+        <Outlet />
+      </TenantProtectedRoute>
+    ),
+    children: [
+      { path: "/app", element: <ModuleHub /> },
+      ...TENANT_MODULE_DEFINITIONS.map((mod) => ({
+        path: `/app/m/${mod.slug}`,
+        element: (
+          <TenantModuleGuard moduleSlug={mod.slug}>
+            <TenantLayout />
+          </TenantModuleGuard>
+        ),
+        children: buildTenantModuleRouteChildren(mod),
+      })),
+    ],
+  },
+  { path: "*", element: <Navigate to="/webhouse-portal" replace /> },
+]);
 
 function App() {
   return (
     <ThemeProvider>
       <AuthProvider>
-        <Router>
-          <AppRoutes />
-        </Router>
+        <RouterProvider router={router} />
       </AuthProvider>
     </ThemeProvider>
   );

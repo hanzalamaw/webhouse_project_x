@@ -14,6 +14,7 @@ export async function getCrmModuleId() {
 
 export async function logCrmActivity(tenantId, userId, action, summary, extra = {}) {
   const moduleId = await getCrmModuleId();
+  const ctx = getAuditContext();
   await logTenantAudit({
     tenantId,
     userId,
@@ -21,6 +22,8 @@ export async function logCrmActivity(tenantId, userId, action, summary, extra = 
     action: `crm_${action}`,
     newValue: { summary, ...extra },
     skipIfImpersonated: false,
+    impersonatedBy: ctx?.impersonatedBy ?? null,
+    ipAddress: ctx?.ip ?? null,
   });
 }
 

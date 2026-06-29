@@ -6,7 +6,9 @@ import { BarChart, DonutChart, HBars } from "../../../../../components/charts";
 import { StatusBadge } from "../../../../../components/Badge";
 import { formatPKR } from "../../../../../utils/currency";
 import { formatDate, formatDateTime } from "../../../../../utils/dateTime";
-import { inDateRange } from "../../../../../utils/tableFilters";
+import { DashboardFilter } from "../../../../../components/DashboardFilter";
+import { EMPTY_DASHBOARD_FILTER, filterRowsByDashboard } from "../../../../../utils/dashboardFilter";
+import { useFiscalYear } from "../../../../../context/FiscalYearContext";
 import {
   TenantsIcon,
   SubscriptionIcon,
@@ -52,9 +54,8 @@ function countBy(rows, field) {
   return map;
 }
 
-function filterByRange(rows, field, range) {
-  if (range.allTime) return rows;
-  return rows.filter((r) => inDateRange(r[field], range));
+function filterByRange(rows, field, range, fiscalYearStart) {
+  return filterRowsByDashboard(rows, field, range, fiscalYearStart);
 }
 
 function isLiveSession(row) {
@@ -98,15 +99,12 @@ export default function AdminDashboard() {
   const [billing, setBilling] = useState(null);
   const [modules, setModules] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [allTime, setAllTime] = useState(true);
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
+  const [dashFilter, setDashFilter] = useState({ ...EMPTY_DASHBOARD_FILTER });
+  const fiscalYearStart = useFiscalYear();
 
-  const range = useMemo(() => ({ allTime, dateFrom, dateTo }), [allTime, dateFrom, dateTo]);
-
-  const fSessions = useMemo(() => filterByRange(sessions, "login_at", range), [sessions, range]);
-  const fAlerts = useMemo(() => filterByRange(alerts, "created_at", range), [alerts, range]);
-  const fActivities = useMemo(() => filterByRange(activities, "created_at", range), [activities, range]);
+  const fSessions = useMemo(() => filterByRange(sessions, "login_at", dashFilter, fiscalYearStart), [sessions, dashFilter, fiscalYearStart]);
+  const fAlerts = useMemo(() => filterByRange(alerts, "created_at", dashFilter, fiscalYearStart), [alerts, dashFilter, fiscalYearStart]);
+  const fActivities = useMemo(() => filterByRange(activities, "created_at", dashFilter, fiscalYearStart), [activities, dashFilter, fiscalYearStart]);
 
   useEffect(() => {
     let active = true;
@@ -230,29 +228,12 @@ export default function AdminDashboard() {
         description="Organization overview — users, sessions, modules, billing, and security alerts."
       />
 
-      <div className="wh-dash-filter">
-        <label className="wh-dash-filter__label">
-          <input type="checkbox" checked={allTime} onChange={(e) => setAllTime(e.target.checked)} />
-          All time
-        </label>
-        <div className="wh-dash-filter__dates">
-          <input
-            type="date"
-            value={dateFrom}
-            disabled={allTime}
-            onChange={(e) => setDateFrom(e.target.value)}
-            aria-label="From date"
-          />
-          <span className="wh-dash-filter__sep">to</span>
-          <input
-            type="date"
-            value={dateTo}
-            disabled={allTime}
-            onChange={(e) => setDateTo(e.target.value)}
-            aria-label="To date"
-          />
-        </div>
-      </div>
+      <DashboardFilter
+        rows={[...sessions, ...alerts, ...activities]}
+        dateField="created_at"
+        value={dashFilter}
+        onChange={setDashFilter}
+      />
 
       <div className="wh-dash-grid">
         <div className="wh-dash-col-3">
