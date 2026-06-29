@@ -194,19 +194,21 @@ export const tenantRepository = {
     return rows[0] || null;
   },
 
-  async updateSuperAdmin(id, { name, email, username, password }) {
-    const user = await this.getSuperAdminUser(id);
+  async updateSuperAdmin(tenantId, { name, email, username, password }) {
+    const user = await this.getSuperAdminUser(tenantId);
     if (!user) return;
     if (password) {
       const hashed = encrypt(password);
       await writeDb.query(
-        `UPDATE users SET name = ?, email = ?, username = ?, password = ? WHERE id = ? AND deleted_at IS NULL`,
-        [name, email, username, hashed, user.id]
+        `UPDATE users SET name = ?, email = ?, username = ?, password = ?
+         WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL`,
+        [name, email, username, hashed, user.id, tenantId]
       );
     } else {
       await writeDb.query(
-        `UPDATE users SET name = ?, email = ?, username = ? WHERE id = ? AND deleted_at IS NULL`,
-        [name, email, username, user.id]
+        `UPDATE users SET name = ?, email = ?, username = ?
+         WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL`,
+        [name, email, username, user.id, tenantId]
       );
     }
   },
@@ -361,13 +363,15 @@ export const tenantRepository = {
           if (sa.password) {
             const hashed = encrypt(sa.password);
             await connection.execute(
-              `UPDATE users SET name = ?, email = ?, username = ?, password = ? WHERE id = ? AND deleted_at IS NULL`,
-              [sa.name || sa.username, sa.email, sa.username, hashed, user.id]
+              `UPDATE users SET name = ?, email = ?, username = ?, password = ?
+               WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL`,
+              [sa.name || sa.username, sa.email, sa.username, hashed, user.id, tenantId]
             );
           } else {
             await connection.execute(
-              `UPDATE users SET name = ?, email = ?, username = ? WHERE id = ? AND deleted_at IS NULL`,
-              [sa.name || sa.username, sa.email, sa.username, user.id]
+              `UPDATE users SET name = ?, email = ?, username = ?
+               WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL`,
+              [sa.name || sa.username, sa.email, sa.username, user.id, tenantId]
             );
           }
         }

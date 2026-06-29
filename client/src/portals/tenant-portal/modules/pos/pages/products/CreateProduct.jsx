@@ -336,7 +336,7 @@ export default function CreateProduct() {
           {!form.outlet_id ? (
             <p className="wh-muted">Select a store first to choose a category.</p>
           ) : (
-            <div className="wh-form-grid">
+            <div className={categoryOptions.length === 0 ? "wh-form-grid" : "wh-form-grid wh-form-grid--field-action"}>
               {categoryOptions.length === 0 ? (
                 <p className="wh-muted wh-form-grid__full">No categories yet for this store.</p>
               ) : (
@@ -349,7 +349,7 @@ export default function CreateProduct() {
                   placeholder="Search categories…"
                 />
               )}
-              <div style={{ display: "flex", alignItems: "flex-end" }}>
+              <div className={categoryOptions.length === 0 ? "wh-form-grid__actions" : "wh-form-grid--field-action__btn"}>
                 <Button type="button" variant="secondary" onClick={() => setCreateCategoryOpen(true)}>
                   New category
                 </Button>

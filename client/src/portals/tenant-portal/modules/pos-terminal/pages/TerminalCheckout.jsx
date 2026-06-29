@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { apiFetch } from "../../../../../api/client";
 import { Button } from "../../../../../components/Button";
-import { Card } from "../../../../../components/Card";
 import { FormField } from "../../../../../components/FormField";
 import { Modal } from "../../../../../components/Modal";
 import { useAuth } from "../../../../../context/AuthContext";
@@ -507,10 +506,15 @@ export default function TerminalCheckout() {
             <h1>POS Terminal</h1>
             <p className="wh-muted">Enter your terminal code to open checkout.</p>
           </div>
-          <Card>
-            <h2 className="wh-card__title">Connect terminal</h2>
-            {error && <p className="wh-field__error">{error}</p>}
-            <form className="wh-form" onSubmit={connectTerminal}>
+          <div className="pos-terminal__gate-card">
+            <div className="pos-terminal__gate-card-head">
+              <h2>Connect terminal</h2>
+              <p>Pair this device with a registered checkout terminal at your store.</p>
+            </div>
+
+            {error && <p className="wh-field__error pos-terminal__gate-error">{error}</p>}
+
+            <form id="pos-terminal-gate-form" className="pos-terminal__gate-form" onSubmit={connectTerminal}>
               <FormField
                 id="device_code"
                 label="Terminal code"
@@ -518,33 +522,23 @@ export default function TerminalCheckout() {
                 onChange={(event) => setDeviceCode(event.target.value)}
                 autoFocus
                 disabled={connecting}
+                placeholder={`e.g. ${DEVICE_CODE}`}
               />
-              {codeEntered && codeChecking && (
-                <p className="pos-terminal__code-status pos-terminal__code-status--checking">
-                  Checking terminal code…
-                </p>
-              )}
-              {codeEntered && !codeChecking && !resolvedTerminal && !inactiveMatch && (
-                <p className="pos-terminal__code-status pos-terminal__code-status--error">
-                  No terminal found with code <strong>{deviceCode.trim()}</strong>.
-                </p>
-              )}
-              {inactiveMatch && (
-                <p className="pos-terminal__code-status pos-terminal__code-status--error">
-                  Terminal <strong>{inactiveMatch.terminal_name}</strong> at {inactiveMatch.outlet_name} is inactive.
-                </p>
-              )}
-              <p className="wh-muted">Default code is {DEVICE_CODE} unless your store uses a custom one.</p>
-              <div className="wh-modal__actions" style={{ marginTop: 16, paddingTop: 0 }}>
-                <Button type="button" variant="secondary" onClick={() => navigate("/app")} disabled={connecting}>
-                  All modules
-                </Button>
-                <Button type="submit" disabled={connecting || !canConnect}>
-                  {connecting ? "Connecting..." : "Open terminal"}
-                </Button>
-              </div>
+
+              <p className="pos-terminal__gate-hint">
+                Default code is <strong>{DEVICE_CODE}</strong> unless your store uses a custom one.
+              </p>
             </form>
-          </Card>
+
+            <div className="pos-terminal__gate-footer">
+              <Button type="button" variant="secondary" onClick={() => navigate("/app")} disabled={connecting}>
+                All modules
+              </Button>
+              <Button type="submit" form="pos-terminal-gate-form" disabled={connecting || !canConnect}>
+                {connecting ? "Connecting..." : "Open terminal"}
+              </Button>
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -738,7 +732,7 @@ export default function TerminalCheckout() {
                 </button>
               )}
             </div>
-            <div className="pos-terminal-v2__customer-row">
+            <div className="wh-field-action-row">
               <FormField
                 id="customer_phone"
                 label="Phone number"
@@ -747,9 +741,11 @@ export default function TerminalCheckout() {
                 onBlur={runCustomerLookup}
                 placeholder="03xxxxxxxxx"
               />
-              <Button type="button" variant="secondary" onClick={runCustomerLookup} disabled={lookupLoading}>
-                {lookupLoading ? "Searching..." : "Search"}
-              </Button>
+              <div className="wh-field-action-row__action">
+                <Button type="button" variant="secondary" onClick={runCustomerLookup} disabled={lookupLoading}>
+                  {lookupLoading ? "Searching..." : "Search"}
+                </Button>
+              </div>
             </div>
             {selectedCustomer && (
               <p className="pos-terminal-v2__customer-selected">

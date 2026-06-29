@@ -1,8 +1,6 @@
 import { Outlet, useLocation } from "react-router-dom";
 import { useMemo } from "react";
-import { useAuth } from "../../context/AuthContext";
 import { FiscalYearProvider } from "../../context/FiscalYearContext";
-import { Button } from "../Button";
 import TenantSidebar from "./TenantSidebar";
 import { getModuleBySlug } from "../../portals/tenant-portal/modules/registry";
 import "./MainLayout.css";
@@ -19,7 +17,6 @@ export default function TenantLayout() {
     [location.pathname]
   );
   const fullScreen = Boolean(getModuleBySlug(moduleSlug)?.fullScreen);
-  const { user, logout } = useAuth();
 
   if (fullScreen) {
     return (
@@ -33,26 +30,16 @@ export default function TenantLayout() {
 
   return (
     <FiscalYearProvider>
-    <div className="wh-layout">
-      <div className="wh-layout-wrapper">
-        <TenantSidebar moduleSlug={moduleSlug} />
-        <div className="wh-layout-main">
-          <main className="wh-layout-content">
-            {user?.impersonating && (
-              <div className="wh-impersonation-banner">
-                <span>
-                  You are impersonating <strong>{user.tenant_name}</strong> (admin support session).
-                </span>
-                <Button type="button" variant="secondary" className="wh-btn--sm" onClick={logout}>
-                  End session
-                </Button>
-              </div>
-            )}
-            <Outlet />
-          </main>
+      <div className="wh-layout">
+        <div className="wh-layout-wrapper">
+          <TenantSidebar moduleSlug={moduleSlug} />
+          <div className="wh-layout-main">
+            <main className="wh-layout-content">
+              <Outlet />
+            </main>
+          </div>
         </div>
       </div>
-    </div>
     </FiscalYearProvider>
   );
 }

@@ -8,6 +8,7 @@ import { StatusBadge } from "../../../../../../components/Badge";
 import { EMPTY_TOOLBAR } from "../../../../../../utils/tableFilters";
 import { useToolbarFilteredRows } from "../../../../../../hooks/useToolbarFilteredRows";
 import { formatPKR } from "../../../../../../utils/currency";
+import { formatDateTime } from "../../../../../../utils/dateTime";
 import { MODULE_BASE } from "../../constants";
 
 const TOOLBAR_FILTERS = [
@@ -65,7 +66,10 @@ export default function ManageRegisters() {
           />
           <div className="wh-terminal-cards">
             {filteredTerminals.length ? (
-              filteredTerminals.map((t) => (
+              filteredTerminals.map((t) => {
+                const shiftOpen = t.shift_status === "open";
+                const terminalActive = String(t.status || "active").toLowerCase() === "active";
+                return (
                 <button
                   type="button"
                   key={t.id}
@@ -73,24 +77,59 @@ export default function ManageRegisters() {
                   onClick={() => navigate(`${MODULE_BASE}/registers/terminal/${t.id}`)}
                 >
                   <div className="wh-terminal-card__head">
-                    <h4 className="wh-terminal-card__title">{t.terminal_name}</h4>
-                    <StatusBadge status={t.shift_status === "open" ? "active" : "inactive"} />
+                    <div className="wh-terminal-card__identity">
+                      <h4 className="wh-terminal-card__title">{t.terminal_name}</h4>
+                      <p className="wh-terminal-card__store">{t.outlet_name}</p>
+                    </div>
+                    <div className="wh-terminal-card__badges">
+                      <StatusBadge status={shiftOpen ? "active" : "inactive"} />
+                    </div>
                   </div>
-                  <p className="wh-terminal-card__store">{t.outlet_name}</p>
-                  <p className="wh-terminal-card__meta wh-muted">Code: {t.device_code}</p>
-                  <div className="wh-terminal-card__balance">
-                    <span className="wh-muted">Balance</span>
-                    <strong>
-                      {t.shift_status === "open" && t.current_balance != null
-                        ? formatPKR(t.current_balance)
-                        : "—"}
-                    </strong>
+
+                  <div className="wh-terminal-card__chips">
+                    <span className="wh-terminal-card__chip">Code {t.device_code}</span>
+                    <span className="wh-terminal-card__chip">
+                      {terminalActive ? "Terminal active" : "Terminal inactive"}
+                    </span>
                   </div>
-                  <p className="wh-terminal-card__meta wh-muted">
-                    {t.shift_status === "open" ? "Shift open · tap for logs" : "No open shift · tap for logs"}
+
+                  <div className="wh-terminal-card__stats">
+                    <div className="wh-terminal-card__stat">
+                      <span className="wh-terminal-card__stat-label">Drawer balance</span>
+                      <strong className="wh-terminal-card__stat-value">
+                        {shiftOpen && t.current_balance != null ? formatPKR(t.current_balance) : "—"}
+                      </strong>
+                    </div>
+                    <div className="wh-terminal-card__stat">
+                      <span className="wh-terminal-card__stat-label">Cash collected</span>
+                      <strong className="wh-terminal-card__stat-value">
+                        {shiftOpen ? formatPKR(t.cash_collected || 0) : "—"}
+                      </strong>
+                    </div>
+                    <div className="wh-terminal-card__stat">
+                      <span className="wh-terminal-card__stat-label">Opening float</span>
+                      <strong className="wh-terminal-card__stat-value">
+                        {shiftOpen ? formatPKR(t.opening_balance || 0) : "—"}
+                      </strong>
+                    </div>
+                    <div className="wh-terminal-card__stat">
+                      <span className="wh-terminal-card__stat-label">Shift status</span>
+                      <strong className="wh-terminal-card__stat-value">
+                        {shiftOpen ? "Open" : "Closed"}
+                      </strong>
+                    </div>
+                  </div>
+
+                  <p className="wh-terminal-card__footer wh-muted">
+                    {shiftOpen && t.opened_at
+                      ? `Shift opened ${formatDateTime(t.opened_at)} · tap for sales and shift logs`
+                      : shiftOpen
+                        ? "Shift open · tap for sales and shift logs"
+                        : "No open shift · tap to view past shifts and sales"}
                   </p>
                 </button>
-              ))
+              );
+              })
             ) : (
               <p className="wh-muted">No terminals match your filters.</p>
             )}

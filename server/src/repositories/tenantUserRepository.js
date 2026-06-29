@@ -44,6 +44,28 @@ export const tenantUserRepository = {
     return rows[0] || null;
   },
 
+  async findByUsername(tenantId, username, excludeUserId = null) {
+    const scopedTenantId = Number(tenantId);
+    if (!Number.isFinite(scopedTenantId) || scopedTenantId < 1) return null;
+
+    const normalized = String(username || "").trim().toLowerCase();
+    if (!normalized) return null;
+
+    const params = [scopedTenantId, normalized];
+    let sql = `SELECT u.id
+       FROM users u
+       WHERE u.tenant_id = ?
+         AND LOWER(u.username) = ?
+         AND u.deleted_at IS NULL`;
+    if (excludeUserId != null) {
+      sql += ` AND u.id != ?`;
+      params.push(excludeUserId);
+    }
+    sql += ` LIMIT 1`;
+    const [rows] = await readDb.query(sql, params);
+    return rows[0] || null;
+  },
+
   async create(tenantId, { name, email, username, phone, password, role_id, status = "active" }) {
     const hashed = encrypt(password);
     const [result] = await writeDb.query(

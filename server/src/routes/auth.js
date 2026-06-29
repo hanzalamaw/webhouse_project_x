@@ -63,11 +63,15 @@ async function tenantLogin(
   const normalized = String(username).trim().toLowerCase();
   const [rows] = await db.execute(
     `SELECT u.*, t.id AS tid, t.company_name, t.login_portal, t.status AS tenant_status
-     FROM users u
-     JOIN wh_tenants t ON t.id = u.tenant_id AND t.deleted_at IS NULL
-     WHERE LOWER(u.username) = ? AND u.status = 'active' AND u.deleted_at IS NULL
+     FROM wh_tenants t
+     INNER JOIN users u ON u.tenant_id = t.id AND u.deleted_at IS NULL
+     WHERE t.login_portal = ?
+       AND t.deleted_at IS NULL
+       AND t.status = 'active'
+       AND LOWER(u.username) = ?
+       AND u.status = 'active'
      LIMIT 1`,
-    [normalized]
+    [portal, normalized]
   );
   const row = rows[0];
   if (!row || !verifyPassword(password, row.password)) {
@@ -82,8 +86,6 @@ async function tenantLogin(
     }
     return null;
   }
-  if (row.tenant_status !== "active") return { error: "Tenant account is not active" };
-  if (row.login_portal !== portal) return { error: "This account cannot log in from this portal" };
 
   await db.execute("UPDATE users SET last_login_at = NOW() WHERE id = ?", [row.id]);
 

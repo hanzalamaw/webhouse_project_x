@@ -115,3 +115,5 @@ Every div in the design should take the whole width of the screen.
 ## 7. make sure always make sql of new migration and update in schema as well. so we can run them to test
 
 ## 8. remeber that we have in admin on tenant roles and permisson. so while desigin any thing in modules keep sure that they are aligned with those. a user with the permission assign in his roles should be able to do exactly that only.
+
+## 9. ask before making changes to db

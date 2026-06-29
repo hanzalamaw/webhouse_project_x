@@ -5,14 +5,6 @@
   background: #f4f5f7;
 }
 
-.wh-module-hub__banner {
-  flex-shrink: 0;
-  max-width: min(1400px, 96vw);
-  width: 100%;
-  margin: 12px auto 0;
-  padding: 0 24px;
-}
-
 .wh-module-hub__center {
   flex: 1;
   display: flex;
@@ -24,6 +16,13 @@
 .wh-module-hub__inner {
   width: 100%;
   max-width: min(1400px, 96vw);
+}
+
+.wh-module-hub__topbar {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  margin-bottom: 12px;
 }
 
 /* Header */

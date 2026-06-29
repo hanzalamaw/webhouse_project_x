@@ -10,6 +10,7 @@ import { logTenantAudit } from "../utils/tenantAudit.js";
 import { createActivityAlert } from "../utils/activityAlerts.js";
 import { paginatedResponse, parsePagination } from "../utils/pagination.js";
 import { isSuperAdminRole, isSuperAdminRoleName, isSuperAdminUser } from "../utils/tenantRoles.js";
+import { assertUsernameAvailable } from "../utils/usernamePolicy.js";
 
 function auditCtx(req) {
   return {
@@ -71,6 +72,7 @@ export const tenantPortalService = {
       err.status = 400;
       throw err;
     }
+    body.username = await assertUsernameAvailable(ctx.tenantId, body.username);
     const id = await tenantUserRepository.create(ctx.tenantId, body);
     const user = await tenantUserRepository.findById(ctx.tenantId, id);
     await logTenantAudit({ ...ctx, action: "user_create", newValue: user });
@@ -93,6 +95,9 @@ export const tenantPortalService = {
     }
 
     const payload = { ...body };
+    if (payload.username != null) {
+      payload.username = await assertUsernameAvailable(ctx.tenantId, payload.username, userId);
+    }
     if (isSuperAdminUser(old)) {
       if (payload.role_id != null && Number(payload.role_id) !== Number(old.role_id)) {
         const err = new Error("Super Admin user role cannot be changed");

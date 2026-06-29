@@ -68,23 +68,93 @@
 
 .pos-terminal__gate-inner {
   width: 100%;
-  max-width: 520px;
+  max-width: 480px;
 }
 
 .pos-terminal__gate-brand {
-  margin-bottom: 20px;
+  margin-bottom: 24px;
   text-align: center;
 }
 
 .pos-terminal__gate-brand h1 {
   margin: 0 0 8px;
-  font-size: 1.5rem;
+  font-size: 1.75rem;
+  font-weight: 700;
   color: var(--pos-primary);
 }
 
-.pos-terminal__code-status {
-  margin: 8px 0 0;
+.pos-terminal__gate-card {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  background: var(--card-bg);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+.pos-terminal__gate-card-head {
+  padding: 20px 22px 0;
+}
+
+.pos-terminal__gate-card-head h2 {
+  margin: 0 0 6px;
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--pos-primary);
+}
+
+.pos-terminal__gate-card-head p {
+  margin: 0;
   font-size: var(--text-sm);
+  color: var(--pos-secondary);
+  line-height: 1.45;
+}
+
+.pos-terminal__gate-error {
+  margin: 16px 22px 0;
+}
+
+.pos-terminal__gate-form {
+  padding: 18px 22px 0;
+}
+
+.pos-terminal__gate-form .wh-field {
+  margin-bottom: 12px;
+}
+
+.pos-terminal__gate-status {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--surface-bg);
+  border: 1px solid var(--border-color);
+}
+
+.pos-terminal__gate-hint {
+  margin: 0 0 18px;
+  font-size: var(--text-sm);
+  color: var(--pos-secondary);
+  line-height: 1.45;
+}
+
+.pos-terminal__gate-hint strong {
+  color: var(--pos-primary);
+  font-weight: 600;
+}
+
+.pos-terminal__gate-footer {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 22px;
+  border-top: 1px solid var(--border-color);
+  background: var(--surface-bg);
+}
+
+.pos-terminal__code-status {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 1.45;
 }
 
 .pos-terminal__code-status--checking {
@@ -356,13 +426,6 @@
   color: var(--pos-primary);
 }
 
-.pos-terminal-v2__customer-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
-  align-items: end;
-}
-
 .pos-terminal-v2__customer-selected {
   margin: 6px 0 0;
   font-size: var(--text-sm);
@@ -563,10 +626,6 @@
   }
 
   .pos-terminal-v2__sidebar {
-    grid-template-columns: 1fr;
-  }
-
-  .pos-terminal-v2__customer-row {
     grid-template-columns: 1fr;
   }
 

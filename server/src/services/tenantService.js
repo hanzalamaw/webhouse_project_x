@@ -4,6 +4,7 @@ import { transactionRepository } from "../repositories/transactionRepository.js"
 import { decrypt } from "../utils/cipher.js";
 import { logWhAudit } from "../utils/whAudit.js";
 import { paginatedResponse, parsePagination } from "../utils/pagination.js";
+import { assertUsernameAvailable, validateUsernameFormat } from "../utils/usernamePolicy.js";
 
 const VALID_PORTALS = ["erp1", "erp2", "erp3"];
 
@@ -36,8 +37,20 @@ export const tenantService = {
       throw new Error("Subscription plan has no valid ERP login portal");
     }
 
+    let superAdmin = payload.super_admin;
+    if (superAdmin?.username) {
+      const existingSuperAdmin = await tenantRepository.getSuperAdminUser(id);
+      const username = await assertUsernameAvailable(
+        id,
+        superAdmin.username,
+        existingSuperAdmin?.id
+      );
+      superAdmin = { ...superAdmin, username };
+    }
+
     await tenantRepository.updateFull(id, {
       ...payload,
+      super_admin: superAdmin,
       login_portal: loginPortal,
     });
     await transactionRepository.processAutoRenewalForTenant(id);
@@ -62,8 +75,15 @@ export const tenantService = {
       throw new Error("Subscription plan has no valid ERP login portal");
     }
 
+    let superAdmin = payload.super_admin;
+    if (superAdmin?.username) {
+      const username = validateUsernameFormat(superAdmin.username);
+      superAdmin = { ...superAdmin, username };
+    }
+
     const tenantId = await tenantRepository.createFull({
       ...payload,
+      super_admin: superAdmin,
       login_portal: loginPortal,
     });
     const created = await this.getById(tenantId);

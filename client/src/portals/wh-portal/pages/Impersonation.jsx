@@ -73,7 +73,7 @@ export default function Impersonation() {
           </p>
           {error && <p className="wh-field__error">{error}</p>}
           {message && <p className="wh-form-message">{message}</p>}
-          <Button type="submit" disabled={loading}>{loading ? "Starting session…" : "Login as Client (new tab)"}</Button>
+          <Button type="submit" disabled={loading}>{loading ? "Starting session…" : "Login as Client"}</Button>
         </form>
       </Card>
     </div>

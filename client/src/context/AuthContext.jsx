@@ -1,5 +1,6 @@
 import { createContext, useState, useContext, useEffect, useCallback, useRef } from "react";
 import { API_BASE } from "../config/api";
+import { ImpersonationGhostIndicator } from "../components/ImpersonationGhostIndicator";
 import { isTokenExpired } from "../utils/authToken";
 import {
   readStoredSession,
@@ -274,6 +275,9 @@ export const AuthProvider = ({ children }) => {
   return (
     <AuthContext.Provider value={{ user, login, logout, loading, authFetch }}>
       {children}
+      {user?.impersonating && user?.portal === "tenant" && (
+        <ImpersonationGhostIndicator tenantName={user.tenant_name} onEnd={logout} />
+      )}
     </AuthContext.Provider>
   );
 };

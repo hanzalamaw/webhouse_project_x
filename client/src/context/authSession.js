@@ -134,5 +134,6 @@ export function mergeTenantUserFromApi(apiUser, storedUser) {
     ...apiUser,
     impersonating: true,
     impersonated_by: storedUser.impersonated_by,
+    tenant_name: apiUser.tenant_name || storedUser.tenant_name,
   };
 }
