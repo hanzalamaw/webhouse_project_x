@@ -14,6 +14,7 @@ import {
   orderFetchParams,
 } from "../services/ecommerce/darazClient.js";
 import { runDarazInitialSync } from "../services/ecommerce/darazSync.js";
+import { ensureInventoryProductsImported, importAllSyncedProductsForStore } from "../services/ecommerce/ecomImport.js";
 import {
   createOAuthState,
   peekOAuthState,
@@ -195,6 +196,12 @@ router.get("/sync/status", async (req, res) => {
   const store = await getStoreFromRequest(req);
   if (!store) return res.json({ connected: false });
 
+  if (store.initial_sync_status === "completed") {
+    ensureInventoryProductsImported(store.id, store.tenant_id).catch((err) =>
+      console.error("Daraz inventory import:", err),
+    );
+  }
+
   res.json({
     connected: true,
     storeId: store.id,
@@ -239,6 +246,13 @@ router.post("/sync/retry", async (req, res) => {
   if (!store) return res.status(401).json({ success: false, error: "Not connected" });
   runDarazInitialSync(store.id).catch((err) => console.error("Daraz retry sync:", err));
   res.json({ success: true, message: "Sync started" });
+});
+
+router.post("/sync/import-inventory", async (req, res) => {
+  const store = await getStoreFromRequest(req);
+  if (!store) return res.status(401).json({ success: false, error: "Not connected" });
+  const result = await importAllSyncedProductsForStore(store.id, store.tenant_id);
+  res.json({ success: true, ...result });
 });
 
 router.get("/db/:entityType", async (req, res) => {

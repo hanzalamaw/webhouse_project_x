@@ -18,6 +18,10 @@ import {
   touchLastSynced,
   getStoreById,
 } from "../../repositories/ecommerceRepository.js";
+import {
+  importNormalizedProduct,
+  importAllSyncedProductsForStore,
+} from "./ecomImport.js";
 
 const runningSyncs = new Set();
 
@@ -47,6 +51,9 @@ export async function persistEntity(storeId, tenantId, entityType, raw, source) 
       : String(raw.id);
   const normalized = normalizeEntity(entityType, raw);
   await upsertSyncedRecord(storeId, tenantId, entityType, externalId, raw, normalized, source);
+  if (entityType === "product") {
+    await importNormalizedProduct(tenantId, normalized, { storeId });
+  }
   await touchLastSynced(storeId);
 }
 
@@ -226,6 +233,8 @@ export async function runInitialFullSync(storeId) {
         message: syncMessage,
       });
     }
+
+    await importAllSyncedProductsForStore(storeId, store.tenant_id);
 
     await updateInitialSyncStatus(storeId, "completed");
     await addSyncLog(storeId, store.tenant_id, {

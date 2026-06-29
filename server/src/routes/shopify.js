@@ -25,6 +25,10 @@ import {
 } from "../repositories/ecommerceRepository.js";
 import { onAppInstalled, retryPostInstall } from "../services/ecommerce/shopifySync.js";
 import { verifyStoreApiAccess, getRequiredScopes } from "../services/ecommerce/shopifyAccess.js";
+import {
+  ensureInventoryProductsImported,
+  importAllSyncedProductsForStore,
+} from "../services/ecommerce/ecomImport.js";
 
 const router = Router();
 const SESSION_COOKIE = "shopify_oauth_session";
@@ -237,6 +241,12 @@ router.get("/sync/status", async (req, res) => {
     return res.json({ connected: false });
   }
 
+  if (store.initial_sync_status === "completed") {
+    ensureInventoryProductsImported(store.id, store.tenant_id).catch((err) =>
+      console.error("Shopify inventory import:", err),
+    );
+  }
+
   const access = await verifyStoreApiAccess(store);
 
   res.json({
@@ -288,6 +298,13 @@ router.post("/sync/retry", async (req, res) => {
 
   retryPostInstall(store.id).catch((err) => console.error("Retry sync error:", err));
   res.json({ success: true, message: "Retry started — check sync log" });
+});
+
+router.post("/sync/import-inventory", async (req, res) => {
+  const store = await getStoreFromRequest(req);
+  if (!store) return res.status(401).json({ success: false, error: "Not connected" });
+  const result = await importAllSyncedProductsForStore(store.id, store.tenant_id);
+  res.json({ success: true, ...result });
 });
 
 router.get("/db/:entityType", async (req, res) => {
