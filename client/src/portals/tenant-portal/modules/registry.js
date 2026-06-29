@@ -30,6 +30,7 @@ import { CRM_ROUTES } from "./crm/routes.jsx";
 
 import EcommerceDashboard from "./ecommerce/pages/Dashboard";
 import { getNavItems as getEcommerceNav } from "./ecommerce/navConfig";
+import { ECOMMERCE_ROUTES } from "./ecommerce/routes.jsx";
 
 import FinanceDashboard from "./finance/pages/Dashboard";
 import { getNavItems as getFinanceNav } from "./finance/navConfig";
@@ -112,6 +113,7 @@ export const TENANT_MODULE_DEFINITIONS = [
     aliases: [],
     Dashboard: EcommerceDashboard,
     getNavItems: getEcommerceNav,
+    routes: ECOMMERCE_ROUTES,
   },
   {
     slug: "finance",

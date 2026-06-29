@@ -1,5 +1,6 @@
 import express from "express";
 import cors from "cors";
+import cookieParser from "cookie-parser";
 import dotenv from "dotenv";
 import { createPool, closePool } from "./src/db/pool.js";
 import { initDb } from "./src/database/db.js";
@@ -11,6 +12,8 @@ import { registerInventoryRoutes } from "./src/routes/inventory.js";
 import { registerPosRoutes } from "./src/routes/pos.js";
 import { registerCrmRoutes } from "./src/routes/crm.js";
 import { registerTenantPortalRoutes } from "./src/routes/tenantPortal.js";
+import { registerEcommerceRoutes } from "./src/routes/ecommerce.js";
+import { shopifyWebhookHandler } from "./src/routes/shopifyWebhooks.js";
 import { purgeSoftDeleted } from "./src/jobs/purgeSoftDeleted.js";
 
 dotenv.config();
@@ -19,7 +22,15 @@ const JSON_BODY_LIMIT = process.env.JSON_BODY_LIMIT || "10mb";
 
 const app = express();
 app.set("trust proxy", 1);
-app.use(cors());
+app.use(cors({ origin: true, credentials: true }));
+
+app.post(
+  "/api/shopify/webhooks",
+  express.raw({ type: "application/json" }),
+  shopifyWebhookHandler,
+);
+
+app.use(cookieParser());
 app.use(express.json({ limit: JSON_BODY_LIMIT }));
 
 const PURGE_INTERVAL_MS = 24 * 60 * 60 * 1000;
@@ -46,6 +57,7 @@ const startServer = async () => {
   registerCrmRoutes(app, verifyToken);
   registerPosRoutes(app, verifyToken);
   registerTenantPortalRoutes(app, verifyToken);
+  registerEcommerceRoutes(app, verifyToken);
 
   app.get("/", (req, res) => {
     res.send("API running");

@@ -1103,6 +1103,9 @@ CREATE TABLE IF NOT EXISTS `ecom_store_connections` (
   `api_key` TEXT NULL DEFAULT NULL,
   `api_secret` TEXT NULL DEFAULT NULL,
   `status` VARCHAR(45) NOT NULL,
+  `initial_sync_status` VARCHAR(45) NOT NULL DEFAULT 'pending',
+  `webhooks_registered` TINYINT(1) NOT NULL DEFAULT 0,
+  `granted_scopes` TEXT NULL DEFAULT NULL,
   `last_synced_at` TIMESTAMP NULL DEFAULT NULL,
   `created_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
   `tenant_id` INT NOT NULL,
@@ -1159,6 +1162,7 @@ CREATE TABLE IF NOT EXISTS `ecom_external_orders` (
   `tenant_id` INT NOT NULL,
   `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
+  UNIQUE INDEX `uq_ecom_external_order` (`store_id`, `external_order_id`),
   INDEX `fk_ecom_external_orders_ecom_store_connections1_idx` (`store_id` ASC),
   INDEX `fk_ecom_external_orders_orders1_idx` (`internal_order_id` ASC),
   INDEX `fk_ecom_external_orders_wh_tenants1_idx` (`tenant_id` ASC),
@@ -1177,6 +1181,63 @@ CREATE TABLE IF NOT EXISTS `ecom_external_orders` (
     REFERENCES `wh_tenants` (`id`)
     ON DELETE CASCADE
     ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- -----------------------------------------------------
+-- Table `ecom_synced_records`
+-- -----------------------------------------------------
+CREATE TABLE IF NOT EXISTS `ecom_synced_records` (
+  `id` INT NOT NULL AUTO_INCREMENT,
+  `store_id` INT NOT NULL,
+  `tenant_id` INT NOT NULL,
+  `entity_type` VARCHAR(45) NOT NULL,
+  `external_id` VARCHAR(100) NOT NULL,
+  `raw_json` LONGTEXT NOT NULL,
+  `normalized_json` LONGTEXT NOT NULL,
+  `source` VARCHAR(100) NOT NULL,
+  `conflict_status` VARCHAR(20) NOT NULL DEFAULT 'none',
+  `pending_raw_json` LONGTEXT NULL DEFAULT NULL,
+  `pending_normalized_json` LONGTEXT NULL DEFAULT NULL,
+  `updated_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE INDEX `uq_ecom_synced_store_entity` (`store_id`, `entity_type`, `external_id`),
+  INDEX `idx_ecom_synced_store_type` (`store_id`, `entity_type`),
+  CONSTRAINT `fk_ecom_synced_records_store`
+    FOREIGN KEY (`store_id`) REFERENCES `ecom_store_connections` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_ecom_synced_records_tenant`
+    FOREIGN KEY (`tenant_id`) REFERENCES `wh_tenants` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- -----------------------------------------------------
+-- Table `ecom_oauth_pending_states`
+-- -----------------------------------------------------
+CREATE TABLE IF NOT EXISTS `ecom_oauth_pending_states` (
+  `state` VARCHAR(64) NOT NULL,
+  `shop` TEXT NOT NULL,
+  `tenant_id` INT NOT NULL,
+  `created_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`state`),
+  INDEX `idx_ecom_oauth_states_created` (`created_at`),
+  CONSTRAINT `fk_ecom_oauth_states_tenant`
+    FOREIGN KEY (`tenant_id`) REFERENCES `wh_tenants` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- -----------------------------------------------------
+-- Table `ecom_oauth_sessions`
+-- -----------------------------------------------------
+CREATE TABLE IF NOT EXISTS `ecom_oauth_sessions` (
+  `session_id` VARCHAR(64) NOT NULL,
+  `shop` TEXT NOT NULL,
+  `access_token` TEXT NOT NULL,
+  `scope` TEXT NULL DEFAULT NULL,
+  `store_id` INT NULL DEFAULT NULL,
+  `tenant_id` INT NOT NULL,
+  `created_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`session_id`),
+  INDEX `idx_ecom_oauth_sessions_created` (`created_at`),
+  CONSTRAINT `fk_ecom_oauth_sessions_tenant`
+    FOREIGN KEY (`tenant_id`) REFERENCES `wh_tenants` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================================================
