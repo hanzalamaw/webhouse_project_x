@@ -152,16 +152,6 @@ export default function BulkImportExport() {
         </Card>
       </div>
 
-      <Card className="wh-inv-import-export__ref">
-        <h3 className="wh-card__title">CSV column reference</h3>
-        <ul className="wh-list wh-inv-csv-ref">
-          <li><strong>cost_price, selling_price</strong> — required for new products</li>
-          <li><strong>delivery_charges, discount, tax</strong> — optional pricing fields (default 0)</li>
-          <li><strong>category_name</strong> — must match an existing category name (case-insensitive)</li>
-          <li><strong>warehouse_id + initial_qty</strong> — optional opening stock in a warehouse</li>
-        </ul>
-      </Card>
-
       {error && <p className="wh-field__error wh-inv-import-export__error">{error}</p>}
       {result && (
         <Card className="wh-inv-import-export__results">

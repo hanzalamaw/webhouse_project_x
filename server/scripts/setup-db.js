@@ -37,6 +37,16 @@ try {
 
   console.log("Applying migrations...");
   try {
+    const { spawnSync } = await import("child_process");
+    const migrate = spawnSync(process.execPath, ["scripts/migrate-crm.js"], {
+      cwd: path.join(__dirname, ".."),
+      stdio: "inherit",
+    });
+    if (migrate.status !== 0) throw new Error("CRM migration failed");
+  } catch (e) {
+    console.warn("CRM migration:", e.message);
+  }
+  try {
     await db.query("ALTER TABLE users ADD COLUMN username VARCHAR(100) NULL AFTER email");
     console.log("OK: added users.username column");
   } catch (e) {

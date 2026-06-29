@@ -8,6 +8,8 @@ export function ConfirmDeleteModal({
   onConfirm,
   title = "Confirm delete",
   recordName = "this record",
+  categoryLabel = "record",
+  cascadeItems = [],
   confirmPhrase = "DELETE",
   loading = false,
   error = "",
@@ -30,6 +32,8 @@ export function ConfirmDeleteModal({
     await onConfirm();
   };
 
+  const items = Array.isArray(cascadeItems) ? cascadeItems.filter(Boolean) : [];
+
   return (
     <Modal
       open={open}
@@ -47,9 +51,16 @@ export function ConfirmDeleteModal({
       }
     >
       <p className="wh-modal__text">
-        Deleting <strong>{recordName}</strong> will also mark all related records as deleted
-        (soft delete). They are permanently removed after 7 days.
+        Deleting <strong>{recordName}</strong> will also delete everything related to this{" "}
+        <strong>{categoryLabel}</strong> (soft delete). Related records are permanently removed after 7 days.
       </p>
+      {items.length > 0 && (
+        <ul className="wh-delete-cascade">
+          {items.map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ul>
+      )}
       <p className="wh-modal__text">
         Type <strong>{confirmPhrase}</strong> to confirm:
       </p>
@@ -60,7 +71,7 @@ export function ConfirmDeleteModal({
         placeholder={confirmPhrase}
         autoFocus
       />
-      {error && <p className="wh-field__error" style={{ marginTop: 12 }}>{error}</p>}
+      {error && <p className="wh-field__error">{error}</p>}
     </Modal>
   );
 }

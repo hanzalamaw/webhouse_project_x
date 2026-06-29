@@ -1,4 +1,39 @@
 const IMPERSONATION_SESSION_KEY = "wh_impersonation_session";
+const SESSION_STARTED_KEY = "wh_session_started_at";
+const SESSION_ACTIVITY_KEY = "wh_session_last_activity_at";
+
+function nowMs() {
+  return Date.now();
+}
+
+export function readSessionTimestamps() {
+  try {
+    return {
+      sessionStartedAt: Number(localStorage.getItem(SESSION_STARTED_KEY)) || null,
+      lastActivityAt: Number(localStorage.getItem(SESSION_ACTIVITY_KEY)) || null,
+    };
+  } catch {
+    return { sessionStartedAt: null, lastActivityAt: null };
+  }
+}
+
+export function touchSessionActivity() {
+  const ts = String(nowMs());
+  try {
+    localStorage.setItem(SESSION_ACTIVITY_KEY, ts);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function clearSessionTimestamps() {
+  try {
+    localStorage.removeItem(SESSION_STARTED_KEY);
+    localStorage.removeItem(SESSION_ACTIVITY_KEY);
+  } catch {
+    /* ignore */
+  }
+}
 
 export function readImpersonationSession() {
   try {
@@ -43,8 +78,11 @@ export function persistSession(userData, token, refreshToken = null) {
   }
 
   sessionStorage.removeItem(IMPERSONATION_SESSION_KEY);
+  const ts = String(nowMs());
   localStorage.setItem("token", token);
   localStorage.setItem("user", JSON.stringify(userData));
+  localStorage.setItem(SESSION_STARTED_KEY, ts);
+  localStorage.setItem(SESSION_ACTIVITY_KEY, ts);
   if (refreshToken != null) localStorage.setItem("refreshToken", refreshToken);
 }
 
@@ -57,6 +95,7 @@ export function clearStoredSession(userHint) {
   localStorage.removeItem("token");
   localStorage.removeItem("refreshToken");
   localStorage.removeItem("user");
+  clearSessionTimestamps();
   return "primary";
 }
 
@@ -77,6 +116,7 @@ export function updateActiveToken(token) {
     return;
   }
   localStorage.setItem("token", token);
+  touchSessionActivity();
 }
 
 export function updateActiveUser(userData) {
@@ -94,5 +134,6 @@ export function mergeTenantUserFromApi(apiUser, storedUser) {
     ...apiUser,
     impersonating: true,
     impersonated_by: storedUser.impersonated_by,
+    tenant_name: apiUser.tenant_name || storedUser.tenant_name,
   };
 }

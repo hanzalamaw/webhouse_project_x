@@ -671,7 +671,13 @@ export function DataTable({
                   onClick={onRowClick ? () => onRowClick(row) : undefined}
                 >
                   {columns.map((col) => (
-                    <td key={col.key || col.label}>{renderCell(row, col)}</td>
+                    <td
+                      key={col.key || col.label}
+                      className={col.stopRowClick ? "wh-table__cell--no-row-click" : undefined}
+                      onClick={col.stopRowClick ? (e) => e.stopPropagation() : undefined}
+                    >
+                      {renderCell(row, col)}
+                    </td>
                   ))}
                 </tr>
               ))

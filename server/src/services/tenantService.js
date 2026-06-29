@@ -1,8 +1,10 @@
 import { tenantRepository } from "../repositories/tenantRepository.js";
 import { subscriptionRepository } from "../repositories/subscriptionRepository.js";
+import { transactionRepository } from "../repositories/transactionRepository.js";
 import { decrypt } from "../utils/cipher.js";
 import { logWhAudit } from "../utils/whAudit.js";
 import { paginatedResponse, parsePagination } from "../utils/pagination.js";
+import { assertUsernameAvailable, validateUsernameFormat } from "../utils/usernamePolicy.js";
 
 const VALID_PORTALS = ["erp1", "erp2", "erp3"];
 
@@ -35,10 +37,24 @@ export const tenantService = {
       throw new Error("Subscription plan has no valid ERP login portal");
     }
 
+    let superAdmin = payload.super_admin;
+    if (superAdmin?.username) {
+      const existingSuperAdmin = await tenantRepository.getSuperAdminUser(id);
+      const username = await assertUsernameAvailable(
+        id,
+        superAdmin.username,
+        existingSuperAdmin?.id
+      );
+      superAdmin = { ...superAdmin, username };
+    }
+
     await tenantRepository.updateFull(id, {
       ...payload,
+      super_admin: superAdmin,
       login_portal: loginPortal,
     });
+    await transactionRepository.processAutoRenewalForTenant(id);
+    await transactionRepository.syncSubscriptionDues(id);
     const updated = await this.getById(id);
     await logWhAudit({
       adminUserId: audit.adminUserId,
@@ -59,8 +75,15 @@ export const tenantService = {
       throw new Error("Subscription plan has no valid ERP login portal");
     }
 
+    let superAdmin = payload.super_admin;
+    if (superAdmin?.username) {
+      const username = validateUsernameFormat(superAdmin.username);
+      superAdmin = { ...superAdmin, username };
+    }
+
     const tenantId = await tenantRepository.createFull({
       ...payload,
+      super_admin: superAdmin,
       login_portal: loginPortal,
     });
     const created = await this.getById(tenantId);
@@ -104,11 +127,33 @@ export const tenantService = {
     return {
       tenant_id: id,
       company_name: tenant.company_name,
+      owner_name: tenant.owner_name,
+      owner_email: tenant.owner_email,
+      owner_phone: tenant.owner_phone,
+      industry: tenant.industry,
+      status: tenant.status,
+      login_portal: tenant.login_portal,
+      plan_name: tenant.plan_name,
+      billing_cycle: tenant.billing_cycle,
+      total_amount: tenant.total_amount,
+      amount_due: tenant.amount_due,
+      max_users: tenant.max_users,
+      max_warehouses: tenant.max_warehouses,
+      max_stores: tenant.max_stores,
+      max_orders_per_month: tenant.max_orders_per_month,
       name: user.name,
       email: user.email,
       username: user.username || user.email,
       password,
     };
+  },
+
+  async getAccountDetails(id) {
+    const tenantFull = await this.getById(id);
+    if (!tenantFull) return null;
+    const credentials = await this.getSuperAdminCredentials(id);
+    const { modules, organization, payment, super_admin, ...tenant } = tenantFull;
+    return { tenant, credentials, modules: modules || [], organization, payment };
   },
 
   async remove(id, audit) {

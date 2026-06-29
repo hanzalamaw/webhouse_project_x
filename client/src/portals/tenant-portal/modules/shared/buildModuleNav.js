@@ -2,23 +2,15 @@ import {
   DashboardIcon,
   TenantsIcon,
   ImpersonateIcon,
-  ModuleIcon,
   LogsIcon,
   SubscriptionIcon,
   SupportIcon,
-  HelpIcon,
 } from "../../../../components/icons";
 
 /** Shared sidebar sections — each module navConfig can extend or replace later. */
 export function buildModuleNav(slug) {
   const base = `/app/m/${slug}`;
   return [
-    {
-      id: "all-modules",
-      label: "All Modules",
-      path: "/app",
-      icon: ModuleIcon,
-    },
     {
       id: "dashboard",
       label: "Dashboard",
@@ -32,16 +24,10 @@ export function buildModuleNav(slug) {
       icon: TenantsIcon,
     },
     {
-      id: "roles-management",
-      label: "Roles Management",
-      path: `${base}/roles-management`,
+      id: "roles-and-permissions",
+      label: "Roles & Permissions",
+      path: `${base}/roles-and-permissions`,
       icon: ImpersonateIcon,
-    },
-    {
-      id: "permissions-management",
-      label: "Permissions Management",
-      path: `${base}/permissions-management`,
-      icon: ModuleIcon,
     },
     {
       id: "audit-logs",
@@ -73,19 +59,12 @@ export function buildModuleNav(slug) {
       path: `${base}/activity-alerts`,
       icon: SupportIcon,
     },
-    {
-      id: "help-center",
-      label: "Help Center",
-      path: `${base}/help-center`,
-      icon: HelpIcon,
-    },
   ];
 }
 
 export const MODULE_SECTION_ROUTES = [
   { path: "user-management", title: "User Management" },
-  { path: "roles-management", title: "Roles Management" },
-  { path: "permissions-management", title: "Permissions Management" },
+  { path: "roles-and-permissions", title: "Roles & Permissions" },
   { path: "audit-logs", title: "Audit Logs" },
   { path: "sessions", title: "Sessions" },
   { path: "organization-settings", title: "Organization Settings" },

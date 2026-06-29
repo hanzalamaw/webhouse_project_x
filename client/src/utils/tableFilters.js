@@ -1,3 +1,5 @@
+import { getFiscalYearFilterRange } from "./fiscalYearFilter";
+
 function rowDate(row, field) {
   const raw = row[field];
   if (!raw) return null;
@@ -32,13 +34,21 @@ export function getFilterOptions(rows, key) {
   return [...values].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
 }
 
-export function applyToolbarFilters(rows, toolbar, { dateField = "created_at", filters = [] } = {}) {
+export function applyToolbarFilters(rows, toolbar, { dateField = "created_at", filters = [], fiscalYearStart = null } = {}) {
   if (!rows?.length) return [];
   const { search = "", year = "", dateFrom = "", dateTo = "", ...fieldFilters } = toolbar;
 
   const from = dateFrom ? new Date(dateFrom) : null;
   const to = dateTo ? new Date(dateTo) : null;
   if (to) to.setHours(23, 59, 59, 999);
+
+  let fiscalFrom = null;
+  let fiscalTo = null;
+  if (year && fiscalYearStart) {
+    const range = getFiscalYearFilterRange(Number(year), fiscalYearStart);
+    fiscalFrom = range.start;
+    fiscalTo = range.end;
+  }
 
   return rows.filter((row) => {
     if (!matchesSearch(row, search)) return false;
@@ -49,7 +59,12 @@ export function applyToolbarFilters(rows, toolbar, { dateField = "created_at", f
     }
 
     const d = rowDate(row, dateField);
-    if (year && d && d.getFullYear() !== Number(year)) return false;
+    if (year && fiscalYearStart) {
+      if (!d) return false;
+      if (d < fiscalFrom || d > fiscalTo) return false;
+    } else if (year && d && d.getFullYear() !== Number(year)) {
+      return false;
+    }
     if (from && d && d < from) return false;
     if (to && d && d > to) return false;
     if ((from || to || year) && !d) return false;

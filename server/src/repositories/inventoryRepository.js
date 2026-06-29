@@ -243,6 +243,23 @@ export const inventoryRepository = {
     return rows[0] || null;
   },
 
+  async findCategoryByName(tenantId, categoryName, excludeId = null) {
+    const name = String(categoryName || "").trim();
+    if (!name) return null;
+    const params = [tenantId, name];
+    let sql = `SELECT c.id, c.category_name, c.status, c.created_at, c.tenant_id
+       FROM inventory_categories c
+       WHERE c.tenant_id = ? AND c.deleted_at IS NULL
+         AND LOWER(TRIM(c.category_name)) = LOWER(?)`;
+    if (excludeId != null) {
+      sql += ` AND c.id != ?`;
+      params.push(excludeId);
+    }
+    sql += ` LIMIT 1`;
+    const [rows] = await readDb.query(sql, params);
+    return rows[0] || null;
+  },
+
   async getCategoryProducts(tenantId, categoryId) {
     const [rows] = await readDb.query(
       `SELECT id, product_name, sku, status, category_id
@@ -413,6 +430,24 @@ export const inventoryRepository = {
   },
 
   // ── Warehouses ─────────────────────────────────────────────────────────────
+  async countWarehouses(tenantId) {
+    const [[row]] = await readDb.query(
+      `SELECT COUNT(*) AS total FROM inventory_warehouses
+       WHERE tenant_id = ? AND deleted_at IS NULL`,
+      [tenantId]
+    );
+    return Number(row.total || 0);
+  },
+
+  async getTenantWarehouseLimit(tenantId) {
+    const [rows] = await readDb.query(
+      `SELECT max_warehouses FROM wh_tenant_limits
+       WHERE tenant_id = ? AND deleted_at IS NULL LIMIT 1`,
+      [tenantId]
+    );
+    return Number(rows[0]?.max_warehouses || 0);
+  },
+
   async listWarehouses(tenantId, { limit, offset }) {
     const [rows] = await readDb.query(
       `SELECT w.id, w.warehouse_name, w.location, w.city, w.status, w.created_at, w.tenant_id,

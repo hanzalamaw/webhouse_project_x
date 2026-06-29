@@ -9,13 +9,19 @@ import { registerAuthRoutes } from "./src/routes/auth.js";
 import { registerDashboardRoutes } from "./src/routes/dashboard.js";
 import { registerWhPortalRoutes } from "./src/routes/whPortal.js";
 import { registerInventoryRoutes } from "./src/routes/inventory.js";
+import { registerPosRoutes } from "./src/routes/pos.js";
+import { registerCrmRoutes } from "./src/routes/crm.js";
+import { registerTenantPortalRoutes } from "./src/routes/tenantPortal.js";
 import { registerEcommerceRoutes } from "./src/routes/ecommerce.js";
 import { shopifyWebhookHandler } from "./src/routes/shopifyWebhooks.js";
 import { purgeSoftDeleted } from "./src/jobs/purgeSoftDeleted.js";
 
 dotenv.config();
 
+const JSON_BODY_LIMIT = process.env.JSON_BODY_LIMIT || "10mb";
+
 const app = express();
+app.set("trust proxy", 1);
 app.use(cors({ origin: true, credentials: true }));
 
 app.post(
@@ -25,7 +31,7 @@ app.post(
 );
 
 app.use(cookieParser());
-app.use(express.json());
+app.use(express.json({ limit: JSON_BODY_LIMIT }));
 
 const PURGE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
@@ -37,7 +43,7 @@ const startServer = async () => {
 
   const JWT_SECRET = process.env.JWT_SECRET || "webhouse_secret";
   const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "1h";
-  const JWT_REFRESH_EXPIRES_IN = process.env.JWT_REFRESH_EXPIRES_IN || "7d";
+  const JWT_REFRESH_EXPIRES_IN = process.env.JWT_REFRESH_EXPIRES_IN || "8h";
   const verifyToken = createVerifyToken(JWT_SECRET);
 
   registerAuthRoutes(app, db, { JWT_SECRET, JWT_EXPIRES_IN, JWT_REFRESH_EXPIRES_IN, verifyToken });
@@ -48,6 +54,9 @@ const startServer = async () => {
     jwtRefreshExpiresIn: JWT_REFRESH_EXPIRES_IN,
   });
   registerInventoryRoutes(app, verifyToken);
+  registerCrmRoutes(app, verifyToken);
+  registerPosRoutes(app, verifyToken);
+  registerTenantPortalRoutes(app, verifyToken);
   registerEcommerceRoutes(app, verifyToken);
 
   app.get("/", (req, res) => {

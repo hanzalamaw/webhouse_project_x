@@ -64,8 +64,8 @@ export const tenantController = {
     try {
       const id = tryParseEntityId(req.params.id);
       if (!id) return res.status(400).json({ message: "Invalid tenant id" });
-      const row = await tenantService.getSuperAdminCredentials(id);
-      if (!row) return res.status(404).json({ message: "Super admin not found for this tenant" });
+      const row = await tenantService.getAccountDetails(id);
+      if (!row) return res.status(404).json({ message: "Tenant not found" });
       res.json(row);
     } catch (e) {
       res.status(500).json({ message: e.message });

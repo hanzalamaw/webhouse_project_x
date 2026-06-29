@@ -9,7 +9,8 @@ import { TableToolbar } from "../../../../../../components/TableToolbar";
 import { ConfirmDeleteModal } from "../../../../../../components/ConfirmDeleteModal";
 import { Button } from "../../../../../../components/Button";
 import { StatusBadge } from "../../../../../../components/Badge";
-import { applyToolbarFilters, EMPTY_TOOLBAR } from "../../../../../../utils/tableFilters";
+import { EMPTY_TOOLBAR } from "../../../../../../utils/tableFilters";
+import { useToolbarFilteredRows } from "../../../../../../hooks/useToolbarFilteredRows";
 import { formatDateTime } from "../../../../../../utils/dateTime";
 import { formatPKR } from "../../../../../../utils/currency";
 import { formatTotalPrice } from "../../utils/pricing";
@@ -32,10 +33,7 @@ export default function ManageProducts() {
   const [error, setError] = useState("");
   const [toolbar, setToolbar] = useState({ ...EMPTY_TOOLBAR, status: "", category_name: "", unit: "" });
 
-  const filteredRows = useMemo(
-    () => applyToolbarFilters(rows, toolbar, { dateField: "created_at", filters: TOOLBAR_FILTERS }),
-    [rows, toolbar]
-  );
+  const filteredRows = useToolbarFilteredRows(rows, toolbar, { dateField: "created_at", filters: TOOLBAR_FILTERS });
 
   useEffect(() => setPage(1), [toolbar]);
 
@@ -92,6 +90,7 @@ export default function ManageProducts() {
     {
       label: "Actions",
       filter: false,
+      stopRowClick: true,
       render: (row) => (
         <div className="wh-action-btns">
           <Button variant="secondary" className="wh-btn--sm" onClick={() => navigate(`${MODULE_BASE}/products/edit/${row.id}`)}>Edit</Button>
@@ -115,7 +114,14 @@ export default function ManageProducts() {
         ) : (
           <>
             <TableToolbar rows={rows} value={toolbar} onChange={setToolbar} dateField="created_at" filters={TOOLBAR_FILTERS} searchPlaceholder="Search products…" />
-            <DataTable columns={columns} rows={filteredRows} page={page} pageSize={TABLE_PAGE_SIZE} onPageChange={setPage} />
+            <DataTable
+              columns={columns}
+              rows={filteredRows}
+              page={page}
+              pageSize={TABLE_PAGE_SIZE}
+              onPageChange={setPage}
+              onRowClick={(row) => navigate(`${MODULE_BASE}/products/edit/${row.id}`)}
+            />
           </>
         )}
       </Card>

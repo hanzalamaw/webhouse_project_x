@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Button } from "../../../components/Button";
 import { useAuth } from "../../../context/AuthContext";
-import { moduleBasePath, TENANT_MODULE_DEFINITIONS } from "../modules/registry";
+import { Button } from "../../../components/Button";
+import { moduleBasePath } from "../modules/registry";
 import { useTenantModules } from "../hooks/useTenantModules";
 import heroImage from "../../../assets/Main top-right Image.png";
 import adminImage from "../../../assets/Admin.png";
@@ -24,6 +24,7 @@ const MODULE_IMAGES = {
   ecommerce: ecommerceImage,
   finance: financeImage,
   "inventory-procurement": inventoryImage,
+  "pos-terminal": posImage,
 };
 
 const MODULE_DESCRIPTIONS = {
@@ -35,7 +36,29 @@ const MODULE_DESCRIPTIONS = {
   ecommerce: "Connect Shopify, WooCommerce and marketplaces.",
   finance: "Expenses, transactions and financial reporting.",
   "inventory-procurement": "Products, warehouses and stock operations.",
+  "pos-terminal": "Cashier checkout — scan-free product grid and shift management.",
 };
+
+const POS_LAST_SLUGS = ["pos", "pos-terminal"];
+
+function sortModulesWithPosLast(modules) {
+  const regular = [];
+  const posModules = [];
+
+  for (const mod of modules) {
+    if (POS_LAST_SLUGS.includes(mod.slug)) {
+      posModules.push(mod);
+    } else {
+      regular.push(mod);
+    }
+  }
+
+  posModules.sort(
+    (a, b) => POS_LAST_SLUGS.indexOf(a.slug) - POS_LAST_SLUGS.indexOf(b.slug)
+  );
+
+  return [...regular, ...posModules];
+}
 
 function getGreeting() {
   const hour = new Date().getHours();
@@ -49,11 +72,6 @@ function getDisplayName(user) {
   return name.split(" ")[0] || "there";
 }
 
-function getModuleNumber(slug) {
-  const index = TENANT_MODULE_DEFINITIONS.findIndex((m) => m.slug === slug);
-  return index >= 0 ? index + 1 : null;
-}
-
 export default function ModuleHub() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
@@ -62,34 +80,35 @@ export default function ModuleHub() {
 
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
-    if (!query) return visible;
-    return visible.filter((mod) => {
-      const description = MODULE_DESCRIPTIONS[mod.slug] || "";
-      return (
-        mod.name.toLowerCase().includes(query) ||
-        description.toLowerCase().includes(query)
-      );
-    });
+    const base = !query
+      ? visible
+      : visible.filter((mod) => {
+          const description = MODULE_DESCRIPTIONS[mod.slug] || "";
+          return (
+            mod.name.toLowerCase().includes(query) ||
+            description.toLowerCase().includes(query)
+          );
+        });
+    return sortModulesWithPosLast(base);
   }, [visible, search]);
+  const handleLogout = async () => {
+    await logout();
+    if (!user?.impersonating) {
+      navigate(`/${user?.login_portal || "erp1"}`);
+    }
+  };
 
   return (
     <div className="wh-module-hub">
-      {user?.impersonating && (
-        <div className="wh-impersonation-banner wh-module-hub__banner">
-          <span>
-            You are impersonating <strong>{user.tenant_name}</strong> (admin support session).
-          </span>
-          <Button type="button" variant="secondary" className="wh-btn--sm" onClick={logout}>
-            End session
-          </Button>
-        </div>
-      )}
-
       <div className="wh-module-hub__center">
         <div className="wh-module-hub__inner">
+        <div className="wh-module-hub__topbar">
+          <Button type="button" variant="secondary" className="wh-btn--sm" onClick={handleLogout}>
+            Logout
+          </Button>
+        </div>
         <header className="wh-module-hub__header">
-          <div className="wh-module-hub__intro">
-            <p className="wh-module-hub__greeting">
+          <div className="wh-module-hub__intro">            <p className="wh-module-hub__greeting">
               <span className="wh-module-hub__greeting-icon" aria-hidden>
                 <svg viewBox="0 0 14 14" fill="none">
                   <path d="M7 0L14 7L7 14L0 7L7 0Z" fill="currentColor" />
@@ -136,9 +155,7 @@ export default function ModuleHub() {
 
         {!loading && filtered.length > 0 && (
           <div className="wh-module-grid">
-            {filtered.map((mod) => {
-              const number = getModuleNumber(mod.slug);
-              return (
+            {filtered.map((mod, index) => (
                 <button
                   key={mod.slug}
                   type="button"
@@ -152,7 +169,7 @@ export default function ModuleHub() {
                   />
                   <div className="wh-module-card__content">
                     <h2 className="wh-module-card__title">
-                      {number}. {mod.name}
+                      {index + 1}. {mod.name}
                     </h2>
                     <p className="wh-module-card__desc">
                       {MODULE_DESCRIPTIONS[mod.slug]}
@@ -165,8 +182,7 @@ export default function ModuleHub() {
                     </svg>
                   </span>
                 </button>
-              );
-            })}
+            ))}
           </div>
         )}
 

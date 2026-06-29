@@ -5,6 +5,7 @@ import { useAuth } from "../../../context/AuthContext";
 import { useNavigate, useSearchParams, Link } from "react-router-dom";
 
 import { API_BASE } from "../../../config/api";
+import { friendlyError } from "../../../utils/friendlyError";
 
 import { FormField } from "../../../components/FormField";
 
@@ -92,13 +93,13 @@ const Login = () => {
 
       } else {
 
-        setError(data.message || "Invalid credentials");
+        setError(friendlyError(data.message, response.status));
 
       }
 
     } catch {
 
-      setError("Could not connect to server.");
+      setError(friendlyError("Failed to fetch"));
 
     } finally {
 

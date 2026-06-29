@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../../../../../context/AuthContext";
 import { fetchAllTableRows, TABLE_PAGE_SIZE } from "../../../../../../api/client";
 import { PageHeader } from "../../../../../../components/PageHeader";
@@ -6,9 +7,10 @@ import { Card } from "../../../../../../components/Card";
 import { DataTable } from "../../../../../../components/DataTable";
 import { TableToolbar } from "../../../../../../components/TableToolbar";
 import { StatusBadge } from "../../../../../../components/Badge";
-import { applyToolbarFilters, EMPTY_TOOLBAR } from "../../../../../../utils/tableFilters";
+import { EMPTY_TOOLBAR } from "../../../../../../utils/tableFilters";
+import { useToolbarFilteredRows } from "../../../../../../hooks/useToolbarFilteredRows";
 import { formatDateTime } from "../../../../../../utils/dateTime";
-import { MOVEMENT_LABELS, MOVEMENT_TYPES } from "../../constants";
+import { MOVEMENT_LABELS, MOVEMENT_TYPES, MODULE_BASE } from "../../constants";
 
 const TOOLBAR_FILTERS = [
   { key: "movement_type", label: "Type" },
@@ -18,6 +20,8 @@ const TOOLBAR_FILTERS = [
 
 export default function MovementHistory() {
   const { authFetch } = useAuth();
+  const navigate = useNavigate();
+  const backPath = `${MODULE_BASE}/procurement/movement-history`;
   const [rows, setRows] = useState([]);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
@@ -28,14 +32,16 @@ export default function MovementHistory() {
     product_name: "",
   });
 
-  const filteredRows = useMemo(
-    () =>
-      applyToolbarFilters(rows, toolbar, {
-        dateField: "created_at",
-        filters: TOOLBAR_FILTERS,
-      }),
-    [rows, toolbar]
-  );
+  const openMovement = (row) => {
+    navigate(`${MODULE_BASE}/procurement/movements/view/${row.id}`, {
+      state: { movement: row, backPath },
+    });
+  };
+
+  const filteredRows = useToolbarFilteredRows(rows, toolbar, {
+    dateField: "created_at",
+    filters: TOOLBAR_FILTERS,
+  });
 
   useEffect(() => setPage(1), [toolbar]);
 
@@ -77,7 +83,7 @@ export default function MovementHistory() {
         ) : (
           <>
             <TableToolbar rows={rows} value={toolbar} onChange={setToolbar} dateField="created_at" filters={TOOLBAR_FILTERS} searchPlaceholder="Search movements…" />
-            <DataTable columns={columns} rows={filteredRows} page={page} pageSize={TABLE_PAGE_SIZE} onPageChange={setPage} />
+            <DataTable columns={columns} rows={filteredRows} page={page} pageSize={TABLE_PAGE_SIZE} onPageChange={setPage} onRowClick={openMovement} />
           </>
         )}
       </Card>

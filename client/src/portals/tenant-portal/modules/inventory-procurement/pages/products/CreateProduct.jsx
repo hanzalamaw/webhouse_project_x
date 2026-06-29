@@ -7,23 +7,11 @@ import { FormField } from "../../../../../../components/FormField";
 import { Button } from "../../../../../../components/Button";
 import { SearchableSelect } from "../../../../../../components/SearchableSelect";
 import { useInventoryReference } from "../../hooks/useInventoryReference";
+import { FormBlock } from "../../../../../../components/FormBlock";
+import { FormPageLayout, FormActions } from "../../../../../../components/FormPageLayout";
+import CreateCategoryModal from "../../components/CreateCategoryModal";
 import { PRODUCT_STATUS, PRODUCT_UNITS, MODULE_BASE } from "../../constants";
 import { formatTotalPrice } from "../../utils/pricing";
-
-function FormBlock({ step, title, description, children }) {
-  return (
-    <div className="wh-inv-block">
-      <div className="wh-inv-block__header">
-        <span className="wh-review-block__step">{step}</span>
-        <div>
-          <h3 className="wh-inv-block__title">{title}</h3>
-          {description && <p className="wh-inv-block__desc">{description}</p>}
-        </div>
-      </div>
-      <div className="wh-inv-block__body">{children}</div>
-    </div>
-  );
-}
 
 const INITIAL = {
   product_name: "",
@@ -85,6 +73,7 @@ export default function CreateProduct() {
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState("");
+  const [createCategoryOpen, setCreateCategoryOpen] = useState(false);
 
   const set = (key, value) => setForm((f) => ({ ...f, [key]: value }));
 
@@ -251,26 +240,29 @@ export default function CreateProduct() {
 
   if (loadingProduct) {
     return (
-      <div className="wh-page wh-page--wide">
-        <p className="wh-muted">Loading product…</p>
+      <div className="wh-page">
+        <FormPageLayout>
+          <p className="wh-muted">Loading product…</p>
+        </FormPageLayout>
       </div>
     );
   }
 
   return (
-    <div className="wh-page wh-page--wide">
-      <PageHeader
-        title={isEdit ? "Edit Product" : "Create New Product"}
-        description={isEdit ? "Update product details and save changes." : "Add a product with category, pricing, warehouse, and initial stock."}
-        actions={
-          <Button variant="secondary" onClick={() => navigate(`${MODULE_BASE}/products/manage`)}>
-            Manage Products
-          </Button>
-        }
-      />
+    <div className="wh-page">
+      <FormPageLayout>
+        <PageHeader
+          title={isEdit ? "Edit Product" : "Create New Product"}
+          description={isEdit ? "Update product details and save changes." : "Add a product with category, pricing, warehouse, and initial stock."}
+          actions={
+            <Button variant="secondary" onClick={() => navigate(`${MODULE_BASE}/products/manage`)}>
+              Manage Products
+            </Button>
+          }
+        />
 
-      <form onSubmit={handleSubmit} className="wh-inv-blocks-stack">
-        <FormBlock step={1} title="Basic information" description="Name, SKU, unit, and status for this product.">
+        <form onSubmit={handleSubmit} className="wh-form-stack">
+        <FormBlock title="Basic information" description="Name, SKU, unit, and status for this product.">
           <div className="wh-form-grid">
             <FormField id="product_name" label="Product name" value={form.product_name} onChange={(e) => set("product_name", e.target.value)} required />
             <FormField id="sku" label="SKU" value={form.sku} onChange={(e) => set("sku", e.target.value)} required />
@@ -287,7 +279,7 @@ export default function CreateProduct() {
           </div>
         </FormBlock>
 
-        <FormBlock step={2} title="Pricing" description="Cost, selling price, delivery, discount, tax, and calculated total.">
+        <FormBlock title="Pricing" description="Cost, selling price, delivery, discount, tax, and calculated total.">
           <div className="wh-form-grid">
             <FormField id="cost_price" label="Cost price (PKR)" type="number" min="0" step="0.01" value={form.cost_price} onChange={(e) => set("cost_price", e.target.value)} required />
             <FormField id="selling_price" label="Selling price (PKR)" type="number" min="0" step="0.01" value={form.selling_price} onChange={(e) => set("selling_price", e.target.value)} required />
@@ -301,28 +293,37 @@ export default function CreateProduct() {
               displayOnly
             />
           </div>
-          <p className="wh-inv-block__desc">Total = (Selling price − Discount) + Tax. Delivery charges are stored separately.</p>
+          <p className="wh-form-block__desc">Total = (Selling price − Discount) + Tax. Delivery charges are stored separately.</p>
         </FormBlock>
 
-        <FormBlock step={3} title="Category" description="Assign this product to a category.">
+        <FormBlock title="Category" description="Assign this product to a category.">
           {refLoading ? (
             <p className="wh-muted">Loading categories…</p>
-          ) : categoryOptions.length === 0 ? (
-            <p className="wh-field__error">No categories found. Create a category first.</p>
           ) : (
-            <SearchableSelect
-              id="category_id"
-              label="Category"
-              options={categoryOptions}
-              value={form.category_id}
-              onChange={(v) => set("category_id", v)}
-              placeholder="Search categories…"
-            />
+            <div className={categoryOptions.length === 0 ? "wh-form-grid" : "wh-form-grid wh-form-grid--field-action"}>
+              {categoryOptions.length === 0 ? (
+                <p className="wh-field__error wh-form-grid__full">No categories yet. Create one to continue.</p>
+              ) : (
+                <SearchableSelect
+                  id="category_id"
+                  label="Category"
+                  options={categoryOptions}
+                  value={form.category_id}
+                  onChange={(v) => set("category_id", v)}
+                  placeholder="Search categories…"
+                />
+              )}
+              <div className={categoryOptions.length === 0 ? "wh-form-grid__actions" : "wh-form-grid--field-action__btn"}>
+                <Button type="button" variant="secondary" onClick={() => setCreateCategoryOpen(true)}>
+                  New category
+                </Button>
+              </div>
+            </div>
           )}
         </FormBlock>
 
         {!isEdit ? (
-          <FormBlock step={4} title="Inventory & warehouses" description="Set initial stock in one or more warehouses. Each entry creates stock level and initial stock movement records where applicable.">
+          <FormBlock title="Inventory & warehouses" description="Set initial stock in one or more warehouses. Each entry creates stock level and initial stock movement records where applicable.">
             {warehouseOptions.length === 0 ? (
               <p className="wh-field__error">No warehouses found. Create a warehouse first to set initial stock.</p>
             ) : (
@@ -403,7 +404,7 @@ export default function CreateProduct() {
             )}
           </FormBlock>
         ) : (
-          <FormBlock step={4} title="Stock levels" description="Reserved and damaged quantities by warehouse. Use Stock In / Stock Out to change available quantity.">
+          <FormBlock title="Stock levels" description="Reserved and damaged quantities by warehouse. Use Stock In / Stock Out to change available quantity.">
             {stockLevels.length === 0 ? (
               <p className="wh-muted">No stock recorded for this product yet.</p>
             ) : (
@@ -446,15 +447,26 @@ export default function CreateProduct() {
         {error && <p className="wh-field__error">{error}</p>}
         {message && <p className="wh-form-message">{message}</p>}
 
-        <div className="wh-inv-form-actions">
+        <FormActions>
           <Button type="button" variant="secondary" onClick={() => navigate(`${MODULE_BASE}/products/manage`)}>
             Cancel
           </Button>
           <Button type="submit" disabled={submitting}>
             {submitting ? "Saving…" : isEdit ? "Save Product" : "Create Product"}
           </Button>
-        </div>
-      </form>
+        </FormActions>
+        </form>
+
+        <CreateCategoryModal
+        open={createCategoryOpen}
+        onClose={() => setCreateCategoryOpen(false)}
+        authFetch={authFetch}
+        onCreated={async (category) => {
+          await reload();
+          if (category?.id) set("category_id", String(category.id));
+        }}
+      />
+      </FormPageLayout>
     </div>
   );
 }

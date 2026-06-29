@@ -15,3 +15,10 @@ export function isTokenExpired(token, skewMs = 0) {
   if (!payload?.exp) return true;
   return payload.exp * 1000 <= Date.now() + skewMs;
 }
+
+export function isStoredAuthExpired(session) {
+  if (!session?.token) return true;
+  if (!session.refreshToken) return true;
+  if (isTokenExpired(session.refreshToken)) return true;
+  return false;
+}

@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { useTheme } from "../../context/ThemeContext";
 import { getTenantMenuItems, TENANT_FOOTER_ITEMS, ChevronIcon } from "../../portals/tenant-portal/navConfig";
+import { apiFetch } from "../../api/client";
 import { HamburgerIcon } from "../icons";
 import { Toggle } from "../Toggle";
 import "./Sidebar.css";
@@ -35,11 +36,43 @@ export default function TenantSidebar({ moduleSlug }) {
   const drawerRef = useRef(null);
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, logout } = useAuth();
+  const { user, logout, authFetch } = useAuth();
   const { darkMode, toggleDarkMode } = useTheme();
 
   const menuItems = useMemo(() => getTenantMenuItems(moduleSlug), [moduleSlug]);
   const logoutRedirect = `/${user?.login_portal || "erp1"}`;
+  const [orgBranding, setOrgBranding] = useState({ logoUrl: null, companyName: null });
+
+  const loadOrg = useCallback(() => {
+    if (user?.portal !== "tenant") return;
+    apiFetch("/tenant/organization-settings", {}, authFetch)
+      .then((res) =>
+        setOrgBranding({
+          logoUrl: res.data?.logo_url || null,
+          companyName: res.data?.company_name || null,
+        })
+      )
+      .catch(() => setOrgBranding({ logoUrl: null, companyName: null }));
+  }, [authFetch, user?.portal]);
+
+  useEffect(() => {
+    loadOrg();
+    const handler = () => loadOrg();
+    window.addEventListener("tenant-org-updated", handler);
+    return () => window.removeEventListener("tenant-org-updated", handler);
+  }, [loadOrg]);
+
+  useEffect(() => {
+    const next = {};
+    for (const item of menuItems) {
+      if (item.children?.some((c) => isPathActive(location.pathname, c.path))) {
+        next[item.id] = true;
+      }
+    }
+    if (Object.keys(next).length) {
+      setOpenGroups((prev) => ({ ...prev, ...next }));
+    }
+  }, [menuItems, location.pathname]);
 
   useEffect(() => {
     const next = {};
@@ -169,38 +202,78 @@ export default function TenantSidebar({ moduleSlug }) {
     );
   };
 
+  const companyName = orgBranding.companyName || user?.tenant_name || "Company";
+  const username = user?.username || user?.name || "User";
+
   const profileBlock = (
     <div className="wh-sidebar-profile">
       <div className="wh-profile-avatar">
-        <span>{(user?.name || "U").charAt(0).toUpperCase()}</span>
+        {orgBranding.logoUrl ? (
+          <img
+            src={orgBranding.logoUrl}
+            alt=""
+            className="wh-profile-logo"
+            onError={(e) => {
+              e.target.style.display = "none";
+            }}
+          />
+        ) : (
+          <span>{companyName.charAt(0).toUpperCase()}</span>
+        )}
       </div>
       {(isExpanded || isMobile) && (
         <div className="wh-profile-info">
-          <span className="wh-profile-name">{(user?.name || "USER").toUpperCase()}</span>
-          <span className="wh-profile-role">{(user?.tenant_name || "WORKSPACE").toUpperCase()}</span>
+          <span className="wh-profile-name" title={companyName}>
+            {companyName}
+          </span>
+          <span className="wh-profile-username" title={username}>
+            {username}
+          </span>
         </div>
       )}
     </div>
   );
 
   const footerBlock = (
-    <div className="wh-sidebar-footer">
-      <button type="button" className="wh-footer-link wh-footer-link--danger" onClick={handleLogout}>
-        <TENANT_FOOTER_ITEMS.logout.icon />
-        {(isExpanded || isMobile) && <span>{TENANT_FOOTER_ITEMS.logout.label}</span>}
-      </button>
-      {(isExpanded || isMobile) ? (
-        <div className="wh-footer-toggle">
-          <TENANT_FOOTER_ITEMS.nightMode.icon />
-          <span>{TENANT_FOOTER_ITEMS.nightMode.label}</span>
-          <Toggle checked={darkMode} onChange={toggleDarkMode} />
-        </div>
-      ) : (
-        <button type="button" className="wh-footer-link" onClick={toggleDarkMode} title="Night Mode">
-          <TENANT_FOOTER_ITEMS.nightMode.icon />
+    <>
+      <div className="wh-sidebar-footer-pre">
+        <button
+          type="button"
+          className="wh-footer-link"
+          onClick={() => handleNavigate(TENANT_FOOTER_ITEMS.allModules.path)}
+          title={!isExpanded && !isMobile ? TENANT_FOOTER_ITEMS.allModules.label : undefined}
+        >
+          <TENANT_FOOTER_ITEMS.allModules.icon />
+          {(isExpanded || isMobile) && <span>{TENANT_FOOTER_ITEMS.allModules.label}</span>}
         </button>
-      )}
-    </div>
+      </div>
+      <div className="wh-sidebar-footer">
+        <button type="button" className="wh-footer-link wh-footer-link--danger" onClick={handleLogout}>
+          <TENANT_FOOTER_ITEMS.logout.icon />
+          {(isExpanded || isMobile) && <span>{TENANT_FOOTER_ITEMS.logout.label}</span>}
+        </button>
+        {(isExpanded || isMobile) ? (
+          <div className="wh-footer-toggle">
+            <TENANT_FOOTER_ITEMS.nightMode.icon />
+            <span>{TENANT_FOOTER_ITEMS.nightMode.label}</span>
+            <Toggle checked={darkMode} onChange={toggleDarkMode} />
+          </div>
+        ) : (
+          <button type="button" className="wh-footer-link" onClick={toggleDarkMode} title="Night Mode">
+            <TENANT_FOOTER_ITEMS.nightMode.icon />
+          </button>
+        )}
+        <button
+          type="button"
+          className="wh-footer-link"
+          onClick={() => handleNavigate(TENANT_FOOTER_ITEMS.helpCenter.path)}
+          title={!isExpanded && !isMobile ? TENANT_FOOTER_ITEMS.helpCenter.label : undefined}
+        >
+          <TENANT_FOOTER_ITEMS.helpCenter.icon />
+          {(isExpanded || isMobile) && <span>{TENANT_FOOTER_ITEMS.helpCenter.label}</span>}
+        </button>
+      </div>
+    </>
   );
 
   if (isMobile) {

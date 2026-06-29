@@ -3,7 +3,7 @@ import { SearchableSelect } from "./SearchableSelect";
 import { useAuth } from "../context/AuthContext";
 import { apiFetch } from "../api/client";
 
-export function TenantSelect({ id = "tenant", label = "Tenant", value, onChange }) {
+export function TenantSelect({ id = "tenant", label = "Tenant", value, onChange, disabled = false }) {
   const { authFetch } = useAuth();
   const [tenants, setTenants] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -33,6 +33,7 @@ export function TenantSelect({ id = "tenant", label = "Tenant", value, onChange 
       options={options}
       loading={loading}
       emptyMessage="No tenants found"
+      disabled={disabled}
     />
   );
 }

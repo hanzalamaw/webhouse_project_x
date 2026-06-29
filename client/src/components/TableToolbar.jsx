@@ -1,5 +1,7 @@
 import { useMemo } from "react";
 import { getYearsFromRows, getFilterOptions } from "../utils/tableFilters";
+import { getFiscalYearsFromRows } from "../utils/fiscalYearFilter";
+import { useFiscalYear } from "../context/FiscalYearContext";
 
 export function TableToolbar({
   rows = [],
@@ -9,7 +11,13 @@ export function TableToolbar({
   filters = [],
   searchPlaceholder = "Search…",
 }) {
-  const years = useMemo(() => getYearsFromRows(rows, dateField), [rows, dateField]);
+  const fiscalYearStart = useFiscalYear();
+  const years = useMemo(() => {
+    if (fiscalYearStart) {
+      return getFiscalYearsFromRows(rows, dateField, fiscalYearStart) || [];
+    }
+    return getYearsFromRows(rows, dateField);
+  }, [rows, dateField, fiscalYearStart]);
 
   const filterOptions = useMemo(() => {
     const opts = {};
@@ -58,7 +66,9 @@ export function TableToolbar({
         >
           <option value="">All years</option>
           {years.map((y) => (
-            <option key={y} value={y}>{y}</option>
+            <option key={y} value={y}>
+              {fiscalYearStart ? `FY ${y}` : y}
+            </option>
           ))}
         </select>
         <input
