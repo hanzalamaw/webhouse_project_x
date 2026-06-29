@@ -30,7 +30,14 @@ export function DashboardFilter({
         <input
           type="checkbox"
           checked={filter.allTime}
-          onChange={(e) => set({ allTime: e.target.checked, year: e.target.checked ? "" : filter.year })}
+          onChange={(e) =>
+            set({
+              allTime: e.target.checked,
+              year: e.target.checked ? "" : filter.year,
+              dateFrom: e.target.checked ? "" : filter.dateFrom,
+              dateTo: e.target.checked ? "" : filter.dateTo,
+            })
+          }
         />
         All time
       </label>

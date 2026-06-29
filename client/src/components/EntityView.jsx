@@ -35,10 +35,15 @@ const CONTACT_ICONS = {
   ),
 };
 
-function StatCard({ label, value, hint, tone = "default", icon, valueVariant }) {
+function StatCard({ label, value, hint, hintTone, tone = "default", icon, valueVariant }) {
   const valueClass = [
     "wh-entity-profile__stat-value",
     valueVariant === "date" ? "wh-entity-profile__stat-value--date" : "",
+  ].filter(Boolean).join(" ");
+
+  const hintClass = [
+    "wh-entity-profile__stat-hint",
+    hintTone ? `wh-entity-profile__stat-hint--${hintTone}` : "",
   ].filter(Boolean).join(" ");
 
   return (
@@ -48,7 +53,7 @@ function StatCard({ label, value, hint, tone = "default", icon, valueVariant }) 
         <span className="wh-entity-profile__stat-label">{label}</span>
       </div>
       <span className={valueClass}>{value}</span>
-      {hint && <span className="wh-entity-profile__stat-hint">{hint}</span>}
+      {hint && <span className={hintClass}>{hint}</span>}
     </div>
   );
 }
@@ -75,39 +80,50 @@ export function ProfileHero({
     <div className={rootClass}>
       <div className="wh-entity-profile__accent" aria-hidden />
       <div className="wh-entity-profile__inner">
-        <div className={isSplit ? "wh-entity-profile__identity" : "wh-entity-profile__aside"}>
-          <div className="wh-entity-profile__title-row">
-            <h2 className="wh-entity-profile__name">{name}</h2>
-            {status && <StatusBadge status={status} />}
-          </div>
-          {subtitle && <p className="wh-entity-profile__subtitle">{subtitle}</p>}
-          {!isSplit && contact.length > 0 && (
-            <div className="wh-entity-profile__contact">
-              {contact.map((item) => (
-                <div key={item.label} className="wh-entity-profile__contact-item">
-                  <span className="wh-entity-profile__contact-icon">
-                    {CONTACT_ICONS[item.icon] || CONTACT_ICONS.user}
-                  </span>
-                  <div>
-                    <span className="wh-entity-profile__contact-label">{item.label}</span>
+        {isSplit ? (
+          <div className="wh-entity-profile__lead">
+            <div className="wh-entity-profile__identity">
+              <div className="wh-entity-profile__title-row">
+                <h2 className="wh-entity-profile__name">{name}</h2>
+                {status && <StatusBadge status={status} />}
+              </div>
+              {subtitle && <p className="wh-entity-profile__subtitle">{subtitle}</p>}
+            </div>
+            {contact.length > 0 && (
+              <div className="wh-entity-profile__contact wh-entity-profile__contact--inline">
+                {contact.map((item) => (
+                  <div key={item.label} className="wh-entity-profile__contact-item" title={item.label}>
+                    <span className="wh-entity-profile__contact-icon">
+                      {CONTACT_ICONS[item.icon] || CONTACT_ICONS.user}
+                    </span>
                     <span className="wh-entity-profile__contact-value">{item.value || "—"}</span>
                   </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {isSplit && contact.length > 0 && (
-          <div className="wh-entity-profile__contact wh-entity-profile__contact--inline">
-            {contact.map((item) => (
-              <div key={item.label} className="wh-entity-profile__contact-item" title={item.label}>
-                <span className="wh-entity-profile__contact-icon">
-                  {CONTACT_ICONS[item.icon] || CONTACT_ICONS.user}
-                </span>
-                <span className="wh-entity-profile__contact-value">{item.value || "—"}</span>
+                ))}
               </div>
-            ))}
+            )}
+          </div>
+        ) : (
+          <div className="wh-entity-profile__aside">
+            <div className="wh-entity-profile__title-row">
+              <h2 className="wh-entity-profile__name">{name}</h2>
+              {status && <StatusBadge status={status} />}
+            </div>
+            {subtitle && <p className="wh-entity-profile__subtitle">{subtitle}</p>}
+            {contact.length > 0 && (
+              <div className="wh-entity-profile__contact">
+                {contact.map((item) => (
+                  <div key={item.label} className="wh-entity-profile__contact-item">
+                    <span className="wh-entity-profile__contact-icon">
+                      {CONTACT_ICONS[item.icon] || CONTACT_ICONS.user}
+                    </span>
+                    <div>
+                      <span className="wh-entity-profile__contact-label">{item.label}</span>
+                      <span className="wh-entity-profile__contact-value">{item.value || "—"}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 

@@ -1,13 +1,22 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../../../../../context/AuthContext";
 import { useModulePermission } from "../../../../../hooks/useModulePermission";
+import { useFiscalYear } from "../../../../../context/FiscalYearContext";
 import { apiFetch, loginPortalUrl } from "../../../../../api/client";
 import { PageHeader } from "../../../../../components/PageHeader";
 import { Button } from "../../../../../components/Button";
+import { DashboardFilter } from "../../../../../components/DashboardFilter";
 import { CopyIcon, EyeIcon, EyeOffIcon } from "../../../../../components/icons";
-import { formatDateTime } from "../../../../../utils/dateTime";
+import { formatDateTime, formatDate } from "../../../../../utils/dateTime";
 import { copyToClipboard } from "../../../../../utils/copyToClipboard";
+import {
+  createThisMonthDashboardFilter,
+  filterRowsByDashboard,
+  getPreviousPeriodFilter,
+  countInDashboardFilter,
+  formatComparisonHint,
+} from "../../../../../utils/dashboardFilter";
 import {
   ProfileHero,
   EntityPanel,
@@ -15,6 +24,7 @@ import {
   TenantsIcon,
   SubscriptionIcon,
   LogsIcon,
+  SinceIcon,
 } from "../../../../../components/EntityView";
 
 const MODULE_BASE = "/app/m/admin";
@@ -55,6 +65,8 @@ export default function UserView() {
   const [credentials, setCredentials] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [dashFilter, setDashFilter] = useState(createThisMonthDashboardFilter);
+  const fiscalYearStart = useFiscalYear();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -76,6 +88,54 @@ export default function UserView() {
   }, [authFetch, userId]);
 
   useEffect(() => { load().catch(() => {}); }, [load]);
+
+  const sessions = user?.sessions || [];
+  const activities = user?.activities || [];
+
+  const sessionRows = useMemo(
+    () => sessions.filter((s) => s.login_at).map((s) => ({ created_at: s.login_at })),
+    [sessions]
+  );
+
+  const filterRows = useMemo(
+    () => [...sessionRows, ...activities],
+    [sessionRows, activities]
+  );
+
+  const prevFilter = useMemo(
+    () => getPreviousPeriodFilter(dashFilter, fiscalYearStart),
+    [dashFilter, fiscalYearStart]
+  );
+
+  const periodMetrics = useMemo(() => {
+    const logins = countInDashboardFilter(sessionRows, "created_at", dashFilter, fiscalYearStart);
+    const actions = countInDashboardFilter(activities, "created_at", dashFilter, fiscalYearStart);
+
+    let prevLogins = 0;
+    let prevActions = 0;
+    if (prevFilter) {
+      prevLogins = countInDashboardFilter(sessionRows, "created_at", prevFilter, fiscalYearStart);
+      prevActions = countInDashboardFilter(activities, "created_at", prevFilter, fiscalYearStart);
+    }
+
+    return {
+      logins,
+      actions,
+      loginsHint: formatComparisonHint(logins, prevLogins, dashFilter),
+      actionsHint: formatComparisonHint(actions, prevActions, dashFilter),
+      activityHint: formatComparisonHint(logins + actions, prevLogins + prevActions, dashFilter),
+    };
+  }, [sessionRows, activities, dashFilter, prevFilter, fiscalYearStart]);
+
+  const filteredSessions = useMemo(
+    () => filterRowsByDashboard(sessionRows, "created_at", dashFilter, fiscalYearStart),
+    [sessionRows, dashFilter, fiscalYearStart]
+  );
+
+  const filteredActivities = useMemo(
+    () => filterRowsByDashboard(activities, "created_at", dashFilter, fiscalYearStart),
+    [activities, dashFilter, fiscalYearStart]
+  );
 
   if (loading) {
     return (
@@ -114,7 +174,16 @@ export default function UserView() {
         }
       />
 
+      <DashboardFilter
+        rows={filterRows}
+        dateField="created_at"
+        value={dashFilter}
+        onChange={setDashFilter}
+      />
+
       <ProfileHero
+        className="wh-entity-profile--entity"
+        variant="split"
         name={user.name}
         subtitle={user.role_name}
         status={user.status}
@@ -123,14 +192,38 @@ export default function UserView() {
           { label: "Email", value: user.email, icon: "email" },
           { label: "Username", value: user.username, icon: "user" },
         ]}
-        highlights={[
-          { label: "Role", value: user.role_name || "—", hint: user.status === "active" ? "Active account" : "Inactive account" },
-          { label: "Last login", value: user.last_login_at ? formatDateTime(user.last_login_at) : "Never", hint: "Portal access" },
-        ]}
         kpis={[
-          { label: "Created", value: user.created_at ? formatDateTime(user.created_at) : "—", hint: "Account opened", icon: <LogsIcon /> },
-          { label: "ERP portal", value: loginPortal.toUpperCase(), hint: "Sign-in portal", tone: "accent", icon: <SubscriptionIcon /> },
-          { label: "User ID", value: String(user.id), hint: "Internal reference", icon: <TenantsIcon /> },
+          {
+            label: "Logins",
+            value: String(periodMetrics.logins),
+            hint: periodMetrics.loginsHint.text,
+            hintTone: periodMetrics.loginsHint.tone,
+            tone: "accent",
+            icon: <LogsIcon />,
+          },
+          {
+            label: "Actions",
+            value: String(periodMetrics.actions),
+            hint: periodMetrics.actionsHint.text,
+            hintTone: periodMetrics.actionsHint.tone,
+            tone: "success",
+            icon: <TenantsIcon />,
+          },
+          {
+            label: "Member since",
+            value: user.created_at ? formatDate(user.created_at) : "—",
+            hint: periodMetrics.activityHint.text,
+            hintTone: periodMetrics.activityHint.tone,
+            icon: <SinceIcon />,
+            valueVariant: "date",
+          },
+          {
+            label: "Last login",
+            value: user.last_login_at ? formatDateTime(user.last_login_at) : "Never",
+            hint: periodMetrics.loginsHint.text,
+            hintTone: periodMetrics.loginsHint.tone,
+            icon: <SubscriptionIcon />,
+          },
         ]}
       />
 
@@ -141,10 +234,28 @@ export default function UserView() {
             { label: "Username", value: credentials?.username || user.username || user.email },
             { label: "Email", value: user.email },
             { label: "Role", value: user.role_name },
+            { label: "ERP portal", value: loginPortal.toUpperCase() },
           ]}
         />
         <SensitiveField label="Password" value={credentials?.password} />
       </EntityPanel>
+
+      {filteredActivities.length > 0 && (
+        <EntityPanel title="Recent activity" subtitle="Actions by this user in the selected period" flush>
+          <div className="wh-mini-list">
+            {filteredActivities.slice(0, 12).map((a) => (
+              <div className="wh-mini-row" key={a.id}>
+                <div className="wh-mini-row__main">
+                  <div className="wh-mini-row__title">{a.action?.replace(/_/g, " ") || "Activity"}</div>
+                  <div className="wh-mini-row__sub">
+                    {[a.module_name, formatDateTime(a.created_at)].filter(Boolean).join(" · ")}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </EntityPanel>
+      )}
     </div>
   );
 }

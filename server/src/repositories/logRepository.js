@@ -35,4 +35,18 @@ export const logRepository = {
     );
     return { rows, total };
   },
+
+  async findByUser(tenantId, userId) {
+    const [rows] = await readDb.query(
+      `SELECT al.id, al.action, al.new_value, al.ip_address, al.device_info, al.created_at,
+              m.module_name, u.name AS user_name
+       FROM audit_logs al
+       LEFT JOIN modules m ON m.id = al.module_id AND m.deleted_at IS NULL
+       JOIN users u ON u.id = al.user_id AND u.deleted_at IS NULL
+       WHERE al.deleted_at IS NULL AND al.tenant_id = ? AND al.user_id = ?
+       ORDER BY al.created_at DESC`,
+      [tenantId, userId]
+    );
+    return rows;
+  },
 };

@@ -62,6 +62,17 @@ export const tenantRepository = {
     return rows[0] || null;
   },
 
+  async getOrderTimeline(tenantId) {
+    const [rows] = await readDb.query(
+      `SELECT created_at, payable_amount
+       FROM orders
+       WHERE tenant_id = ? AND deleted_at IS NULL
+       ORDER BY created_at DESC`,
+      [tenantId]
+    );
+    return rows;
+  },
+
   async getTenantModules(tenantId) {
     const [planRows] = await readDb.query(
       `SELECT m.id AS module_id, 1 AS is_enabled, m.module_name

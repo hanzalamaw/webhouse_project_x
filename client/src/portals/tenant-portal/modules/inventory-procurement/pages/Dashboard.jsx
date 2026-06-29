@@ -8,18 +8,12 @@ import { EMPTY_DASHBOARD_FILTER, filterRowsByDashboard } from "../../../../../ut
 import { useFiscalYear } from "../../../../../context/FiscalYearContext";
 import { BarChart, DonutChart, HBars, CHART_COLORS } from "../../../../../components/charts";
 import { StatusBadge } from "../../../../../components/Badge";
-import { formatPKR } from "../../../../../utils/currency";
+import { formatPKR, formatCompactPKR } from "../../../../../utils/currency";
 import { formatDateTime } from "../../../../../utils/dateTime";
 import { MOVEMENT_LABELS, MODULE_BASE } from "../constants";
 import { ProductIcon, WarehouseIcon, ProcurementIcon, LogsIcon } from "../../../../../components/icons";
 
 const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
-function compactPKR(n) {
-  if (n >= 1_000_000) return `Rs.${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `Rs.${(n / 1_000).toFixed(n % 1_000 === 0 ? 0 : 1)}k`;
-  return `Rs.${Math.round(n)}`;
-}
 
 function lastNMonths(n) {
   const out = [];
@@ -452,7 +446,7 @@ export default function InventoryDashboard() {
         <div className="wh-dash-col-4">
           <Panel title="Value by Warehouse" subtitle="Inventory value at cost">
             {warehouseValueBars.length ? (
-              <HBars data={warehouseValueBars} formatValue={compactPKR} />
+              <HBars data={warehouseValueBars} formatValue={formatCompactPKR} />
             ) : (
               <p className="wh-panel__empty">No value data.</p>
             )}

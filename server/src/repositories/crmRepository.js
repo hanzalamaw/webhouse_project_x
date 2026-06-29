@@ -306,7 +306,7 @@ export const crmRepository = {
       `SELECT id, order_no, order_status, payment_status, fulfillment_status, payable_amount, created_at
        FROM orders
        WHERE customer_id = ? AND tenant_id = ? AND deleted_at IS NULL
-       ORDER BY created_at DESC LIMIT 25`,
+       ORDER BY created_at DESC`,
       [id, tenantId]
     );
 
@@ -314,7 +314,7 @@ export const crmRepository = {
       `SELECT id, sale_no, payable_amount, payment_status, created_at
        FROM pos_sales
        WHERE crm_customers_id = ? AND tenant_id = ? AND deleted_at IS NULL
-       ORDER BY created_at DESC LIMIT 25`,
+       ORDER BY created_at DESC`,
       [id, tenantId]
     );
 

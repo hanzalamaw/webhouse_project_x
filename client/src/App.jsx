@@ -50,10 +50,18 @@ function TenantProtectedRoute({ children }) {
   return children;
 }
 
+function AuthRouteLoading() {
+  return (
+    <div className="wh-auth-route-loading">
+      <p className="wh-muted">Loading…</p>
+    </div>
+  );
+}
+
 function WhLoginGate() {
   const { user, loading } = useAuth();
   const location = useLocation();
-  if (loading) return null;
+  if (loading) return <AuthRouteLoading />;
   if (user?.portal === "wh_admin") {
     const params = new URLSearchParams(location.search);
     const redirect = params.get("redirect") || "/webhouse-portal/dashboard";
@@ -102,7 +110,7 @@ function buildTenantModuleRouteChildren(mod) {
 }
 
 const router = createBrowserRouter([
-  { path: "/", element: <Navigate to="/webhouse-portal" replace /> },
+  { path: "/", element: <WhLoginGate /> },
   { path: "/login", element: <Navigate to="/webhouse-portal" replace /> },
   { path: "/webhouse-portal", element: <WhLoginGate /> },
   { path: "/webhouse-portal/impersonate/session", element: <ImpersonationHandoff /> },
