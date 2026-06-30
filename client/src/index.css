@@ -3692,6 +3692,16 @@ button {
   border: none;
   border-radius: 0;
   box-shadow: none;
+  overflow-x: auto;
+}
+
+.wh-inv-variants-table-wrap .wh-table {
+  min-width: 0;
+}
+
+.wh-inv-variants-table {
+  width: 100%;
+  table-layout: fixed;
 }
 
 .wh-inv-variants-table .wh-inv-variants-table__check {
@@ -3699,8 +3709,14 @@ button {
   padding-left: 16px;
 }
 
+.wh-inv-variants-table .wh-inv-variants-table__variant {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .wh-inv-variants-table .wh-inv-variants-table__price {
-  width: 140px;
+  width: 120px;
 }
 
 .wh-inv-variants-table__row {
@@ -3713,9 +3729,10 @@ button {
 
 .wh-inv-variant-cell--btn {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
   width: 100%;
+  min-width: 0;
   padding: 0;
   border: none;
   background: transparent;
@@ -3781,17 +3798,26 @@ button {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  flex: 1;
   min-width: 0;
 }
 
 .wh-inv-variant-cell__name {
   font-weight: 500;
   color: var(--text-primary);
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.35;
 }
 
 .wh-inv-variant-cell__sku {
   font-size: var(--text-xs);
   color: var(--text-muted);
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.35;
 }
 
 .wh-inv-price-input-wrap {

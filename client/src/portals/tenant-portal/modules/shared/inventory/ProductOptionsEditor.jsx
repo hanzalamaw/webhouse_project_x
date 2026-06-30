@@ -674,7 +674,7 @@ export default function ProductOptionsEditor({
                           aria-label={`Select ${row.variant_name}`}
                         />
                       </td>
-                      <td>
+                      <td className="wh-inv-variants-table__variant">
                         <button
                           type="button"
                           className="wh-inv-variant-cell wh-inv-variant-cell--btn"
