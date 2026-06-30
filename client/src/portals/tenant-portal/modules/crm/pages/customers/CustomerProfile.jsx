@@ -1,12 +1,24 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../../../../../../context/AuthContext";
 import { useModulePermission } from "../../../../../../hooks/useModulePermission";
+import { useFiscalYear } from "../../../../../../context/FiscalYearContext";
 import { apiFetch, TABLE_PAGE_SIZE } from "../../../../../../api/client";
 import { PageHeader } from "../../../../../../components/PageHeader";
 import { Button } from "../../../../../../components/Button";
 import { DataTable } from "../../../../../../components/DataTable";
 import { StatusBadge } from "../../../../../../components/Badge";
+import { DashboardFilter } from "../../../../../../components/DashboardFilter";
+import {
+  createThisMonthDashboardFilter,
+  filterRowsByDashboard,
+  getPreviousPeriodFilter,
+  countInDashboardFilter,
+  sumInDashboardFilter,
+  formatComparisonHint,
+  isAllTimeDashboardFilter,
+  getEarliestDateFromSources,
+} from "../../../../../../utils/dashboardFilter";
 import {
   ProfileHero,
   EntityPanel,
@@ -21,10 +33,11 @@ import { formatPKR } from "../../../../../../utils/currency";
 import {
   MODULE_BASE,
   LEAD_SOURCE_LABELS,
-  ACTIVE_CUSTOMER_DAYS,
   ISSUE_TYPE_LABELS,
 } from "../../constants";
 import { formatCustomerType } from "../../utils/typeFields";
+
+const OPEN_COMPLAINT_STATUSES = new Set(["open", "in_progress"]);
 
 function formatLocation(addresses) {
   const list = addresses || [];
@@ -43,6 +56,8 @@ export default function CustomerProfile() {
   const [error, setError] = useState("");
   const [ordersPage, setOrdersPage] = useState(1);
   const [posPage, setPosPage] = useState(1);
+  const [dashFilter, setDashFilter] = useState(createThisMonthDashboardFilter);
+  const fiscalYearStart = useFiscalYear();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -58,6 +73,98 @@ export default function CustomerProfile() {
   }, [authFetch, customerId]);
 
   useEffect(() => { load().catch(() => {}); }, [load]);
+
+  const orders = customer?.orders || [];
+  const posSales = customer?.pos_sales || [];
+  const complaints = customer?.complaints || [];
+
+  const filterRows = useMemo(() => [...orders, ...posSales, ...complaints], [orders, posSales, complaints]);
+
+  const firstOrderAt = useMemo(
+    () => getEarliestDateFromSources([orders, posSales], "created_at"),
+    [orders, posSales]
+  );
+
+  const allTimeOrderCount = orders.length;
+  const allTimePosCount = posSales.length;
+  const allTimeTotalSpent = useMemo(
+    () =>
+      orders.reduce((sum, row) => sum + (Number(row.payable_amount) || 0), 0) +
+      posSales.reduce((sum, row) => sum + (Number(row.payable_amount) || 0), 0),
+    [orders, posSales]
+  );
+
+  const prevFilter = useMemo(
+    () => getPreviousPeriodFilter(dashFilter, fiscalYearStart),
+    [dashFilter, fiscalYearStart]
+  );
+
+  const periodMetrics = useMemo(() => {
+    const orderCount = countInDashboardFilter(orders, "created_at", dashFilter, fiscalYearStart);
+    const posCount = countInDashboardFilter(posSales, "created_at", dashFilter, fiscalYearStart);
+    const orderRevenue = sumInDashboardFilter(orders, "created_at", "payable_amount", dashFilter, fiscalYearStart);
+    const posRevenue = sumInDashboardFilter(posSales, "created_at", "payable_amount", dashFilter, fiscalYearStart);
+    const totalSpent = orderRevenue + posRevenue;
+    const complaintsInPeriod = countInDashboardFilter(complaints, "created_at", dashFilter, fiscalYearStart);
+    const transactions = orderCount + posCount;
+
+    let prevOrderCount = 0;
+    let prevTotalSpent = 0;
+    let prevComplaints = 0;
+    let prevTransactions = 0;
+
+    if (prevFilter) {
+      prevOrderCount = countInDashboardFilter(orders, "created_at", prevFilter, fiscalYearStart);
+      const prevPosCount = countInDashboardFilter(posSales, "created_at", prevFilter, fiscalYearStart);
+      prevTransactions = prevOrderCount + prevPosCount;
+      prevTotalSpent =
+        sumInDashboardFilter(orders, "created_at", "payable_amount", prevFilter, fiscalYearStart) +
+        sumInDashboardFilter(posSales, "created_at", "payable_amount", prevFilter, fiscalYearStart);
+      prevComplaints = countInDashboardFilter(complaints, "created_at", prevFilter, fiscalYearStart);
+    }
+
+    const allTime = isAllTimeDashboardFilter(dashFilter);
+    const displayOrderCount = allTime ? allTimeOrderCount : orderCount;
+    const displayTotalSpent = allTime ? allTimeTotalSpent : totalSpent;
+    const displayTransactions = allTime ? allTimeOrderCount + allTimePosCount : transactions;
+    const displayComplaintsInPeriod = allTime ? complaints.length : complaintsInPeriod;
+
+    return {
+      orderCount: displayOrderCount,
+      totalSpent: displayTotalSpent,
+      transactions: displayTransactions,
+      openComplaints: complaints.filter((c) => OPEN_COMPLAINT_STATUSES.has(c.status)).length,
+      ordersHint: formatComparisonHint(displayOrderCount, prevOrderCount, dashFilter),
+      spentHint: formatComparisonHint(displayTotalSpent, prevTotalSpent, dashFilter),
+      activityHint: formatComparisonHint(displayTransactions, prevTransactions, dashFilter),
+      complaintsHint: formatComparisonHint(displayComplaintsInPeriod, prevComplaints, dashFilter),
+    };
+  }, [
+    orders,
+    posSales,
+    complaints,
+    dashFilter,
+    prevFilter,
+    fiscalYearStart,
+    allTimeOrderCount,
+    allTimePosCount,
+    allTimeTotalSpent,
+  ]);
+
+  const filteredOrders = useMemo(
+    () => filterRowsByDashboard(orders, "created_at", dashFilter, fiscalYearStart),
+    [orders, dashFilter, fiscalYearStart]
+  );
+
+  const filteredPosSales = useMemo(
+    () => filterRowsByDashboard(posSales, "created_at", dashFilter, fiscalYearStart),
+    [posSales, dashFilter, fiscalYearStart]
+  );
+
+  useEffect(() => {
+    setOrdersPage(1);
+    setPosPage(1);
+  }, [dashFilter]);
 
   if (loading) {
     return (
@@ -76,12 +183,6 @@ export default function CustomerProfile() {
     );
   }
 
-  const stats = customer.stats || {};
-  const totalSpent = stats.total_revenue ?? 0;
-  const orderCount = stats.order_count ?? 0;
-  const orders = customer.orders || [];
-  const posSales = customer.pos_sales || [];
-  const complaints = customer.complaints || [];
   const activities = (customer.activities || []).map((a) => ({
     ...a,
     created_at: formatDateTime(a.created_at),
@@ -122,8 +223,15 @@ export default function CustomerProfile() {
         }
       />
 
+      <DashboardFilter
+        rows={filterRows}
+        dateField="created_at"
+        value={dashFilter}
+        onChange={setDashFilter}
+      />
+
       <ProfileHero
-        className="wh-entity-profile--customer"
+        className="wh-entity-profile--entity"
         variant="split"
         name={customer.customer_name}
         subtitle={[formatCustomerType(customer.customer_type), customer.company_name].filter(Boolean).join(" · ")}
@@ -136,42 +244,33 @@ export default function CustomerProfile() {
         kpis={[
           {
             label: "Total orders",
-            value: String(orderCount),
-            hint: stats.recently_active ? `Active · ${ACTIVE_CUSTOMER_DAYS}d` : "Inactive",
+            value: String(periodMetrics.orderCount),
+            hint: periodMetrics.ordersHint.text,
+            hintTone: periodMetrics.ordersHint.tone,
             tone: "accent",
             icon: <LogsIcon />,
           },
           {
             label: "Total spent",
-            value: formatPKR(totalSpent),
-            hint: `${stats.pos_sale_count ?? 0} POS sales`,
+            value: formatPKR(periodMetrics.totalSpent),
+            hint: periodMetrics.spentHint.text,
+            hintTone: periodMetrics.spentHint.tone,
             tone: "success",
             icon: <TenantsIcon />,
           },
           {
-            label: "Order revenue",
-            value: formatPKR(stats.order_revenue ?? 0),
-            hint: `${orderCount} orders`,
-            icon: <LogsIcon />,
-          },
-          {
-            label: "POS revenue",
-            value: formatPKR(stats.pos_revenue ?? 0),
-            hint: `${stats.pos_sale_count ?? 0} sales`,
-            icon: <TenantsIcon />,
-          },
-          {
             label: "Customer since",
-            value: stats.first_order_at ? formatDate(stats.first_order_at) : "—",
-            hint: stats.first_order_at ? "First order date" : "No orders yet",
+            value: firstOrderAt ? formatDate(firstOrderAt) : "—",
+            hint: firstOrderAt ? "First order" : "No orders yet",
             icon: <SinceIcon />,
             valueVariant: "date",
           },
           {
             label: "Open complaints",
-            value: stats.complaint_count ?? 0,
-            hint: "Needs attention",
-            tone: "warning",
+            value: periodMetrics.openComplaints,
+            hint: periodMetrics.complaintsHint.text,
+            hintTone: periodMetrics.complaintsHint.tone,
+            tone: periodMetrics.openComplaints > 0 ? "warning" : "default",
             icon: <SupportIcon />,
           },
         ]}
@@ -187,31 +286,31 @@ export default function CustomerProfile() {
         </div>
       )}
 
-      <EntityPanel title="Order overview" subtitle="Recent e-commerce orders for this customer" flush>
-        {orders.length ? (
+      <EntityPanel title="Order overview" subtitle="E-commerce orders for this customer in the selected period" flush>
+        {filteredOrders.length ? (
           <DataTable
             columns={orderColumns}
-            rows={orders}
+            rows={filteredOrders}
             page={ordersPage}
             pageSize={TABLE_PAGE_SIZE}
             onPageChange={setOrdersPage}
           />
         ) : (
-          <p className="wh-panel__empty">No orders linked to this customer.</p>
+          <p className="wh-panel__empty">No orders in the selected period.</p>
         )}
       </EntityPanel>
 
-      <EntityPanel title="POS sales" subtitle="In-store transactions linked to this customer" flush>
-        {posSales.length ? (
+      <EntityPanel title="POS sales" subtitle="In-store transactions for this customer in the selected period" flush>
+        {filteredPosSales.length ? (
           <DataTable
             columns={posColumns}
-            rows={posSales}
+            rows={filteredPosSales}
             page={posPage}
             pageSize={TABLE_PAGE_SIZE}
             onPageChange={setPosPage}
           />
         ) : (
-          <p className="wh-panel__empty">No POS sales linked to this customer.</p>
+          <p className="wh-panel__empty">No POS sales in the selected period.</p>
         )}
       </EntityPanel>
 

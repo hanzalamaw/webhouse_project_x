@@ -1,6 +1,7 @@
 import { tenantRepository } from "../repositories/tenantRepository.js";
 import { subscriptionRepository } from "../repositories/subscriptionRepository.js";
 import { transactionRepository } from "../repositories/transactionRepository.js";
+import { tenantUserRepository } from "../repositories/tenantUserRepository.js";
 import { decrypt } from "../utils/cipher.js";
 import { logWhAudit } from "../utils/whAudit.js";
 import { paginatedResponse, parsePagination } from "../utils/pagination.js";
@@ -153,7 +154,12 @@ export const tenantService = {
     if (!tenantFull) return null;
     const credentials = await this.getSuperAdminCredentials(id);
     const { modules, organization, payment, super_admin, ...tenant } = tenantFull;
-    return { tenant, credentials, modules: modules || [], organization, payment };
+    const [orders, payments, users] = await Promise.all([
+      tenantRepository.getOrderTimeline(id),
+      transactionRepository.findPaymentsByTenant(id),
+      tenantUserRepository.findAllByTenant(id),
+    ]);
+    return { tenant, credentials, modules: modules || [], organization, payment, orders, payments, users };
   },
 
   async remove(id, audit) {

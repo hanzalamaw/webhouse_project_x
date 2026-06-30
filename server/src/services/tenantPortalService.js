@@ -49,7 +49,13 @@ export const tenantPortalService = {
   },
 
   async getUser(tenantId, userId) {
-    return tenantUserRepository.findById(tenantId, userId);
+    const user = await tenantUserRepository.findById(tenantId, userId);
+    if (!user) return null;
+    const [sessions, activities] = await Promise.all([
+      sessionRepository.findAllByUser(tenantId, userId),
+      logRepository.findByUser(tenantId, userId),
+    ]);
+    return { ...user, sessions, activities };
   },
 
   async createUser(req, body) {

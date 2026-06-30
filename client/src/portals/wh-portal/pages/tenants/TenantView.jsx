@@ -1,20 +1,31 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../../../../context/AuthContext";
+import { useFiscalYear } from "../../../../context/FiscalYearContext";
 import { apiFetch, loginPortalUrl } from "../../../../api/client";
 import { PageHeader } from "../../../../components/PageHeader";
 import { Button } from "../../../../components/Button";
+import { DashboardFilter } from "../../../../components/DashboardFilter";
 import { CopyIcon, EyeIcon, EyeOffIcon } from "../../../../components/icons";
 import { formatPKR } from "../../../../utils/currency";
+import { formatDate } from "../../../../utils/dateTime";
 import { copyToClipboard } from "../../../../utils/copyToClipboard";
+import {
+  createThisMonthDashboardFilter,
+  getPreviousPeriodFilter,
+  countInDashboardFilter,
+  sumInDashboardFilter,
+  formatComparisonHint,
+  isAllTimeDashboardFilter,
+} from "../../../../utils/dashboardFilter";
 import {
   ProfileHero,
   EntityPanel,
   EntityDetailGrid,
   TenantsIcon,
   SubscriptionIcon,
-  ProductIcon,
   LogsIcon,
+  SinceIcon,
 } from "../../../../components/EntityView";
 
 const MASK = "••••••••";
@@ -52,6 +63,8 @@ export default function TenantView() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [dashFilter, setDashFilter] = useState(createThisMonthDashboardFilter);
+  const fiscalYearStart = useFiscalYear();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -67,6 +80,66 @@ export default function TenantView() {
   }, [authFetch, tenantId]);
 
   useEffect(() => { load().catch(() => {}); }, [load]);
+
+  const orders = data?.orders || [];
+  const payments = data?.payments || [];
+  const team = data?.users || [];
+
+  const paymentRows = useMemo(
+    () =>
+      payments
+        .filter((p) => p.received_at)
+        .map((p) => ({ created_at: p.received_at, total_received: p.total_received })),
+    [payments]
+  );
+
+  const allTimeOrderTotal = orders.length;
+  const allTimePaymentTotal = useMemo(
+    () => paymentRows.reduce((sum, row) => sum + (Number(row.total_received) || 0), 0),
+    [paymentRows]
+  );
+
+  const filterRows = useMemo(
+    () => [...orders, ...paymentRows, ...team],
+    [orders, paymentRows, team]
+  );
+
+  const prevFilter = useMemo(
+    () => getPreviousPeriodFilter(dashFilter, fiscalYearStart),
+    [dashFilter, fiscalYearStart]
+  );
+
+  const periodMetrics = useMemo(() => {
+    const orderCount = countInDashboardFilter(orders, "created_at", dashFilter, fiscalYearStart);
+    const paymentTotal = sumInDashboardFilter(paymentRows, "created_at", "total_received", dashFilter, fiscalYearStart);
+    const newUsers = countInDashboardFilter(team, "created_at", dashFilter, fiscalYearStart);
+
+    let prevOrders = 0;
+    let prevPayments = 0;
+    let prevUsers = 0;
+    if (prevFilter) {
+      prevOrders = countInDashboardFilter(orders, "created_at", prevFilter, fiscalYearStart);
+      prevPayments = sumInDashboardFilter(paymentRows, "created_at", "total_received", prevFilter, fiscalYearStart);
+      prevUsers = countInDashboardFilter(team, "created_at", prevFilter, fiscalYearStart);
+    }
+
+    const allTime = isAllTimeDashboardFilter(dashFilter);
+    const tenant = data?.tenant;
+    const displayOrders = allTime ? allTimeOrderTotal : orderCount;
+    const displayPayments = allTime ? allTimePaymentTotal : paymentTotal;
+    const displayUsers = tenant?.user_count ?? team.length;
+    const usersCompared = allTime ? team.length : newUsers;
+
+    return {
+      orders: displayOrders,
+      payments: displayPayments,
+      users: displayUsers,
+      ordersHint: formatComparisonHint(displayOrders, prevOrders, dashFilter),
+      paymentsHint: formatComparisonHint(displayPayments, prevPayments, dashFilter),
+      usersHint: formatComparisonHint(usersCompared, prevUsers, dashFilter),
+      activityHint: formatComparisonHint(displayOrders, prevOrders, dashFilter),
+    };
+  }, [orders, paymentRows, team, dashFilter, prevFilter, fiscalYearStart, data?.tenant, allTimeOrderTotal, allTimePaymentTotal]);
 
   if (loading) {
     return (
@@ -89,6 +162,7 @@ export default function TenantView() {
   const loginPortal = tenant.login_portal || credentials?.login_portal;
   const loginLink = loginPortal ? loginPortalUrl(loginPortal) : "—";
   const moduleNames = modules.map((m) => m.module_name || m.name).filter(Boolean).join(", ") || "—";
+  const maxOrders = tenant.max_orders_per_month ?? "∞";
 
   return (
     <div className="wh-page wh-page--wide wh-entity-view">
@@ -103,7 +177,16 @@ export default function TenantView() {
         }
       />
 
+      <DashboardFilter
+        rows={filterRows}
+        dateField="created_at"
+        value={dashFilter}
+        onChange={setDashFilter}
+      />
+
       <ProfileHero
+        className="wh-entity-profile--entity"
+        variant="split"
         name={tenant.company_name}
         subtitle={[tenant.plan_name, tenant.industry].filter(Boolean).join(" · ")}
         status={tenant.status}
@@ -112,29 +195,38 @@ export default function TenantView() {
           { label: "Phone", value: tenant.owner_phone, icon: "phone" },
           { label: "Email", value: tenant.owner_email, icon: "email" },
         ]}
-        highlights={[
-          {
-            label: "Users",
-            value: `${tenant.user_count ?? 0}/${tenant.max_users ?? "∞"}`,
-            hint: "Active / limit",
-          },
-          {
-            label: "Monthly total",
-            value: tenant.total_amount != null ? formatPKR(tenant.total_amount) : "—",
-            hint: tenant.amount_due != null ? `${formatPKR(tenant.amount_due)} due` : undefined,
-          },
-        ]}
         kpis={[
-          { label: "Stores", value: `${tenant.store_count ?? 0}/${tenant.max_stores ?? "∞"}`, hint: "Active / limit", icon: <TenantsIcon /> },
-          { label: "Warehouses", value: `${tenant.warehouse_count ?? 0}/${tenant.max_warehouses ?? "∞"}`, hint: "Active / limit", icon: <ProductIcon /> },
           {
-            label: "Orders this month",
-            value: `${tenant.orders_this_month ?? 0}/${tenant.max_orders_per_month ?? "∞"}`,
-            hint: "Usage / limit",
+            label: "Orders",
+            value: `${periodMetrics.orders}/${maxOrders}`,
+            hint: periodMetrics.ordersHint.text,
+            hintTone: periodMetrics.ordersHint.tone,
             tone: "accent",
             icon: <LogsIcon />,
           },
-          { label: "Billing cycle", value: tenant.billing_cycle || "—", hint: loginPortal?.toUpperCase() || "ERP portal", tone: "success", icon: <SubscriptionIcon /> },
+          {
+            label: "Payments",
+            value: formatPKR(periodMetrics.payments),
+            hint: periodMetrics.paymentsHint.text,
+            hintTone: periodMetrics.paymentsHint.tone,
+            tone: "success",
+            icon: <SubscriptionIcon />,
+          },
+          {
+            label: "Tenant since",
+            value: tenant.created_at ? formatDate(tenant.created_at) : "—",
+            hint: periodMetrics.activityHint.text,
+            hintTone: periodMetrics.activityHint.tone,
+            icon: <SinceIcon />,
+            valueVariant: "date",
+          },
+          {
+            label: "Users",
+            value: `${periodMetrics.users}/${tenant.max_users ?? "∞"}`,
+            hint: periodMetrics.usersHint.text,
+            hintTone: periodMetrics.usersHint.tone,
+            icon: <TenantsIcon />,
+          },
         ]}
       />
 
@@ -158,6 +250,8 @@ export default function TenantView() {
                 { label: "Billing cycle", value: tenant.billing_cycle },
                 { label: "ERP portal", value: loginPortal?.toUpperCase() },
                 { label: "Amount due", value: tenant.amount_due != null ? formatPKR(tenant.amount_due) : "—" },
+                { label: "Stores", value: `${tenant.store_count ?? 0}/${tenant.max_stores ?? "∞"}` },
+                { label: "Warehouses", value: `${tenant.warehouse_count ?? 0}/${tenant.max_warehouses ?? "∞"}` },
               ]}
             />
             <div className="wh-entity-detail-grid__item wh-entity-detail-grid__item--full">
@@ -175,6 +269,7 @@ export default function TenantView() {
             { label: "Max stores", value: tenant.max_stores },
             { label: "Max warehouses", value: tenant.max_warehouses },
             { label: "Orders / month", value: tenant.max_orders_per_month },
+            { label: "Monthly total", value: tenant.total_amount != null ? formatPKR(tenant.total_amount) : "—" },
             ...(organization?.fiscal_year_start
               ? [{ label: "Fiscal year start", value: organization.fiscal_year_start }]
               : []),

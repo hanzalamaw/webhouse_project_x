@@ -79,6 +79,18 @@ export const sessionRepository = {
     return result.affectedRows;
   },
 
+  async findAllByUser(tenantId, userId) {
+    const [rows] = await readDb.query(
+      `SELECT id, ip_address, device_info, login_at, logout_at,
+              CAST(is_active AS UNSIGNED) AS is_active
+       FROM sessions
+       WHERE user_id = ? AND tenant_id = ? AND deleted_at IS NULL
+       ORDER BY login_at DESC`,
+      [userId, tenantId]
+    );
+    return rows;
+  },
+
   async findByTenant(tenantId, { limit, offset, activeOnly = false }) {
     const activeClause = activeOnly ? `AND ${ACTIVE_WHERE}` : "";
     const baseFrom = `

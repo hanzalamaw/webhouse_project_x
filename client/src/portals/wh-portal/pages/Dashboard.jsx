@@ -4,7 +4,7 @@ import { fetchAllTableRows } from "../../../api/client";
 import { PageHeader } from "../../../components/PageHeader";
 import { BarChart, DonutChart, HBars } from "../../../components/charts";
 import { StatusBadge } from "../../../components/Badge";
-import { formatPKR } from "../../../utils/currency";
+import { formatPKR, formatCompactPKR } from "../../../utils/currency";
 import { formatDate } from "../../../utils/dateTime";
 import { DashboardFilter } from "../../../components/DashboardFilter";
 import { EMPTY_DASHBOARD_FILTER, filterRowsByDashboard } from "../../../utils/dashboardFilter";
@@ -17,12 +17,6 @@ import {
 } from "../../../components/icons";
 
 const MONTH_LABELS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
-function compactPKR(n) {
-  if (n >= 1_000_000) return `Rs.${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `Rs.${(n / 1_000).toFixed(n % 1_000 === 0 ? 0 : 1)}k`;
-  return `Rs.${Math.round(n)}`;
-}
 
 function lastNMonths(n) {
   const out = [];
@@ -294,7 +288,7 @@ export default function Dashboard() {
       <div className="wh-dash-grid">
         <div className="wh-dash-col-8">
           <Panel title="Revenue" subtitle="Payments received over the last 6 months">
-            <BarChart data={revenueSeries} formatValue={compactPKR} />
+            <BarChart data={revenueSeries} formatValue={formatCompactPKR} />
           </Panel>
         </div>
         <div className="wh-dash-col-4">
