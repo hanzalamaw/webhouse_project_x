@@ -94,28 +94,6 @@ async function ensureCategory(tenantId, categoryId) {
   return cat;
 }
 
-async function ensureUniqueCategoryName(tenantId, categoryName, excludeId = null) {
-  const existing = await inventoryRepository.findCategoryByName(tenantId, categoryName, excludeId);
-  if (existing) throw new Error("A category with this name already exists");
-}
-
-async function resolveCategoryId(tenantId, body) {
-  const category_name = String(body.category_name || "").trim();
-  if (category_name) {
-    const cat = await inventoryRepository.findCategoryByName(tenantId, category_name);
-    if (!cat) throw new Error(`Category not found: "${category_name}"`);
-    return cat.id;
-  }
-  const legacyId = body.category_id;
-  if (legacyId !== undefined && legacyId !== null && String(legacyId).trim() !== "") {
-    const category_id = Number(legacyId);
-    if (!category_id) throw new Error("Invalid category");
-    await ensureCategory(tenantId, category_id);
-    return category_id;
-  }
-  throw new Error("Category name is required");
-}
-
 async function ensureProduct(tenantId, productId) {
   const product = await inventoryRepository.getProductById(tenantId, productId);
   if (!product) throw new Error("Product not found");
@@ -135,50 +113,6 @@ async function applyStockDelta(tenantId, productId, warehouseId, deltaAvailable,
     throw new Error("Insufficient available stock");
   }
   return inventoryRepository.upsertStockLevel(tenantId, productId, warehouseId, deltaAvailable, deltaDamaged);
-}
-
-function parseCreateWarehouseStocks(body) {
-  if (Array.isArray(body.warehouse_stocks) && body.warehouse_stocks.length) {
-    const stocks = body.warehouse_stocks.map((entry, i) => {
-      const label = `warehouse entry ${i + 1}`;
-      const warehouse_id = Number(entry.warehouse_id);
-      if (!warehouse_id) throw new Error(`Select a warehouse for ${label}`);
-      const initial_qty = assertNonNegativeInt(entry.initial_qty ?? entry.available_qty ?? 0, `Available quantity for ${label}`);
-      const reserved_qty = assertNonNegativeInt(entry.reserved_qty ?? 0, `Reserved quantity for ${label}`);
-      const damaged_qty = assertNonNegativeInt(entry.damaged_qty ?? 0, `Damaged quantity for ${label}`);
-      return {
-        warehouse_id,
-        initial_qty,
-        reserved_qty,
-        damaged_qty,
-        stock_notes: entry.stock_notes ? String(entry.stock_notes).trim() : null,
-      };
-    });
-    const ids = stocks.map((s) => s.warehouse_id);
-    if (new Set(ids).size !== ids.length) {
-      throw new Error("Each warehouse can only be selected once");
-    }
-    return stocks;
-  }
-
-  const initial_qty = assertNonNegativeInt(body.initial_qty ?? 0, "Initial quantity");
-  const warehouse_id = body.warehouse_id ? Number(body.warehouse_id) : null;
-  const damaged_qty = assertNonNegativeInt(body.damaged_qty ?? 0, "Damaged quantity");
-  const reserved_qty = assertNonNegativeInt(body.reserved_qty ?? 0, "Reserved quantity");
-
-  if (initial_qty > 0 && !warehouse_id) {
-    throw new Error("Warehouse is required when setting initial stock");
-  }
-  if (!warehouse_id) return [];
-  if (initial_qty === 0 && damaged_qty === 0 && reserved_qty === 0) return [];
-
-  return [{
-    warehouse_id,
-    initial_qty,
-    reserved_qty,
-    damaged_qty,
-    stock_notes: body.stock_notes ? String(body.stock_notes).trim() : null,
-  }];
 }
 
 export const inventoryService = {
@@ -241,7 +175,6 @@ export const inventoryService = {
     if (!category_name) throw new Error("Category name is required");
     const status = body.status || "active";
     assertStatus(status);
-    await ensureUniqueCategoryName(tenantId, category_name);
 
     const id = await inventoryRepository.createCategory(tenantId, { category_name, status });
     if (Array.isArray(body.product_ids) && body.product_ids.length) {
@@ -258,7 +191,6 @@ export const inventoryService = {
     if (!category_name) throw new Error("Category name is required");
     const status = body.status ?? existing.status;
     assertStatus(status);
-    await ensureUniqueCategoryName(tenantId, category_name, id);
 
     await inventoryRepository.updateCategory(tenantId, id, { category_name, status });
     if (Array.isArray(body.product_ids)) {
@@ -291,7 +223,9 @@ export const inventoryService = {
     if (!product_name) throw new Error("Product name is required");
     if (!sku) throw new Error("SKU is required");
 
-    const category_id = await resolveCategoryId(tenantId, body);
+    const category_id = Number(body.category_id);
+    if (!category_id) throw new Error("Category is required");
+    await ensureCategory(tenantId, category_id);
 
     const duplicate = await inventoryRepository.findProductBySku(tenantId, sku);
     if (duplicate) throw new Error("SKU already exists");
@@ -300,11 +234,16 @@ export const inventoryService = {
     assertStatus(status);
     const unit = String(body.unit || "piece").trim();
     const pricing = parsePricingFields(body);
-    const warehouseStocks = parseCreateWarehouseStocks(body);
 
-    for (const stock of warehouseStocks) {
-      await ensureWarehouse(tenantId, stock.warehouse_id);
+    const initial_qty = assertNonNegativeInt(body.initial_qty ?? 0, "Initial quantity");
+    const warehouse_id = body.warehouse_id ? Number(body.warehouse_id) : null;
+    const damaged_qty = assertNonNegativeInt(body.damaged_qty ?? 0, "Damaged quantity");
+    const reserved_qty = assertNonNegativeInt(body.reserved_qty ?? 0, "Reserved quantity");
+
+    if (initial_qty > 0 && !warehouse_id) {
+      throw new Error("Warehouse is required when setting initial stock");
     }
+    if (warehouse_id) await ensureWarehouse(tenantId, warehouse_id);
 
     return withTransaction(async () => {
       const productId = await inventoryRepository.createProduct(tenantId, {
@@ -316,22 +255,20 @@ export const inventoryService = {
         category_id,
       });
 
-      for (const stock of warehouseStocks) {
-        if (stock.initial_qty > 0 || stock.damaged_qty > 0 || stock.reserved_qty > 0) {
-          await inventoryRepository.setStockLevelAbsolute(tenantId, productId, stock.warehouse_id, {
-            available_qty: stock.initial_qty,
-            reserved_qty: stock.reserved_qty,
-            damaged_qty: stock.damaged_qty,
+      if (warehouse_id && (initial_qty > 0 || damaged_qty > 0 || reserved_qty > 0)) {
+        await inventoryRepository.setStockLevelAbsolute(tenantId, productId, warehouse_id, {
+          available_qty: initial_qty,
+          reserved_qty,
+          damaged_qty,
+        });
+        if (initial_qty > 0) {
+          await inventoryRepository.createMovement(tenantId, userId, {
+            movement_type: "initial_stock",
+            qty: initial_qty,
+            notes: body.stock_notes || "Initial stock on product creation",
+            product_id: productId,
+            warehouse_id,
           });
-          if (stock.initial_qty > 0) {
-            await inventoryRepository.createMovement(tenantId, userId, {
-              movement_type: "initial_stock",
-              qty: stock.initial_qty,
-              notes: stock.stock_notes || "Initial stock on product creation",
-              product_id: productId,
-              warehouse_id: stock.warehouse_id,
-            });
-          }
         }
       }
 
@@ -368,22 +305,6 @@ export const inventoryService = {
       category_id,
     });
 
-    if (Array.isArray(body.stock_levels) && body.stock_levels.length) {
-      for (const level of body.stock_levels) {
-        const warehouse_id = Number(level.warehouse_id);
-        if (!warehouse_id) continue;
-        await ensureWarehouse(tenantId, warehouse_id);
-        const reserved_qty = assertNonNegativeInt(level.reserved_qty ?? 0, "Reserved quantity");
-        const damaged_qty = assertNonNegativeInt(level.damaged_qty ?? 0, "Damaged quantity");
-        const existingLevel = await inventoryRepository.getStockLevel(tenantId, id, warehouse_id);
-        await inventoryRepository.setStockLevelAbsolute(tenantId, id, warehouse_id, {
-          available_qty: existingLevel?.available_qty ?? 0,
-          reserved_qty,
-          damaged_qty,
-        });
-      }
-    }
-
     return this.getProduct(tenantId, id);
   },
 
@@ -417,18 +338,7 @@ export const inventoryService = {
   async listWarehouses(tenantId, query) {
     const { page, limit, offset } = parsePagination(query);
     const { rows, total } = await inventoryRepository.listWarehouses(tenantId, { limit, offset });
-    const limits = await this.getWarehouseLimits(tenantId);
-    return { ...paginatedResponse(rows, total, page, limit), limits };
-  },
-
-  async getWarehouseLimits(tenantId) {
-    const max_warehouses = await inventoryRepository.getTenantWarehouseLimit(tenantId);
-    const warehouse_count = await inventoryRepository.countWarehouses(tenantId);
-    return {
-      max_warehouses,
-      warehouse_count,
-      can_create: max_warehouses <= 0 || warehouse_count < max_warehouses,
-    };
+    return paginatedResponse(rows, total, page, limit);
   },
 
   async getWarehouse(tenantId, id) {
@@ -436,12 +346,6 @@ export const inventoryService = {
   },
 
   async createWarehouse(tenantId, body) {
-    const limits = await this.getWarehouseLimits(tenantId);
-    if (!limits.can_create) {
-      throw new Error(
-        `Warehouse limit reached (${limits.warehouse_count}/${limits.max_warehouses}). Contact your administrator to increase the limit.`
-      );
-    }
     const warehouse_name = String(body.warehouse_name || "").trim();
     if (!warehouse_name) throw new Error("Warehouse name is required");
     const status = body.status || "active";
