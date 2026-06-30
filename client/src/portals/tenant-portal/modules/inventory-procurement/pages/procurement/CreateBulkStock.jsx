@@ -51,7 +51,7 @@ export default function CreateBulkStock() {
   const operation = resolveOperation(pathname);
   const config = CONFIG[operation];
   const { authFetch } = useAuth();
-  const { products, warehouses } = useInventoryReference();
+  const { variants, warehouses } = useInventoryReference();
 
   const [selectedIds, setSelectedIds] = useState([]);
   const [productSearch, setProductSearch] = useState("");
@@ -71,9 +71,9 @@ export default function CreateBulkStock() {
     [warehouses]
   );
 
-  const selectedProducts = useMemo(
-    () => products.filter((p) => selectedIds.includes(String(p.id))),
-    [products, selectedIds]
+  const selectedVariants = useMemo(
+    () => variants.filter((v) => selectedIds.includes(String(v.id))),
+    [variants, selectedIds]
   );
 
   const toggleProduct = (id) => {
@@ -97,7 +97,7 @@ export default function CreateBulkStock() {
   };
 
   const buildPayload = () => {
-    const items = selectedIds.map((id) => ({ product_id: Number(id) }));
+    const items = selectedIds.map((id) => ({ variant_id: Number(id) }));
     const base = {
       same_qty_for_all: sameQtyForAll,
       items,
@@ -108,7 +108,7 @@ export default function CreateBulkStock() {
       base.notes = sharedNotes || null;
     } else {
       base.items = selectedIds.map((id) => ({
-        product_id: Number(id),
+        variant_id: Number(id),
         qty: Number(lineDetails[id]?.qty || 0),
         notes: lineDetails[id]?.notes || null,
       }));
@@ -176,9 +176,9 @@ export default function CreateBulkStock() {
         />
 
         <form onSubmit={handleSubmit} className="wh-form-stack">
-        <FormBlock title="Select products" description="Choose one or more products for this operation.">
+        <FormBlock title="Select variants" description="Choose one or more product variants (SKUs) for this operation.">
           <ProductPicker
-            products={products}
+            variants={variants}
             selectedIds={selectedIds}
             onToggle={toggleProduct}
             search={productSearch}
@@ -241,30 +241,30 @@ export default function CreateBulkStock() {
             </div>
           ) : (
             <div className="wh-inv-line-items">
-              {selectedProducts.length === 0 ? (
-                <p className="wh-muted">Select products above to enter individual quantities.</p>
+              {selectedVariants.length === 0 ? (
+                <p className="wh-muted">Select variants above to enter individual quantities.</p>
               ) : (
-                selectedProducts.map((p) => (
-                  <div key={p.id} className="wh-inv-line-item">
+                selectedVariants.map((v) => (
+                  <div key={v.id} className="wh-inv-line-item">
                     <div className="wh-inv-line-item__head">
-                      <strong>{p.product_name}</strong>
-                      <span className="wh-muted">{p.sku}</span>
+                      <strong>{v.product_name}{v.variant_name && v.variant_name !== v.product_name ? ` — ${v.variant_name}` : ""}</strong>
+                      <span className="wh-muted">{v.sku}</span>
                     </div>
                     <div className="wh-form-grid">
                       <FormField
-                        id={`qty_${p.id}`}
+                        id={`qty_${v.id}`}
                         label="Quantity"
                         type="number"
                         min="1"
-                        value={lineDetails[String(p.id)]?.qty || ""}
-                        onChange={(e) => setLine(p.id, "qty", e.target.value)}
+                        value={lineDetails[String(v.id)]?.qty || ""}
+                        onChange={(e) => setLine(v.id, "qty", e.target.value)}
                         required
                       />
                       <FormField
-                        id={`notes_${p.id}`}
+                        id={`notes_${v.id}`}
                         label="Notes"
-                        value={lineDetails[String(p.id)]?.notes || ""}
-                        onChange={(e) => setLine(p.id, "notes", e.target.value)}
+                        value={lineDetails[String(v.id)]?.notes || ""}
+                        onChange={(e) => setLine(v.id, "notes", e.target.value)}
                       />
                     </div>
                   </div>

@@ -18,10 +18,7 @@ import {
   touchLastSynced,
   getStoreById,
 } from "../../repositories/ecommerceRepository.js";
-import {
-  importNormalizedProduct,
-  importAllSyncedProductsForStore,
-} from "./ecomImport.js";
+import { maybeUpdateLinkedProduct } from "./ecomImport.js";
 
 const runningSyncs = new Set();
 
@@ -50,9 +47,9 @@ export async function persistEntity(storeId, tenantId, entityType, raw, source) 
       ? `${raw.inventory_item_id}-${raw.location_id}`
       : String(raw.id);
   const normalized = normalizeEntity(entityType, raw);
-  await upsertSyncedRecord(storeId, tenantId, entityType, externalId, raw, normalized, source);
+  await upsertSyncedRecord(storeId, tenantId, entityType, externalId, raw, normalized, source, "shopify");
   if (entityType === "product") {
-    await importNormalizedProduct(tenantId, normalized, { storeId });
+    await maybeUpdateLinkedProduct(tenantId, storeId, normalized);
   }
   await touchLastSynced(storeId);
 }
@@ -234,13 +231,11 @@ export async function runInitialFullSync(storeId) {
       });
     }
 
-    await importAllSyncedProductsForStore(storeId, store.tenant_id);
-
     await updateInitialSyncStatus(storeId, "completed");
     await addSyncLog(storeId, store.tenant_id, {
       syncType: "initial_sync",
       status: "completed",
-      message: "Initial full sync completed — webhooks will keep DB in sync",
+      message: "Store data fetched — review and import into your ERP when ready",
     });
   } catch (error) {
     await updateInitialSyncStatus(storeId, "failed");

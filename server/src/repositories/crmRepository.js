@@ -388,8 +388,8 @@ export const crmRepository = {
     const tags = serializeTags(data.tags);
     const [result] = await writeDb.query(
       `INSERT INTO crm_customers
-         (customer_name, company_name, customer_type, tags, phone, email, status, note, tenant_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (customer_name, company_name, customer_type, tags, phone, email, status, source, note, tenant_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         data.customer_name,
         data.company_name || null,
@@ -398,6 +398,7 @@ export const crmRepository = {
         data.phone || null,
         data.email || null,
         data.status || "active",
+        data.source || "manual",
         data.note || null,
         tenantId,
       ]
@@ -415,11 +416,11 @@ export const crmRepository = {
     const sql = data.tags != null
       ? `UPDATE crm_customers SET
            customer_name = ?, company_name = ?, customer_type = ?, tags = ?,
-           phone = ?, email = ?, status = ?, note = ?
+           phone = ?, email = ?, status = ?, source = COALESCE(?, source), note = ?
          WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL`
       : `UPDATE crm_customers SET
            customer_name = ?, company_name = ?, customer_type = ?,
-           phone = ?, email = ?, status = ?, note = ?
+           phone = ?, email = ?, status = ?, source = COALESCE(?, source), note = ?
          WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL`;
     const params = data.tags != null
       ? [
@@ -430,6 +431,7 @@ export const crmRepository = {
           data.phone || null,
           data.email || null,
           data.status || "active",
+          data.source ?? null,
           data.note || null,
           id,
           tenantId,
@@ -441,6 +443,7 @@ export const crmRepository = {
           data.phone || null,
           data.email || null,
           data.status || "active",
+          data.source ?? null,
           data.note || null,
           id,
           tenantId,

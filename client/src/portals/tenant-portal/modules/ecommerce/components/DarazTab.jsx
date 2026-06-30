@@ -11,7 +11,7 @@ const DARAZ_STEPS = [
   "Click Connect Daraz — you will be redirected to Daraz.",
   "Sign in with your seller account.",
   "Authorize the connection.",
-  "Your orders, products, and customers will sync automatically.",
+  "We fetch your data first, then you choose what to import into your ERP.",
 ];
 
 export default function DarazTab() {
@@ -37,7 +37,7 @@ export default function DarazTab() {
       window.history.replaceState({}, "", window.location.pathname);
     }
     if (params.get("daraz_connected")) {
-      setNotice("Store connected. We are syncing your data now.");
+      setNotice("Store connected. We are fetching your data — you will review before anything is added to your ERP.");
       window.history.replaceState({}, "", window.location.pathname);
     }
     loadSyncStatus();
@@ -73,10 +73,13 @@ export default function DarazTab() {
     setTimeout(loadSyncStatus, 1500);
   };
 
-  const handleDisconnect = async () => {
-    await ecomApiPostEmpty("daraz", "oauth/disconnect", authFetch);
+  const handleDisconnect = () => {
     setConnection(null);
     setNotice("");
+  };
+
+  const handleImported = () => {
+    loadSyncStatus();
   };
 
   if (connected) {
@@ -89,10 +92,16 @@ export default function DarazTab() {
           storeName={connection.storeName}
           storeSubtitle={connection.apiBase}
           syncStatus={connection.initialSyncStatus}
+          erpImportStatus={connection.erpImportStatus}
           lastSyncedAt={connection.lastSyncedAt}
           counts={counts}
+          pendingImportCount={connection.pendingImportCount}
+          pendingConflictCount={connection.pendingConflictCount}
+          connection={connection}
+          authFetch={authFetch}
           onDisconnect={handleDisconnect}
           onRetrySync={handleRetrySync}
+          onImported={handleImported}
           showRetry={connection.initialSyncStatus === "failed"}
         />
       </>
@@ -103,7 +112,7 @@ export default function DarazTab() {
     <Card>
       <h3 className="wh-card__title">Connect your Daraz store</h3>
       <p className="wh-muted" style={{ margin: "0.35rem 0 1.25rem" }}>
-        Link your Daraz seller account to import orders, products, and customers into your ERP.
+        Link your Daraz seller account to fetch orders, products, and customers. You review and approve what gets added to your ERP.
       </p>
 
       {notice && <p className="wh-form-message" style={{ marginBottom: "1rem" }}>{notice}</p>}

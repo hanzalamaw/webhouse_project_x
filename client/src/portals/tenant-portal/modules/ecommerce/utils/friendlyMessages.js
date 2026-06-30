@@ -13,6 +13,13 @@ export function friendlyConnectError(message) {
 export const SYNC_STATUS_USER = {
   pending: "Waiting to sync",
   running: "Syncing your store…",
-  completed: "Sync complete",
+  completed: "Data fetched — review import",
   failed: "Sync interrupted",
+};
+
+export const ERP_IMPORT_STATUS_USER = {
+  pending: "Not imported yet",
+  in_progress: "Importing…",
+  partial: "Partially imported",
+  completed: "Imported to ERP",
 };

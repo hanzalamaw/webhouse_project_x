@@ -15,23 +15,16 @@ import {
   getStoreById,
   getStoreByShop,
   getStoreByPlatform,
-  disconnectStore,
   getSyncedRecords,
   getEntityCounts,
-  getSyncLogs,
-  getPendingOrderConflicts,
-  countPendingOrderConflicts,
-  resolveOrderConflict,
 } from "../repositories/ecommerceRepository.js";
 import { onAppInstalled, retryPostInstall } from "../services/ecommerce/shopifySync.js";
 import { verifyStoreApiAccess, getRequiredScopes } from "../services/ecommerce/shopifyAccess.js";
-import {
-  ensureInventoryProductsImported,
-  importAllSyncedProductsForStore,
-} from "../services/ecommerce/ecomImport.js";
+import { createEcomSharedHandlers } from "./ecomSharedHandlers.js";
 
 const router = Router();
 const SESSION_COOKIE = "shopify_oauth_session";
+const shared = createEcomSharedHandlers("shopify");
 
 async function getStoreFromRequest(req) {
   if (req.tenantId) {
@@ -227,12 +220,25 @@ router.get("/oauth/session", async (req, res) => {
 
 router.post("/oauth/disconnect", async (req, res) => {
   const store = await getStoreFromRequest(req);
-  if (store) {
-    await disconnectStore(store.id);
-  }
-  await deleteSession(req.cookies?.[SESSION_COOKIE]);
-  res.clearCookie(SESSION_COOKIE);
-  res.json({ success: true });
+  await shared.handleDisconnect(req, res, store, async (req) => {
+    await deleteSession(req.cookies?.[SESSION_COOKIE]);
+    res.clearCookie(SESSION_COOKIE);
+  });
+});
+
+router.get("/oauth/disconnect-preview", async (req, res) => {
+  const store = await getStoreFromRequest(req);
+  await shared.handleDisconnectPreview(req, res, store);
+});
+
+router.get("/sync/import-preview", async (req, res) => {
+  const store = await getStoreFromRequest(req);
+  await shared.handleImportPreview(req, res, store);
+});
+
+router.post("/sync/import", async (req, res) => {
+  const store = await getStoreFromRequest(req);
+  await shared.handleImport(req, res, store);
 });
 
 router.get("/sync/status", async (req, res) => {
@@ -241,13 +247,8 @@ router.get("/sync/status", async (req, res) => {
     return res.json({ connected: false });
   }
 
-  if (store.initial_sync_status === "completed") {
-    ensureInventoryProductsImported(store.id, store.tenant_id).catch((err) =>
-      console.error("Shopify inventory import:", err),
-    );
-  }
-
   const access = await verifyStoreApiAccess(store);
+  const importExtras = await shared.handleSyncStatusExtras(store);
 
   res.json({
     connected: true,
@@ -266,28 +267,18 @@ router.get("/sync/status", async (req, res) => {
     webhooksRegistered: Boolean(store.webhooks_registered),
     lastSyncedAt: store.last_synced_at,
     counts: await getEntityCounts(store.id),
-    pendingConflictCount: await countPendingOrderConflicts(store.id),
+    ...importExtras,
   });
 });
 
 router.get("/sync/conflicts", async (req, res) => {
   const store = await getStoreFromRequest(req);
-  if (!store) return res.status(401).json({ success: false, error: "Not connected" });
-  const conflicts = await getPendingOrderConflicts(store.id);
-  res.json({ success: true, conflicts });
+  await shared.handleConflicts(req, res, store);
 });
 
 router.post("/sync/conflicts/:externalId/resolve", async (req, res) => {
   const store = await getStoreFromRequest(req);
-  if (!store) return res.status(401).json({ success: false, error: "Not connected" });
-  const action = req.body?.action === "update" ? "update" : "keep";
-  const ok = await resolveOrderConflict(store.id, req.params.externalId, action);
-  if (!ok) return res.status(404).json({ success: false, error: "Conflict not found" });
-  res.json({
-    success: true,
-    counts: await getEntityCounts(store.id),
-    pendingConflictCount: await countPendingOrderConflicts(store.id),
-  });
+  await shared.handleResolveConflict(req, res, store);
 });
 
 router.post("/sync/retry", async (req, res) => {
@@ -303,8 +294,13 @@ router.post("/sync/retry", async (req, res) => {
 router.post("/sync/import-inventory", async (req, res) => {
   const store = await getStoreFromRequest(req);
   if (!store) return res.status(401).json({ success: false, error: "Not connected" });
-  const result = await importAllSyncedProductsForStore(store.id, store.tenant_id);
-  res.json({ success: true, ...result });
+  req.body = { entities: ["product"], ...(req.body || {}) };
+  await shared.handleImport(req, res, store);
+});
+
+router.get("/sync/logs", async (req, res) => {
+  const store = await getStoreFromRequest(req);
+  await shared.handleSyncLogs(req, res, store);
 });
 
 router.get("/db/:entityType", async (req, res) => {
@@ -333,14 +329,6 @@ router.get("/db/:entityType", async (req, res) => {
     normalized: records.map((r) => r.normalized),
     counts: await getEntityCounts(store.id),
   });
-});
-
-router.get("/sync/logs", async (req, res) => {
-  const store = await getStoreFromRequest(req);
-  if (!store) {
-    return res.json({ logs: [] });
-  }
-  res.json({ logs: await getSyncLogs(store.id, 150) });
 });
 
 router.post("/connect", async (req, res) => {

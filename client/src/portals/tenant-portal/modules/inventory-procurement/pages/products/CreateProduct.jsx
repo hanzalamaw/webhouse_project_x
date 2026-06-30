@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../../../../../../context/AuthContext";
 import { apiFetch } from "../../../../../../api/client";
@@ -10,46 +10,76 @@ import { useInventoryReference } from "../../hooks/useInventoryReference";
 import { FormBlock } from "../../../../../../components/FormBlock";
 import { FormPageLayout, FormActions } from "../../../../../../components/FormPageLayout";
 import CreateCategoryModal from "../../components/CreateCategoryModal";
+import ProductOptionsEditor, {
+  makeDefaultOptions,
+  mapOptionsFromApi,
+  mapVariantRowsFromApi,
+} from "../../../shared/inventory/ProductOptionsEditor";
 import { PRODUCT_STATUS, PRODUCT_UNITS, MODULE_BASE } from "../../constants";
-import { formatTotalPrice } from "../../utils/pricing";
 
 const INITIAL = {
   product_name: "",
-  sku: "",
+  sku_prefix: "",
   unit: "piece",
   status: "active",
-  cost_price: "",
-  selling_price: "",
+  default_cost_price: "",
+  default_selling_price: "",
   delivery_charges: "0",
   discount: "0",
   tax: "0",
   category_id: "",
 };
 
-function emptyWarehouseEntry(key) {
-  return {
-    _key: key,
-    warehouse_id: "",
-    initial_qty: "0",
-    reserved_qty: "0",
-    damaged_qty: "0",
-    stock_notes: "",
-  };
-}
-
 function mapProductToForm(product) {
+  const variants = product.variants || [];
+  const first = variants[0];
   return {
     product_name: product.product_name || "",
-    sku: product.sku || "",
+    sku_prefix: "",
     unit: product.unit || "piece",
     status: product.status || "active",
-    cost_price: product.cost_price ?? "",
-    selling_price: product.selling_price ?? "",
+    default_cost_price: first?.cost_price ?? "",
+    default_selling_price: first?.selling_price ?? "",
     delivery_charges: product.delivery_charges ?? "0",
     discount: product.discount ?? "0",
     tax: product.tax ?? "0",
     category_id: product.category_id ? String(product.category_id) : "",
   };
+}
+
+function buildVariantRowPayload(row, isEdit) {
+  const attributes = Object.entries(row.combo || {}).map(([attribute_name, value]) => ({
+    attribute_name,
+    value,
+  }));
+  const base = {
+    ...(row.id ? { id: row.id } : {}),
+    combo_key: row.combo_key,
+    sku: row.sku.trim(),
+    variant_name: row.variant_name.trim(),
+    cost_price: Number(row.cost_price),
+    selling_price: Number(row.selling_price),
+    status: row.status,
+    attributes,
+  };
+  if (isEdit) {
+    base.stock_levels = (row.stock_levels || []).map((sl) => ({
+      warehouse_id: sl.warehouse_id,
+      reserved_qty: Number(sl.reserved_qty) || 0,
+      damaged_qty: Number(sl.damaged_qty) || 0,
+    }));
+  } else {
+    base.warehouse_stocks = (row.warehouse_stocks || [])
+      .filter((r) => r.warehouse_id)
+      .map((r) => ({
+        warehouse_id: Number(r.warehouse_id),
+        initial_qty: Number(r.initial_qty) || 0,
+        reserved_qty: Number(r.reserved_qty) || 0,
+        damaged_qty: Number(r.damaged_qty) || 0,
+        stock_notes: r.stock_notes || null,
+      }));
+  }
+  return base;
 }
 
 export default function CreateProduct() {
@@ -59,16 +89,8 @@ export default function CreateProduct() {
   const { authFetch } = useAuth();
   const { categories, warehouses, loading: refLoading, reload } = useInventoryReference();
   const [form, setForm] = useState(INITIAL);
-  const [stockLevels, setStockLevels] = useState([]);
-  const warehouseKeyRef = useRef(0);
-  const makeWarehouseEntry = useCallback(() => {
-    warehouseKeyRef.current += 1;
-    return emptyWarehouseEntry(`wh-${warehouseKeyRef.current}`);
-  }, []);
-  const [warehouseStocks, setWarehouseStocks] = useState(() => {
-    warehouseKeyRef.current = 1;
-    return [emptyWarehouseEntry("wh-1")];
-  });
+  const [options, setOptions] = useState(() => makeDefaultOptions());
+  const [variantRows, setVariantRows] = useState([]);
   const [loadingProduct, setLoadingProduct] = useState(isEdit);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -86,82 +108,44 @@ export default function CreateProduct() {
     [warehouses]
   );
 
-
   useEffect(() => {
     if (!isEdit) return;
     setLoadingProduct(true);
     apiFetch(`/inventory/products/${productId}`, {}, authFetch)
       .then((data) => {
-        setStockLevels(data.stock_levels || []);
         setForm(mapProductToForm(data));
+        setOptions(data.options?.length ? data.options.map((o, i) => ({
+          _key: `o-${i}`,
+          attribute_name: o.attribute_name,
+          values: o.values || [],
+          valueInput: "",
+        })) : mapOptionsFromApi(data.variants || []));
+        setVariantRows(mapVariantRowsFromApi(data.variants || []));
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoadingProduct(false));
   }, [isEdit, productId, authFetch]);
 
-  const setStockLevel = (warehouseId, field, value) => {
-    setStockLevels((levels) =>
-      levels.map((sl) =>
-        String(sl.warehouse_id) === String(warehouseId) ? { ...sl, [field]: value } : sl
-      )
-    );
-  };
-
-  const updateWarehouseStock = (key, field, value) => {
-    setWarehouseStocks((rows) =>
-      rows.map((row) => (row._key === key ? { ...row, [field]: value } : row))
-    );
-  };
-
-  const addWarehouseStock = () => {
-    setWarehouseStocks((rows) => [...rows, makeWarehouseEntry()]);
-  };
-
-  const removeWarehouseStock = (key) => {
-    setWarehouseStocks((rows) => (rows.length <= 1 ? rows : rows.filter((row) => row._key !== key)));
-  };
-
-  const warehouseOptionsFor = (currentKey) => {
-    const used = new Set(
-      warehouseStocks
-        .filter((row) => row._key !== currentKey && row.warehouse_id)
-        .map((row) => row.warehouse_id)
-    );
-    return warehouseOptions.filter((opt) => !used.has(opt.value));
-  };
-
-  const canAddWarehouse = warehouseStocks.length < warehouses.length;
-
   const validate = () => {
     if (!form.product_name.trim()) return "Product name is required";
-    if (!form.sku.trim()) return "SKU is required";
-    if (form.cost_price === "" || Number(form.cost_price) < 0) return "Valid cost price is required";
-    if (form.selling_price === "" || Number(form.selling_price) < 0) return "Valid selling price is required";
     if (!form.category_id) return "Category is required";
-    if (!isEdit) {
-      const filled = warehouseStocks.filter((row) => row.warehouse_id);
-      const ids = filled.map((row) => row.warehouse_id);
-      if (new Set(ids).size !== ids.length) return "Each warehouse can only be selected once";
-      for (const row of filled) {
-        const available = Number(row.initial_qty);
-        const reserved = Number(row.reserved_qty);
-        const damaged = Number(row.damaged_qty);
-        if (!Number.isInteger(available) || available < 0) return "Available quantity must be a non-negative whole number";
-        if (!Number.isInteger(reserved) || reserved < 0) return "Reserved quantity must be a non-negative whole number";
-        if (!Number.isInteger(damaged) || damaged < 0) return "Damaged quantity must be a non-negative whole number";
-        if (available > 0 && !row.warehouse_id) return "Select a warehouse when setting available quantity";
+    if (!variantRows.length) return "At least one variant is required";
+
+    for (const opt of options) {
+      if (opt.attribute_name.trim() && !opt.values.length) {
+        return `Add at least one value for attribute "${opt.attribute_name}"`;
       }
-      const partial = warehouseStocks.filter((row) => !row.warehouse_id && (
-        Number(row.initial_qty) > 0 || Number(row.reserved_qty) > 0 || Number(row.damaged_qty) > 0
-      ));
-      if (partial.length) return "Select a warehouse for each stock entry with quantities";
-    } else {
-      for (const sl of stockLevels) {
-        const reserved = Number(sl.reserved_qty);
-        const damaged = Number(sl.damaged_qty);
-        if (!Number.isInteger(reserved) || reserved < 0) return `Invalid reserved quantity for ${sl.warehouse_name}`;
-        if (!Number.isInteger(damaged) || damaged < 0) return `Invalid damaged quantity for ${sl.warehouse_name}`;
-      }
+    }
+
+    const skus = new Set();
+    for (let i = 0; i < variantRows.length; i++) {
+      const v = variantRows[i];
+      const label = v.variant_name || `Variant ${i + 1}`;
+      if (!v.sku.trim()) return `SKU is required for ${label}`;
+      if (skus.has(v.sku.trim())) return `Duplicate SKU: ${v.sku}`;
+      skus.add(v.sku.trim());
+      if (v.cost_price === "" || Number(v.cost_price) < 0) return `Valid cost price is required for ${label}`;
+      if (v.selling_price === "" || Number(v.selling_price) < 0) return `Valid selling price is required for ${label}`;
     }
     return "";
   };
@@ -179,54 +163,26 @@ export default function CreateProduct() {
     try {
       const payload = {
         product_name: form.product_name,
-        sku: form.sku,
+        sku_prefix: form.sku_prefix.trim() || undefined,
         unit: form.unit,
         status: form.status,
         category_id: Number(form.category_id),
-        cost_price: Number(form.cost_price),
-        selling_price: Number(form.selling_price),
         delivery_charges: Number(form.delivery_charges) || 0,
         discount: Number(form.discount) || 0,
         tax: Number(form.tax) || 0,
+        default_cost_price: form.default_cost_price !== "" ? Number(form.default_cost_price) : undefined,
+        default_selling_price: form.default_selling_price !== "" ? Number(form.default_selling_price) : undefined,
+        options: options
+          .filter((o) => o.attribute_name.trim() && o.values.length)
+          .map((o) => ({ attribute_name: o.attribute_name.trim(), values: o.values })),
+        variants: variantRows.map((row) => buildVariantRowPayload(row, isEdit)),
       };
 
       if (isEdit) {
-        await apiFetch(
-          `/inventory/products/${productId}`,
-          {
-            method: "PUT",
-            body: JSON.stringify({
-              ...payload,
-              stock_levels: stockLevels.map((sl) => ({
-                warehouse_id: sl.warehouse_id,
-                reserved_qty: Number(sl.reserved_qty) || 0,
-                damaged_qty: Number(sl.damaged_qty) || 0,
-              })),
-            }),
-          },
-          authFetch
-        );
+        await apiFetch(`/inventory/products/${productId}`, { method: "PUT", body: JSON.stringify(payload) }, authFetch);
         setMessage("Product updated successfully.");
       } else {
-        await apiFetch(
-          "/inventory/products",
-          {
-            method: "POST",
-            body: JSON.stringify({
-              ...payload,
-              warehouse_stocks: warehouseStocks
-                .filter((row) => row.warehouse_id)
-                .map((row) => ({
-                  warehouse_id: Number(row.warehouse_id),
-                  initial_qty: Number(row.initial_qty) || 0,
-                  reserved_qty: Number(row.reserved_qty) || 0,
-                  damaged_qty: Number(row.damaged_qty) || 0,
-                  stock_notes: row.stock_notes || null,
-                })),
-            }),
-          },
-          authFetch
-        );
+        await apiFetch("/inventory/products", { method: "POST", body: JSON.stringify(payload) }, authFetch);
         setMessage("Product created successfully.");
         await reload();
       }
@@ -253,7 +209,7 @@ export default function CreateProduct() {
       <FormPageLayout>
         <PageHeader
           title={isEdit ? "Edit Product" : "Create New Product"}
-          description={isEdit ? "Update product details and save changes." : "Add a product with category, pricing, warehouse, and initial stock."}
+          description="Define attributes and values — variants are generated automatically (e.g. Color × Size)."
           actions={
             <Button variant="secondary" onClick={() => navigate(`${MODULE_BASE}/products/manage`)}>
               Manage Products
@@ -262,210 +218,90 @@ export default function CreateProduct() {
         />
 
         <form onSubmit={handleSubmit} className="wh-form-stack">
-        <FormBlock title="Basic information" description="Name, SKU, unit, and status for this product.">
-          <div className="wh-form-grid">
-            <FormField id="product_name" label="Product name" value={form.product_name} onChange={(e) => set("product_name", e.target.value)} required />
-            <FormField id="sku" label="SKU" value={form.sku} onChange={(e) => set("sku", e.target.value)} required />
-            <FormField id="unit" label="Unit" as="select" value={form.unit} onChange={(e) => set("unit", e.target.value)}>
-              {PRODUCT_UNITS.map((u) => (
-                <option key={u} value={u}>{u}</option>
-              ))}
-            </FormField>
-            <FormField id="status" label="Status" as="select" value={form.status} onChange={(e) => set("status", e.target.value)}>
-              {PRODUCT_STATUS.map((s) => (
-                <option key={s} value={s}>{s}</option>
-              ))}
-            </FormField>
-          </div>
-        </FormBlock>
-
-        <FormBlock title="Pricing" description="Cost, selling price, delivery, discount, tax, and calculated total.">
-          <div className="wh-form-grid">
-            <FormField id="cost_price" label="Cost price (PKR)" type="number" min="0" step="0.01" value={form.cost_price} onChange={(e) => set("cost_price", e.target.value)} required />
-            <FormField id="selling_price" label="Selling price (PKR)" type="number" min="0" step="0.01" value={form.selling_price} onChange={(e) => set("selling_price", e.target.value)} required />
-            <FormField id="delivery_charges" label="Delivery charges (PKR)" type="number" min="0" step="0.01" value={form.delivery_charges} onChange={(e) => set("delivery_charges", e.target.value)} />
-            <FormField id="discount" label="Discount (PKR)" type="number" min="0" step="0.01" value={form.discount} onChange={(e) => set("discount", e.target.value)} />
-            <FormField id="tax" label="Tax (PKR)" type="number" min="0" step="0.01" value={form.tax} onChange={(e) => set("tax", e.target.value)} />
-            <FormField
-              id="total_price"
-              label="Total price (PKR)"
-              value={formatTotalPrice(form.selling_price, form.discount, form.tax)}
-              displayOnly
-            />
-          </div>
-          <p className="wh-form-block__desc">Total = (Selling price − Discount) + Tax. Delivery charges are stored separately.</p>
-        </FormBlock>
-
-        <FormBlock title="Category" description="Assign this product to a category.">
-          {refLoading ? (
-            <p className="wh-muted">Loading categories…</p>
-          ) : (
-            <div className={categoryOptions.length === 0 ? "wh-form-grid" : "wh-form-grid wh-form-grid--field-action"}>
-              {categoryOptions.length === 0 ? (
-                <p className="wh-field__error wh-form-grid__full">No categories yet. Create one to continue.</p>
-              ) : (
-                <SearchableSelect
-                  id="category_id"
-                  label="Category"
-                  options={categoryOptions}
-                  value={form.category_id}
-                  onChange={(v) => set("category_id", v)}
-                  placeholder="Search categories…"
-                />
-              )}
-              <div className={categoryOptions.length === 0 ? "wh-form-grid__actions" : "wh-form-grid--field-action__btn"}>
-                <Button type="button" variant="secondary" onClick={() => setCreateCategoryOpen(true)}>
-                  New category
-                </Button>
-              </div>
+          <FormBlock title="Basic information" description="Product name, unit, and SKU prefix for auto-generated variant SKUs.">
+            <div className="wh-form-grid">
+              <FormField id="product_name" label="Product name" value={form.product_name} onChange={(e) => set("product_name", e.target.value)} required />
+              <FormField id="sku_prefix" label="SKU prefix" value={form.sku_prefix} onChange={(e) => set("sku_prefix", e.target.value)} placeholder="e.g. TS" />
+              <FormField id="unit" label="Unit" as="select" value={form.unit} onChange={(e) => set("unit", e.target.value)}>
+                {PRODUCT_UNITS.map((u) => (<option key={u} value={u}>{u}</option>))}
+              </FormField>
+              <FormField id="status" label="Status" as="select" value={form.status} onChange={(e) => set("status", e.target.value)}>
+                {PRODUCT_STATUS.map((s) => (<option key={s} value={s}>{s}</option>))}
+              </FormField>
             </div>
-          )}
-        </FormBlock>
+          </FormBlock>
 
-        {!isEdit ? (
-          <FormBlock title="Inventory & warehouses" description="Set initial stock in one or more warehouses. Each entry creates stock level and initial stock movement records where applicable.">
-            {warehouseOptions.length === 0 ? (
+          <FormBlock title="Default variant pricing" description="Applied to new generated variants. Override per variant below.">
+            <div className="wh-form-grid">
+              <FormField id="default_cost_price" label="Default cost price (PKR)" type="number" min="0" step="0.01" value={form.default_cost_price} onChange={(e) => set("default_cost_price", e.target.value)} />
+              <FormField id="default_selling_price" label="Default selling price (PKR)" type="number" min="0" step="0.01" value={form.default_selling_price} onChange={(e) => set("default_selling_price", e.target.value)} />
+            </div>
+          </FormBlock>
+
+          <FormBlock title="Product pricing" description="Delivery, discount, and tax at product level.">
+            <div className="wh-form-grid">
+              <FormField id="delivery_charges" label="Delivery charges (PKR)" type="number" min="0" step="0.01" value={form.delivery_charges} onChange={(e) => set("delivery_charges", e.target.value)} />
+              <FormField id="discount" label="Discount (PKR)" type="number" min="0" step="0.01" value={form.discount} onChange={(e) => set("discount", e.target.value)} />
+              <FormField id="tax" label="Tax (PKR)" type="number" min="0" step="0.01" value={form.tax} onChange={(e) => set("tax", e.target.value)} />
+            </div>
+          </FormBlock>
+
+          <FormBlock title="Category" description="Assign this product to a category.">
+            {refLoading ? (
+              <p className="wh-muted">Loading categories…</p>
+            ) : (
+              <div className={categoryOptions.length === 0 ? "wh-form-grid" : "wh-form-grid wh-form-grid--field-action"}>
+                {categoryOptions.length === 0 ? (
+                  <p className="wh-field__error wh-form-grid__full">No categories yet. Create one to continue.</p>
+                ) : (
+                  <SearchableSelect id="category_id" label="Category" options={categoryOptions} value={form.category_id} onChange={(v) => set("category_id", v)} placeholder="Search categories…" />
+                )}
+                <div className={categoryOptions.length === 0 ? "wh-form-grid__actions" : "wh-form-grid--field-action__btn"}>
+                  <Button type="button" variant="secondary" onClick={() => setCreateCategoryOpen(true)}>New category</Button>
+                </div>
+              </div>
+            )}
+          </FormBlock>
+
+          <FormBlock title="Options & variants" description="Add options and values (like Shopify). Variants are generated automatically — set price and stock per row.">
+            {warehouseOptions.length === 0 && !isEdit ? (
               <p className="wh-field__error">No warehouses found. Create a warehouse first to set initial stock.</p>
             ) : (
-              <>
-                <div className="wh-inv-line-items">
-                  {warehouseStocks.map((row, index) => (
-                    <div key={row._key} className="wh-inv-line-item">
-                      <div className="wh-inv-line-item__head">
-                        <strong>Warehouse {index + 1}</strong>
-                        {warehouseStocks.length > 1 && (
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            className="wh-btn--sm"
-                            onClick={() => removeWarehouseStock(row._key)}
-                          >
-                            Remove
-                          </Button>
-                        )}
-                      </div>
-                      <SearchableSelect
-                        id={`warehouse_${row._key}`}
-                        label="Warehouse"
-                        options={warehouseOptionsFor(row._key)}
-                        value={row.warehouse_id}
-                        onChange={(v) => updateWarehouseStock(row._key, "warehouse_id", v)}
-                        placeholder="Select warehouse…"
-                      />
-                      <div className="wh-form-grid">
-                        <FormField
-                          id={`initial_qty_${row._key}`}
-                          label="Available quantity"
-                          type="number"
-                          min="0"
-                          step="1"
-                          value={row.initial_qty}
-                          onChange={(e) => updateWarehouseStock(row._key, "initial_qty", e.target.value)}
-                        />
-                        <FormField
-                          id={`reserved_qty_${row._key}`}
-                          label="Reserved quantity"
-                          type="number"
-                          min="0"
-                          step="1"
-                          value={row.reserved_qty}
-                          onChange={(e) => updateWarehouseStock(row._key, "reserved_qty", e.target.value)}
-                        />
-                        <FormField
-                          id={`damaged_qty_${row._key}`}
-                          label="Damaged quantity"
-                          type="number"
-                          min="0"
-                          step="1"
-                          value={row.damaged_qty}
-                          onChange={(e) => updateWarehouseStock(row._key, "damaged_qty", e.target.value)}
-                        />
-                      </div>
-                      <FormField
-                        id={`stock_notes_${row._key}`}
-                        label="Stock notes"
-                        as="textarea"
-                        rows={2}
-                        value={row.stock_notes}
-                        onChange={(e) => updateWarehouseStock(row._key, "stock_notes", e.target.value)}
-                        placeholder="Notes for the initial stock movement record"
-                      />
-                    </div>
-                  ))}
-                </div>
-                {canAddWarehouse && (
-                  <div className="wh-inv-warehouse-add">
-                    <Button type="button" variant="secondary" onClick={addWarehouseStock}>
-                      Add warehouse
-                    </Button>
-                  </div>
-                )}
-              </>
+              <ProductOptionsEditor
+                options={options}
+                onOptionsChange={setOptions}
+                variantRows={variantRows}
+                onVariantRowsChange={setVariantRows}
+                productName={form.product_name}
+                skuPrefix={form.sku_prefix}
+                defaultCostPrice={form.default_cost_price}
+                defaultSellingPrice={form.default_selling_price}
+                statusOptions={PRODUCT_STATUS}
+                isEdit={isEdit}
+                warehouseOptions={warehouseOptions}
+                showWarehouseStock={!isEdit && warehouseOptions.length > 0}
+              />
             )}
           </FormBlock>
-        ) : (
-          <FormBlock title="Stock levels" description="Reserved and damaged quantities by warehouse. Use Stock In / Stock Out to change available quantity.">
-            {stockLevels.length === 0 ? (
-              <p className="wh-muted">No stock recorded for this product yet.</p>
-            ) : (
-              <div className="wh-inv-line-items">
-                {stockLevels.map((sl) => (
-                  <div key={sl.id} className="wh-inv-line-item">
-                    <div className="wh-inv-line-item__head">
-                      <strong>{sl.warehouse_name}</strong>
-                      <span className="wh-muted">
-                        Available: {sl.available_qty} · Total: {sl.total_qty}
-                      </span>
-                    </div>
-                    <div className="wh-form-grid">
-                      <FormField
-                        id={`reserved_${sl.warehouse_id}`}
-                        label="Reserved quantity"
-                        type="number"
-                        min="0"
-                        step="1"
-                        value={sl.reserved_qty ?? 0}
-                        onChange={(e) => setStockLevel(sl.warehouse_id, "reserved_qty", e.target.value)}
-                      />
-                      <FormField
-                        id={`damaged_${sl.warehouse_id}`}
-                        label="Damaged quantity"
-                        type="number"
-                        min="0"
-                        step="1"
-                        value={sl.damaged_qty ?? 0}
-                        onChange={(e) => setStockLevel(sl.warehouse_id, "damaged_qty", e.target.value)}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </FormBlock>
-        )}
 
-        {error && <p className="wh-field__error">{error}</p>}
-        {message && <p className="wh-form-message">{message}</p>}
+          {error && <p className="wh-field__error">{error}</p>}
+          {message && <p className="wh-form-message">{message}</p>}
 
-        <FormActions>
-          <Button type="button" variant="secondary" onClick={() => navigate(`${MODULE_BASE}/products/manage`)}>
-            Cancel
-          </Button>
-          <Button type="submit" disabled={submitting}>
-            {submitting ? "Saving…" : isEdit ? "Save Product" : "Create Product"}
-          </Button>
-        </FormActions>
+          <FormActions>
+            <Button type="button" variant="secondary" onClick={() => navigate(`${MODULE_BASE}/products/manage`)}>Cancel</Button>
+            <Button type="submit" disabled={submitting}>{submitting ? "Saving…" : isEdit ? "Save Product" : "Create Product"}</Button>
+          </FormActions>
         </form>
 
         <CreateCategoryModal
-        open={createCategoryOpen}
-        onClose={() => setCreateCategoryOpen(false)}
-        authFetch={authFetch}
-        onCreated={async (category) => {
-          await reload();
-          if (category?.id) set("category_id", String(category.id));
-        }}
-      />
+          open={createCategoryOpen}
+          onClose={() => setCreateCategoryOpen(false)}
+          authFetch={authFetch}
+          onCreated={async (category) => {
+            await reload();
+            if (category?.id) set("category_id", String(category.id));
+          }}
+        />
       </FormPageLayout>
     </div>
   );

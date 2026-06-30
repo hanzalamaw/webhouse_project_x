@@ -4,7 +4,7 @@ import { apiFetch } from "../../../../../api/client";
 
 export function useInventoryReference() {
   const { authFetch } = useAuth();
-  const [data, setData] = useState({ categories: [], warehouses: [], products: [] });
+  const [data, setData] = useState({ categories: [], warehouses: [], products: [], variants: [] });
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
@@ -13,7 +13,7 @@ export function useInventoryReference() {
       const ref = await apiFetch("/inventory/reference", {}, authFetch);
       setData(ref);
     } catch {
-      setData({ categories: [], warehouses: [], products: [] });
+      setData({ categories: [], warehouses: [], products: [], variants: [] });
     } finally {
       setLoading(false);
     }

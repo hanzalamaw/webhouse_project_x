@@ -16,6 +16,19 @@ import { formatPKR } from "../../../../../../utils/currency";
 import { formatTotalPrice } from "../../utils/pricing";
 import { MODULE_BASE } from "../../constants";
 
+function formatPriceRange(min, max, formatter = formatPKR) {
+  if (min == null && max == null) return "—";
+  if (Number(min) === Number(max)) return formatter(min);
+  return `${formatter(min)} – ${formatter(max)}`;
+}
+
+function formatTotalPriceRange(minSelling, maxSelling, discount, tax) {
+  const minTotal = formatTotalPrice(minSelling, discount, tax);
+  const maxTotal = formatTotalPrice(maxSelling, discount, tax);
+  if (minTotal === maxTotal) return minTotal;
+  return `${minTotal} – ${maxTotal}`;
+}
+
 const TOOLBAR_FILTERS = [
   { key: "status", label: "Status" },
   { key: "category_name", label: "Category" },
@@ -68,18 +81,24 @@ export default function ManageProducts() {
 
   const columns = [
     { key: "product_name", label: "Product" },
-    { key: "sku", label: "SKU" },
+    { key: "skus", label: "SKUs", format: (v) => v || "—" },
+    { key: "variant_count", label: "Variants", filter: false },
     { key: "outlet_name", label: "Store", format: (v) => v || "—" },
     { key: "category_name", label: "Category", format: (v) => v || "—" },
     { key: "unit", label: "Unit" },
-    { key: "selling_price", label: "Selling", format: (v) => formatPKR(v) },
+    {
+      key: "min_selling_price",
+      label: "Selling",
+      filter: false,
+      format: (_, r) => formatPriceRange(r.min_selling_price, r.max_selling_price),
+    },
     { key: "discount", label: "Discount", format: (v) => formatPKR(v) },
     { key: "tax", label: "Tax", format: (v) => formatPKR(v) },
     {
       key: "total_price",
       label: "Total",
       filter: false,
-      format: (_, r) => formatTotalPrice(r.selling_price, r.discount, r.tax),
+      format: (_, r) => formatTotalPriceRange(r.min_selling_price, r.max_selling_price, r.discount, r.tax),
     },
     { key: "total_available", label: "Available", filter: false },
     { key: "total_reserved", label: "Reserved", filter: false },

@@ -1,6 +1,11 @@
 import { getPool } from "../database/db.js";
 import { posInventoryRepository } from "../repositories/posInventoryRepository.js";
 import { parsePagination, paginatedResponse } from "../utils/pagination.js";
+import {
+  resolveVariantsFromBody,
+  reconstructOptionsFromVariants,
+  variantComboKey,
+} from "../utils/productVariants.js";
 
 const STATUS_VALUES = ["active", "inactive"];
 const TRANSFER_STATUSES = ["pending", "completed", "cancelled"];
@@ -27,10 +32,15 @@ function assertPrice(value, label) {
   return n;
 }
 
-function parsePricingFields(body, existing = {}) {
+function parseVariantPricing(body, existing = {}) {
   return {
     cost_price: assertPrice(body.cost_price ?? existing.cost_price ?? 0, "Cost price"),
     selling_price: assertPrice(body.selling_price ?? existing.selling_price ?? 0, "Selling price"),
+  };
+}
+
+function parseProductPricing(body, existing = {}) {
+  return {
     delivery_charges: 0,
     discount: assertPrice(body.discount ?? existing.discount ?? 0, "Discount"),
     tax: assertPrice(body.tax ?? existing.tax ?? 0, "Tax"),
@@ -39,22 +49,111 @@ function parsePricingFields(body, existing = {}) {
 
 function normalizeBulkQtyItems(body, label = "item") {
   const items = body.items;
-  if (!Array.isArray(items) || !items.length) throw new Error("Select at least one product");
+  if (!Array.isArray(items) || !items.length) throw new Error("Select at least one variant");
   const sameQty = Boolean(body.same_qty_for_all);
   if (sameQty) {
     const qty = assertPositiveInt(body.qty, "Quantity");
     const notes = body.notes || null;
     return items.map((item) => ({
-      product_id: Number(item.product_id),
+      variant_id: Number(item.variant_id || item.product_id),
       qty,
       notes,
     }));
   }
   return items.map((item, i) => ({
-    product_id: Number(item.product_id),
+    variant_id: Number(item.variant_id || item.product_id),
     qty: assertPositiveInt(item.qty, `Quantity for ${label} ${i + 1}`),
     notes: item.notes || null,
   }));
+}
+
+async function persistPosVariantRow(tenantId, userId, productId, outletId, v) {
+  const sku = String(v.sku || "").trim();
+  const variant_name = String(v.variant_name || "").trim();
+  if (!sku) throw new Error("Each generated variant requires a SKU");
+  if (!variant_name) throw new Error("Each generated variant requires a name");
+  const vStatus = v.status || "active";
+  assertStatus(vStatus);
+  const pricing = {
+    cost_price: assertPrice(v.cost_price ?? 0, "Cost price"),
+    selling_price: assertPrice(v.selling_price ?? 0, "Selling price"),
+  };
+
+  let variantId;
+  if (v.id) {
+    const dup = await posInventoryRepository.findVariantBySku(tenantId, outletId, sku, Number(v.id));
+    if (dup) throw new Error(`SKU already exists for this store: ${sku}`);
+    await posInventoryRepository.updateVariant(tenantId, Number(v.id), {
+      sku,
+      variant_name,
+      ...pricing,
+      status: vStatus,
+    });
+    variantId = Number(v.id);
+  } else {
+    const dup = await posInventoryRepository.findVariantBySku(tenantId, outletId, sku);
+    if (dup) throw new Error(`SKU already exists for this store: ${sku}`);
+    variantId = await posInventoryRepository.createVariant(tenantId, {
+      product_id: productId,
+      outlet_id: outletId,
+      sku,
+      variant_name,
+      ...pricing,
+      status: vStatus,
+    });
+  }
+
+  await posInventoryRepository.setVariantAttributes(tenantId, variantId, v.attributes || []);
+
+  const outletStocks = v.outlet_stocks?.length
+    ? v.outlet_stocks
+    : v.warehouse_stocks?.length
+      ? v.warehouse_stocks
+      : [];
+
+  if (Array.isArray(v.stock_levels) && v.stock_levels.length) {
+    for (const sl of v.stock_levels) {
+      const oid = Number(sl.outlet_id ?? sl.warehouse_id ?? outletId);
+      if (!oid) continue;
+      await ensureOutlet(tenantId, oid);
+      await posInventoryRepository.setStockLevelAbsolute(tenantId, variantId, oid, {
+        available_qty: sl.available_qty ?? 0,
+        reserved_qty: sl.reserved_qty ?? 0,
+        damaged_qty: sl.damaged_qty ?? 0,
+      });
+    }
+  } else if (outletStocks.length) {
+    await applyVariantOutletStocks(tenantId, userId, variantId, outletStocks, outletId);
+  }
+
+  return variantId;
+}
+
+async function syncPosProductVariants(tenantId, userId, productId, outletId, body, productName) {
+  const { variants } = resolveVariantsFromBody(body, productName);
+  const existing = await posInventoryRepository.getVariantsByProductId(tenantId, productId);
+  const existingByKey = new Map();
+  for (const v of existing) {
+    existingByKey.set(variantComboKey(v.attributes), v);
+  }
+
+  const seenKeys = new Set();
+  for (const v of variants) {
+    const key = v.combo_key || variantComboKey(v.attributes);
+    seenKeys.add(key);
+    const match = existingByKey.get(key);
+    await persistPosVariantRow(tenantId, userId, productId, outletId, {
+      ...v,
+      id: v.id || match?.id || null,
+    });
+  }
+
+  for (const v of existing) {
+    const key = variantComboKey(v.attributes);
+    if (!seenKeys.has(key)) {
+      await posInventoryRepository.softDeleteVariant(tenantId, v.id);
+    }
+  }
 }
 
 function parseCreateOutletStocks(body, outletId) {
@@ -65,7 +164,10 @@ function parseCreateOutletStocks(body, outletId) {
       const entryOutletId = Number(entry.warehouse_id ?? entry.outlet_id);
       if (!entryOutletId) throw new Error(`Select a store for ${label}`);
       if (entryOutletId !== outlet_id) throw new Error("Stock store must match the product store");
-      const initial_qty = assertNonNegativeInt(entry.initial_qty ?? entry.available_qty ?? 0, `Available quantity for ${label}`);
+      const initial_qty = assertNonNegativeInt(
+        entry.initial_qty ?? entry.available_qty ?? 0,
+        `Available quantity for ${label}`
+      );
       const reserved_qty = assertNonNegativeInt(entry.reserved_qty ?? 0, `Reserved quantity for ${label}`);
       const damaged_qty = assertNonNegativeInt(entry.damaged_qty ?? 0, `Damaged quantity for ${label}`);
       return {
@@ -83,13 +185,15 @@ function parseCreateOutletStocks(body, outletId) {
   const reserved_qty = assertNonNegativeInt(body.reserved_qty ?? 0, "Reserved quantity");
   const damaged_qty = assertNonNegativeInt(body.damaged_qty ?? 0, "Damaged quantity");
   if (initial_qty > 0 || reserved_qty > 0 || damaged_qty > 0) {
-    return [{
-      outlet_id,
-      initial_qty,
-      reserved_qty,
-      damaged_qty,
-      stock_notes: body.stock_notes ? String(body.stock_notes).trim() : null,
-    }];
+    return [
+      {
+        outlet_id,
+        initial_qty,
+        reserved_qty,
+        damaged_qty,
+        stock_notes: body.stock_notes ? String(body.stock_notes).trim() : null,
+      },
+    ];
   }
   return [];
 }
@@ -136,16 +240,64 @@ async function ensureCategory(tenantId, categoryId, outletId = null) {
   return cat;
 }
 
-async function ensureProduct(tenantId, productId) {
-  const product = await posInventoryRepository.getProductById(tenantId, productId);
-  if (!product) throw new Error("Product not found");
-  return product;
+async function ensureVariant(tenantId, variantId) {
+  const variant = await posInventoryRepository.getVariantById(tenantId, variantId);
+  if (!variant) throw new Error("Variant not found");
+  return variant;
+}
+
+async function resolveVariantId(tenantId, body) {
+  if (body.variant_id) {
+    return ensureVariant(tenantId, Number(body.variant_id));
+  }
+  if (body.product_id) {
+    const def = await posInventoryRepository.getDefaultVariantForProduct(tenantId, Number(body.product_id));
+    if (!def) throw new Error("Product has no variants");
+    return ensureVariant(tenantId, def.id);
+  }
+  throw new Error("variant_id is required");
 }
 
 function parseOutletId(body, existing = null) {
   const outletId = Number(body.outlet_id ?? existing?.outlet_id);
   if (!Number.isInteger(outletId) || outletId <= 0) throw new Error("Store is required");
   return outletId;
+}
+
+async function applyStockDelta(tenantId, variantId, outletId, deltaAvailable, deltaDamaged = 0) {
+  const level = await posInventoryRepository.getStockLevel(tenantId, variantId, outletId);
+  const current = level?.available_qty ?? 0;
+  if (deltaAvailable < 0 && current + deltaAvailable < 0) {
+    throw new Error("Insufficient available stock");
+  }
+  return posInventoryRepository.upsertStockDelta(tenantId, variantId, outletId, deltaAvailable, deltaDamaged);
+}
+
+async function applyVariantOutletStocks(tenantId, userId, variantId, outletStocks, defaultOutletId) {
+  for (const row of outletStocks) {
+    const outlet_id = Number(row.outlet_id ?? row.warehouse_id ?? defaultOutletId);
+    if (!outlet_id) continue;
+    await ensureOutlet(tenantId, outlet_id);
+    const initial_qty = assertNonNegativeInt(row.initial_qty ?? row.available_qty ?? 0, "Initial quantity");
+    const reserved_qty = assertNonNegativeInt(row.reserved_qty ?? 0, "Reserved quantity");
+    const damaged_qty = assertNonNegativeInt(row.damaged_qty ?? 0, "Damaged quantity");
+    if (initial_qty > 0 || reserved_qty > 0 || damaged_qty > 0) {
+      await posInventoryRepository.setStockLevelAbsolute(tenantId, variantId, outlet_id, {
+        available_qty: initial_qty,
+        reserved_qty,
+        damaged_qty,
+      });
+      if (initial_qty > 0) {
+        await posInventoryRepository.createMovement(tenantId, userId, {
+          movement_type: "initial_stock",
+          qty: initial_qty,
+          notes: row.stock_notes || "Initial stock on product creation",
+          variant_id: variantId,
+          outlet_id,
+        });
+      }
+    }
+  }
 }
 
 export const posInventoryService = {
@@ -218,8 +370,11 @@ export const posInventoryService = {
   async getProduct(tenantId, id) {
     const product = await posInventoryRepository.getProductById(tenantId, id);
     if (!product) return null;
-    const stock_levels = await posInventoryRepository.getProductStockLevels(tenantId, id);
-    return { ...product, stock_levels };
+    const variants = await posInventoryRepository.getVariantsByProductId(tenantId, id);
+    for (const v of variants) {
+      v.stock_levels = await posInventoryRepository.getVariantStockLevels(tenantId, v.id);
+    }
+    return { ...product, options: reconstructOptionsFromVariants(variants), variants };
   },
 
   async createProduct(tenantId, userId, body) {
@@ -227,92 +382,64 @@ export const posInventoryService = {
     await ensureOutlet(tenantId, outlet_id);
     const category_id = await resolveCategoryId(tenantId, body, outlet_id);
     const product_name = String(body.product_name || "").trim();
-    const sku = String(body.sku || "").trim();
     if (!product_name) throw new Error("Product name is required");
-    if (!sku) throw new Error("SKU is required");
-    if (await posInventoryRepository.findProductBySku(tenantId, outlet_id, sku)) {
-      throw new Error("SKU already exists for this store");
-    }
+
     const status = body.status || "active";
     assertStatus(status);
-    const pricing = parsePricingFields(body);
-    const outletStocks = parseCreateOutletStocks(body, outlet_id);
+    const unit = String(body.unit || "piece").trim();
+    const productPricing = parseProductPricing(body);
+    const { variants } = resolveVariantsFromBody(body, product_name);
+
+    for (const v of variants) {
+      const dup = await posInventoryRepository.findVariantBySku(tenantId, outlet_id, v.sku);
+      if (dup) throw new Error(`SKU already exists for this store: ${v.sku}`);
+    }
 
     return withTransaction(async () => {
-      const id = await posInventoryRepository.createProduct(tenantId, {
+      const productId = await posInventoryRepository.createProduct(tenantId, {
         product_name,
-        sku,
-        unit: String(body.unit || "piece").trim(),
-        ...pricing,
+        unit,
+        ...productPricing,
         status,
         category_id,
         outlet_id,
       });
 
-      for (const stock of outletStocks) {
-        if (stock.initial_qty > 0 || stock.damaged_qty > 0 || stock.reserved_qty > 0) {
-          await posInventoryRepository.setStockLevelAbsolute(tenantId, id, stock.outlet_id, {
-            available_qty: stock.initial_qty,
-            reserved_qty: stock.reserved_qty,
-            damaged_qty: stock.damaged_qty,
-          });
-          if (stock.initial_qty > 0) {
-            await posInventoryRepository.createMovement(tenantId, userId, {
-              movement_type: "initial_stock",
-              qty: stock.initial_qty,
-              notes: stock.stock_notes || "Initial stock on product creation",
-              product_id: id,
-              outlet_id: stock.outlet_id,
-            });
-          }
-        }
+      for (const v of variants) {
+        await persistPosVariantRow(tenantId, userId, productId, outlet_id, v);
       }
 
-      return this.getProduct(tenantId, id);
+      return this.getProduct(tenantId, productId);
     });
   },
 
-  async updateProduct(tenantId, id, body) {
+  async updateProduct(tenantId, userId, id, body) {
     const existing = await posInventoryRepository.getProductById(tenantId, id);
     if (!existing) return null;
+
     const outlet_id = parseOutletId(body, existing);
     await ensureOutlet(tenantId, outlet_id);
     const category_id = Number(body.category_id ?? existing.category_id);
     await ensureCategory(tenantId, category_id, outlet_id);
+
     const product_name = String(body.product_name ?? existing.product_name).trim();
-    const sku = String(body.sku ?? existing.sku).trim();
     if (!product_name) throw new Error("Product name is required");
-    if (!sku) throw new Error("SKU is required");
-    if (await posInventoryRepository.findProductBySku(tenantId, outlet_id, sku, id)) {
-      throw new Error("SKU already exists for this store");
-    }
+
     const status = body.status ?? existing.status;
     assertStatus(status);
-    const pricing = parsePricingFields(body, existing);
+    const productPricing = parseProductPricing(body, existing);
+
     await posInventoryRepository.updateProduct(tenantId, id, {
       product_name,
-      sku,
       unit: String(body.unit ?? existing.unit).trim(),
-      ...pricing,
+      ...productPricing,
       status,
       category_id,
       outlet_id,
     });
 
-    if (Array.isArray(body.stock_levels)) {
-      for (const sl of body.stock_levels) {
-        const slOutletId = Number(sl.outlet_id ?? sl.warehouse_id ?? outlet_id);
-        if (!slOutletId) continue;
-        if (slOutletId !== outlet_id) throw new Error("Stock level store must match product store");
-        const reserved_qty = assertNonNegativeInt(sl.reserved_qty ?? 0, "Reserved quantity");
-        const damaged_qty = assertNonNegativeInt(sl.damaged_qty ?? 0, "Damaged quantity");
-        const existingLevel = await posInventoryRepository.getStockLevel(tenantId, id, slOutletId);
-        await posInventoryRepository.setStockLevelAbsolute(tenantId, id, slOutletId, {
-          available_qty: existingLevel?.available_qty ?? 0,
-          reserved_qty,
-          damaged_qty,
-        });
-      }
+    if (body.options != null || Array.isArray(body.variants)) {
+      await syncPosProductVariants(tenantId, userId, id, outlet_id, body, product_name);
     }
 
     return this.getProduct(tenantId, id);
@@ -321,23 +448,58 @@ export const posInventoryService = {
   async exportProducts(tenantId, query = {}) {
     const outletId = query.outlet_id ? Number(query.outlet_id) : null;
     const { rows } = await posInventoryRepository.listProducts(tenantId, { limit: 10000, offset: 0, outletId });
-    return rows.map((row) => ({
-      product_name: row.product_name,
-      sku: row.sku,
-      unit: row.unit,
-      cost_price: row.cost_price,
-      selling_price: row.selling_price,
-      discount: row.discount,
-      tax: row.tax,
-      status: row.status,
-      category_name: row.category_name,
-      outlet_id: row.outlet_id,
-      outlet_name: row.outlet_name,
-      initial_qty: row.total_available,
-      reserved_qty: row.total_reserved,
-      damaged_qty: row.total_damaged,
-      stock_notes: "",
-    }));
+    const flattened = [];
+
+    for (const p of rows) {
+      const full = await this.getProduct(tenantId, p.id);
+      if (!full) continue;
+
+      if (!full.variants?.length) {
+        flattened.push({
+          product_name: full.product_name,
+          variant_name: "",
+          sku: "",
+          unit: full.unit,
+          cost_price: "",
+          selling_price: "",
+          discount: full.discount,
+          tax: full.tax,
+          status: full.status,
+          category_name: full.category_name,
+          outlet_id: full.outlet_id,
+          outlet_name: full.outlet_name,
+          initial_qty: 0,
+          reserved_qty: 0,
+          damaged_qty: 0,
+          stock_notes: "",
+        });
+        continue;
+      }
+
+      for (const v of full.variants) {
+        const sl = v.stock_levels?.find((row) => Number(row.outlet_id) === Number(full.outlet_id)) || v.stock_levels?.[0] || {};
+        flattened.push({
+          product_name: full.product_name,
+          variant_name: v.variant_name,
+          sku: v.sku,
+          unit: full.unit,
+          cost_price: v.cost_price,
+          selling_price: v.selling_price,
+          discount: full.discount,
+          tax: full.tax,
+          status: v.status,
+          category_name: full.category_name,
+          outlet_id: full.outlet_id,
+          outlet_name: full.outlet_name,
+          initial_qty: sl.available_qty ?? v.total_available ?? 0,
+          reserved_qty: sl.reserved_qty ?? 0,
+          damaged_qty: sl.damaged_qty ?? 0,
+          stock_notes: "",
+        });
+      }
+    }
+
+    return flattened;
   },
 
   async importProducts(tenantId, userId, rows) {
@@ -381,19 +543,21 @@ export const posInventoryService = {
   },
 
   async stockIn(tenantId, userId, body) {
-    const product_id = Number(body.product_id);
     const outlet_id = Number(body.outlet_id);
     const qty = assertPositiveInt(body.qty, "Quantity");
-    const product = await ensureProduct(tenantId, product_id);
-    if (product.outlet_id !== outlet_id) throw new Error("Product does not belong to this store");
+    const variant = await resolveVariantId(tenantId, body);
+    if (Number(variant.outlet_id) !== outlet_id) {
+      throw new Error("Variant does not belong to this store");
+    }
     await ensureOutlet(tenantId, outlet_id);
+
     return withTransaction(async () => {
-      await posInventoryRepository.upsertStockDelta(tenantId, product_id, outlet_id, qty);
+      await applyStockDelta(tenantId, variant.id, outlet_id, qty);
       const movementId = await posInventoryRepository.createMovement(tenantId, userId, {
         movement_type: "stock_in",
         qty,
         notes: body.notes || null,
-        product_id,
+        variant_id: variant.id,
         outlet_id,
       });
       return { id: movementId };
@@ -401,21 +565,21 @@ export const posInventoryService = {
   },
 
   async stockOut(tenantId, userId, body) {
-    const product_id = Number(body.product_id);
     const outlet_id = Number(body.outlet_id);
     const qty = assertPositiveInt(body.qty, "Quantity");
-    const product = await ensureProduct(tenantId, product_id);
-    if (product.outlet_id !== outlet_id) throw new Error("Product does not belong to this store");
+    const variant = await resolveVariantId(tenantId, body);
+    if (Number(variant.outlet_id) !== outlet_id) {
+      throw new Error("Variant does not belong to this store");
+    }
     await ensureOutlet(tenantId, outlet_id);
-    const level = await posInventoryRepository.getStockLevel(tenantId, product_id, outlet_id);
-    if (!level || level.available_qty < qty) throw new Error("Insufficient stock");
+
     return withTransaction(async () => {
-      await posInventoryRepository.upsertStockDelta(tenantId, product_id, outlet_id, -qty);
+      await applyStockDelta(tenantId, variant.id, outlet_id, -qty);
       const movementId = await posInventoryRepository.createMovement(tenantId, userId, {
         movement_type: "stock_out",
         qty,
         notes: body.notes || null,
-        product_id,
+        variant_id: variant.id,
         outlet_id,
       });
       return { id: movementId };
@@ -426,22 +590,24 @@ export const posInventoryService = {
     const outlet_id = Number(body.outlet_id ?? body.warehouse_id);
     if (!outlet_id) throw new Error("Store is required");
     await ensureOutlet(tenantId, outlet_id);
-    const lines = normalizeBulkQtyItems(body, "product");
+    const lines = normalizeBulkQtyItems(body, "variant");
 
     return withTransaction(async () => {
       const created = [];
       for (const line of lines) {
-        const product = await ensureProduct(tenantId, line.product_id);
-        if (product.outlet_id !== outlet_id) throw new Error("Product does not belong to this store");
-        await posInventoryRepository.upsertStockDelta(tenantId, line.product_id, outlet_id, line.qty);
+        const variant = await ensureVariant(tenantId, line.variant_id);
+        if (Number(variant.outlet_id) !== outlet_id) {
+          throw new Error("Variant does not belong to this store");
+        }
+        await applyStockDelta(tenantId, line.variant_id, outlet_id, line.qty);
         const id = await posInventoryRepository.createMovement(tenantId, userId, {
           movement_type: "stock_in",
           qty: line.qty,
           notes: line.notes,
-          product_id: line.product_id,
+          variant_id: line.variant_id,
           outlet_id,
         });
-        created.push({ id, product_id: line.product_id });
+        created.push({ id, variant_id: line.variant_id });
       }
       return { count: created.length, items: created };
     });
@@ -451,26 +617,24 @@ export const posInventoryService = {
     const outlet_id = Number(body.outlet_id ?? body.warehouse_id);
     if (!outlet_id) throw new Error("Store is required");
     await ensureOutlet(tenantId, outlet_id);
-    const lines = normalizeBulkQtyItems(body, "product");
+    const lines = normalizeBulkQtyItems(body, "variant");
 
     return withTransaction(async () => {
       const created = [];
       for (const line of lines) {
-        const product = await ensureProduct(tenantId, line.product_id);
-        if (product.outlet_id !== outlet_id) throw new Error("Product does not belong to this store");
-        const level = await posInventoryRepository.getStockLevel(tenantId, line.product_id, outlet_id);
-        if (!level || level.available_qty < line.qty) {
-          throw new Error(`Insufficient stock for ${product.product_name}`);
+        const variant = await ensureVariant(tenantId, line.variant_id);
+        if (Number(variant.outlet_id) !== outlet_id) {
+          throw new Error("Variant does not belong to this store");
         }
-        await posInventoryRepository.upsertStockDelta(tenantId, line.product_id, outlet_id, -line.qty);
+        await applyStockDelta(tenantId, line.variant_id, outlet_id, -line.qty);
         const id = await posInventoryRepository.createMovement(tenantId, userId, {
           movement_type: "stock_out",
           qty: line.qty,
           notes: line.notes,
-          product_id: line.product_id,
+          variant_id: line.variant_id,
           outlet_id,
         });
-        created.push({ id, product_id: line.product_id });
+        created.push({ id, variant_id: line.variant_id });
       }
       return { count: created.length, items: created };
     });
@@ -483,57 +647,56 @@ export const posInventoryService = {
     if (from_outlet_id === to_outlet_id) throw new Error("Source and destination stores must differ");
     await ensureOutlet(tenantId, from_outlet_id);
     await ensureOutlet(tenantId, to_outlet_id);
-    const lines = normalizeBulkQtyItems(body, "product");
+    const lines = normalizeBulkQtyItems(body, "variant");
     const completeNow = body.complete !== false;
 
     return withTransaction(async () => {
       const created = [];
       for (const line of lines) {
-        const sourceProduct = await ensureProduct(tenantId, line.product_id);
-        if (sourceProduct.outlet_id !== from_outlet_id) {
-          throw new Error("Product does not belong to the source store");
+        const sourceVariant = await ensureVariant(tenantId, line.variant_id);
+        if (Number(sourceVariant.outlet_id) !== from_outlet_id) {
+          throw new Error("Variant does not belong to the source store");
         }
-        let destProduct = sourceProduct;
+
+        let destVariant = sourceVariant;
         if (from_outlet_id !== to_outlet_id) {
-          destProduct = await posInventoryRepository.findProductBySku(
+          destVariant = await posInventoryRepository.findVariantBySku(
             tenantId,
             to_outlet_id,
-            sourceProduct.sku
+            sourceVariant.sku
           );
-          if (!destProduct) {
-            throw new Error(`Matching product SKU not found at destination store: ${sourceProduct.sku}`);
+          if (!destVariant) {
+            throw new Error(`Matching variant SKU not found at destination store: ${sourceVariant.sku}`);
           }
         }
+
         if (completeNow) {
-          const level = await posInventoryRepository.getStockLevel(tenantId, line.product_id, from_outlet_id);
-          if (!level || level.available_qty < line.qty) {
-            throw new Error(`Insufficient stock for ${sourceProduct.product_name}`);
-          }
-          await posInventoryRepository.upsertStockDelta(tenantId, line.product_id, from_outlet_id, -line.qty);
+          await applyStockDelta(tenantId, sourceVariant.id, from_outlet_id, -line.qty);
           await posInventoryRepository.createMovement(tenantId, userId, {
             movement_type: "transfer_out",
             qty: line.qty,
             notes: line.notes || `Transfer to store #${to_outlet_id}`,
-            product_id: line.product_id,
+            variant_id: sourceVariant.id,
             outlet_id: from_outlet_id,
           });
-          await posInventoryRepository.upsertStockDelta(tenantId, destProduct.id, to_outlet_id, line.qty);
+          await applyStockDelta(tenantId, destVariant.id, to_outlet_id, line.qty);
           await posInventoryRepository.createMovement(tenantId, userId, {
             movement_type: "transfer_in",
             qty: line.qty,
             notes: line.notes || `Transfer from store #${from_outlet_id}`,
-            product_id: destProduct.id,
+            variant_id: destVariant.id,
             outlet_id: to_outlet_id,
           });
         }
+
         const transferId = await posInventoryRepository.createTransfer(tenantId, {
           qty: line.qty,
           transfer_status: completeNow ? "completed" : "pending",
-          product_id: line.product_id,
+          variant_id: sourceVariant.id,
           from_outlet_id,
           to_outlet_id,
         });
-        created.push({ id: transferId, product_id: line.product_id });
+        created.push({ id: transferId, variant_id: sourceVariant.id });
       }
       return { count: created.length, items: created };
     });
@@ -547,60 +710,64 @@ export const posInventoryService = {
   },
 
   async createTransfer(tenantId, userId, body) {
-    const product_id = Number(body.product_id);
     const from_outlet_id = Number(body.from_outlet_id);
     const to_outlet_id = Number(body.to_outlet_id);
     const qty = assertPositiveInt(body.qty, "Quantity");
     if (from_outlet_id === to_outlet_id) throw new Error("Source and destination store must differ");
-    const product = await ensureProduct(tenantId, product_id);
-    if (product.outlet_id !== from_outlet_id) throw new Error("Product does not belong to the source store");
+
+    const variant = await resolveVariantId(tenantId, body);
+    if (Number(variant.outlet_id) !== from_outlet_id) {
+      throw new Error("Variant does not belong to the source store");
+    }
     await ensureOutlet(tenantId, from_outlet_id);
     await ensureOutlet(tenantId, to_outlet_id);
-    const level = await posInventoryRepository.getStockLevel(tenantId, product_id, from_outlet_id);
+
+    const level = await posInventoryRepository.getStockLevel(tenantId, variant.id, from_outlet_id);
     if (!level || level.available_qty < qty) throw new Error("Insufficient stock at source store");
+
     const id = await posInventoryRepository.createTransfer(tenantId, {
       qty,
       transfer_status: "pending",
-      product_id,
+      variant_id: variant.id,
       from_outlet_id,
       to_outlet_id,
     });
-    const transfer = await posInventoryRepository.getTransferById(tenantId, id);
-    return transfer;
+    return posInventoryRepository.getTransferById(tenantId, id);
   },
 
   async completeTransfer(tenantId, userId, id) {
     const transfer = await posInventoryRepository.getTransferById(tenantId, id);
     if (!transfer) return null;
     if (transfer.transfer_status !== "pending") throw new Error("Transfer is not pending");
-    const sourceProduct = await posInventoryRepository.getProductById(tenantId, transfer.product_id);
-    if (!sourceProduct) throw new Error("Product not found");
-    let destProduct = sourceProduct;
+
+    const sourceVariant = await ensureVariant(tenantId, transfer.variant_id);
+    let destVariant = sourceVariant;
     if (transfer.from_outlet_id !== transfer.to_outlet_id) {
-      destProduct = await posInventoryRepository.findProductBySku(
+      destVariant = await posInventoryRepository.findVariantBySku(
         tenantId,
         transfer.to_outlet_id,
-        sourceProduct.sku
+        sourceVariant.sku
       );
-      if (!destProduct) {
-        throw new Error("Matching product SKU not found at destination store. Create the product there first.");
+      if (!destVariant) {
+        throw new Error("Matching variant SKU not found at destination store. Create the variant there first.");
       }
     }
+
     return withTransaction(async () => {
-      await posInventoryRepository.upsertStockDelta(tenantId, transfer.product_id, transfer.from_outlet_id, -transfer.qty);
+      await applyStockDelta(tenantId, sourceVariant.id, transfer.from_outlet_id, -transfer.qty);
       await posInventoryRepository.createMovement(tenantId, userId, {
         movement_type: "transfer_out",
         qty: transfer.qty,
         notes: `Transfer #${id}`,
-        product_id: transfer.product_id,
+        variant_id: sourceVariant.id,
         outlet_id: transfer.from_outlet_id,
       });
-      await posInventoryRepository.upsertStockDelta(tenantId, destProduct.id, transfer.to_outlet_id, transfer.qty);
+      await applyStockDelta(tenantId, destVariant.id, transfer.to_outlet_id, transfer.qty);
       await posInventoryRepository.createMovement(tenantId, userId, {
         movement_type: "transfer_in",
         qty: transfer.qty,
         notes: `Transfer #${id}`,
-        product_id: destProduct.id,
+        variant_id: destVariant.id,
         outlet_id: transfer.to_outlet_id,
       });
       await posInventoryRepository.updateTransferStatus(tenantId, id, "completed");
@@ -623,18 +790,23 @@ export const posInventoryService = {
   async deductSaleStock(tenantId, userId, outletId, items) {
     return withTransaction(async () => {
       for (const item of items) {
-        if (!item.product_id) continue;
+        const variantId = Number(item.variant_id || item.product_id);
+        if (!variantId) continue;
         const qty = Number(item.quantity);
-        const level = await posInventoryRepository.getStockLevel(tenantId, item.product_id, outletId);
-        if (level && level.available_qty < qty) {
-          throw new Error(`Insufficient stock for ${item.product_name}`);
+        const variant = await ensureVariant(tenantId, variantId);
+        if (Number(variant.outlet_id) !== Number(outletId)) {
+          throw new Error("Variant does not belong to this store");
         }
-        await posInventoryRepository.upsertStockDelta(tenantId, item.product_id, outletId, -qty);
+        const level = await posInventoryRepository.getStockLevel(tenantId, variantId, outletId);
+        if (level && level.available_qty < qty) {
+          throw new Error(`Insufficient stock for ${item.product_name || variant.variant_name}`);
+        }
+        await applyStockDelta(tenantId, variantId, outletId, -qty);
         await posInventoryRepository.createMovement(tenantId, userId, {
           movement_type: "stock_out",
           qty,
           notes: "POS sale",
-          product_id: item.product_id,
+          variant_id: variantId,
           outlet_id: outletId,
         });
       }

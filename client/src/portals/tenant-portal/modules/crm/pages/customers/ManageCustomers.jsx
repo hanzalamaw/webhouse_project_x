@@ -15,6 +15,7 @@ import { useToolbarFilteredRows } from "../../../../../../hooks/useToolbarFilter
 import { formatDateTime } from "../../../../../../utils/dateTime";
 import { MODULE_BASE, CUSTOMER_TYPES, CUSTOMER_STATUSES, ACTIVE_CUSTOMER_DAYS } from "../../constants";
 import { formatCustomerType } from "../../utils/typeFields";
+import { SourceBadge } from "../../../ecommerce/components/SourceBadge";
 
 const TOOLBAR_FILTERS = [
   { key: "status", label: "Status", options: CUSTOMER_STATUSES },
@@ -74,6 +75,7 @@ export default function ManageCustomers() {
     { key: "customer_type", label: "Type", format: (v) => formatCustomerType(v) },
     { key: "phone", label: "Phone", format: (v) => v || "—" },
     { key: "email", label: "Email", format: (v) => v || "—" },
+    { key: "source", label: "Source", render: (r) => <SourceBadge source={r.source} /> },
     { key: "tags", label: "Tags", format: (_, r) => (r.tags || []).join(", ") || "—" },
     { key: "status", label: "Status", render: (r) => <StatusBadge status={r.status} /> },
     {

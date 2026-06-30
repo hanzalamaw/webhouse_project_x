@@ -489,7 +489,7 @@ export const posRepository = {
     for (const item of data.items) {
       await writeDb.query(
         `INSERT INTO pos_sale_items
-           (product_name, sku, quantity, unit_price, total_price, pos_sale_id, product_id, tenant_id)
+           (product_name, sku, quantity, unit_price, total_price, pos_sale_id, variant_id, tenant_id)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           item.product_name,
@@ -498,7 +498,7 @@ export const posRepository = {
           item.unit_price,
           item.total_price,
           saleId,
-          item.product_id || null,
+          item.variant_id || item.product_id || null,
           tenantId,
         ]
       );

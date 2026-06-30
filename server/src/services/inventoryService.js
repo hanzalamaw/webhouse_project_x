@@ -1,6 +1,11 @@
 import { getPool } from "../database/db.js";
 import { inventoryRepository } from "../repositories/inventoryRepository.js";
 import { parsePagination, paginatedResponse } from "../utils/pagination.js";
+import {
+  resolveVariantsFromBody,
+  reconstructOptionsFromVariants,
+  variantComboKey,
+} from "../utils/productVariants.js";
 
 const STATUS_VALUES = ["active", "inactive"];
 const MOVEMENT_TYPES = ["initial_stock", "stock_in", "stock_out", "transfer_in", "transfer_out"];
@@ -58,10 +63,15 @@ async function withTransaction(fn) {
   }
 }
 
-function parsePricingFields(body, existing = {}) {
+function parseVariantPricing(body, existing = {}) {
   return {
     cost_price: assertPrice(body.cost_price ?? existing.cost_price ?? 0, "Cost price"),
     selling_price: assertPrice(body.selling_price ?? existing.selling_price ?? 0, "Selling price"),
+  };
+}
+
+function parseProductPricing(body, existing = {}) {
+  return {
     delivery_charges: assertPrice(body.delivery_charges ?? existing.delivery_charges ?? 0, "Delivery charges"),
     discount: assertPrice(body.discount ?? existing.discount ?? 0, "Discount"),
     tax: assertPrice(body.tax ?? existing.tax ?? 0, "Tax"),
@@ -70,22 +80,104 @@ function parsePricingFields(body, existing = {}) {
 
 function normalizeBulkQtyItems(body, label = "item") {
   const items = body.items;
-  if (!Array.isArray(items) || !items.length) throw new Error("Select at least one product");
+  if (!Array.isArray(items) || !items.length) throw new Error("Select at least one variant");
   const sameQty = Boolean(body.same_qty_for_all);
   if (sameQty) {
     const qty = assertPositiveInt(body.qty, "Quantity");
     const notes = body.notes || null;
     return items.map((item) => ({
-      product_id: Number(item.product_id),
+      variant_id: Number(item.variant_id || item.product_id),
       qty,
       notes,
     }));
   }
   return items.map((item, i) => ({
-    product_id: Number(item.product_id),
+    variant_id: Number(item.variant_id || item.product_id),
     qty: assertPositiveInt(item.qty, `Quantity for ${label} ${i + 1}`),
     notes: item.notes || null,
   }));
+}
+
+async function persistVariantRow(tenantId, userId, productId, v) {
+  const sku = String(v.sku || "").trim();
+  const variant_name = String(v.variant_name || "").trim();
+  if (!sku) throw new Error("Each generated variant requires a SKU");
+  if (!variant_name) throw new Error("Each generated variant requires a name");
+  const vStatus = v.status || "active";
+  assertStatus(vStatus);
+  const pricing = {
+    cost_price: assertPrice(v.cost_price ?? 0, "Cost price"),
+    selling_price: assertPrice(v.selling_price ?? 0, "Selling price"),
+  };
+
+  let variantId;
+  if (v.id) {
+    const dup = await inventoryRepository.findVariantBySku(tenantId, sku, Number(v.id));
+    if (dup) throw new Error(`SKU already exists: ${sku}`);
+    await inventoryRepository.updateVariant(tenantId, Number(v.id), {
+      sku,
+      variant_name,
+      ...pricing,
+      status: vStatus,
+    });
+    variantId = Number(v.id);
+  } else {
+    const dup = await inventoryRepository.findVariantBySku(tenantId, sku);
+    if (dup) throw new Error(`SKU already exists: ${sku}`);
+    variantId = await inventoryRepository.createVariant(tenantId, {
+      product_id: productId,
+      sku,
+      variant_name,
+      ...pricing,
+      status: vStatus,
+    });
+  }
+
+  await inventoryRepository.setVariantAttributes(tenantId, variantId, v.attributes || []);
+
+  if (Array.isArray(v.stock_levels) && v.stock_levels.length) {
+    for (const sl of v.stock_levels) {
+      const warehouse_id = Number(sl.warehouse_id);
+      if (!warehouse_id) continue;
+      await ensureWarehouse(tenantId, warehouse_id);
+      await inventoryRepository.setStockLevelAbsolute(tenantId, variantId, warehouse_id, {
+        available_qty: sl.available_qty ?? 0,
+        reserved_qty: sl.reserved_qty ?? 0,
+        damaged_qty: sl.damaged_qty ?? 0,
+      });
+    }
+  } else if (Array.isArray(v.warehouse_stocks) && v.warehouse_stocks.length) {
+    await applyVariantWarehouseStocks(tenantId, userId, variantId, v.warehouse_stocks);
+  }
+
+  return variantId;
+}
+
+async function syncProductVariants(tenantId, userId, productId, body, productName) {
+  const { variants } = resolveVariantsFromBody(body, productName);
+  const existing = await inventoryRepository.getVariantsByProductId(tenantId, productId);
+  const existingByKey = new Map();
+  for (const v of existing) {
+    existingByKey.set(variantComboKey(v.attributes), v);
+  }
+
+  const seenKeys = new Set();
+  for (const v of variants) {
+    const key = v.combo_key || variantComboKey(v.attributes);
+    seenKeys.add(key);
+    const match = existingByKey.get(key);
+    await persistVariantRow(tenantId, userId, productId, {
+      ...v,
+      id: v.id || match?.id || null,
+    });
+  }
+
+  for (const v of existing) {
+    const key = variantComboKey(v.attributes);
+    if (!seenKeys.has(key)) {
+      await inventoryRepository.softDeleteVariant(tenantId, v.id);
+    }
+  }
 }
 
 async function ensureCategory(tenantId, categoryId) {
@@ -100,19 +192,64 @@ async function ensureProduct(tenantId, productId) {
   return product;
 }
 
+async function ensureVariant(tenantId, variantId) {
+  const variant = await inventoryRepository.getVariantById(tenantId, variantId);
+  if (!variant) throw new Error("Variant not found");
+  return variant;
+}
+
+async function resolveVariantId(tenantId, { variant_id, product_id }) {
+  if (variant_id) {
+    return ensureVariant(tenantId, Number(variant_id));
+  }
+  if (product_id) {
+    const def = await inventoryRepository.getDefaultVariantForProduct(tenantId, Number(product_id));
+    if (!def) throw new Error("Product has no variants");
+    return ensureVariant(tenantId, def.id);
+  }
+  throw new Error("variant_id is required");
+}
+
 async function ensureWarehouse(tenantId, warehouseId) {
   const wh = await inventoryRepository.getWarehouseById(tenantId, warehouseId);
   if (!wh) throw new Error("Warehouse not found");
   return wh;
 }
 
-async function applyStockDelta(tenantId, productId, warehouseId, deltaAvailable, deltaDamaged = 0) {
-  const level = await inventoryRepository.getStockLevel(tenantId, productId, warehouseId);
+async function applyStockDelta(tenantId, variantId, warehouseId, deltaAvailable, deltaDamaged = 0) {
+  const level = await inventoryRepository.getStockLevel(tenantId, variantId, warehouseId);
   const current = level?.available_qty ?? 0;
   if (deltaAvailable < 0 && current + deltaAvailable < 0) {
     throw new Error("Insufficient available stock");
   }
-  return inventoryRepository.upsertStockLevel(tenantId, productId, warehouseId, deltaAvailable, deltaDamaged);
+  return inventoryRepository.upsertStockLevel(tenantId, variantId, warehouseId, deltaAvailable, deltaDamaged);
+}
+
+async function applyVariantWarehouseStocks(tenantId, userId, variantId, warehouseStocks) {
+  for (const row of warehouseStocks) {
+    const warehouse_id = Number(row.warehouse_id);
+    if (!warehouse_id) continue;
+    await ensureWarehouse(tenantId, warehouse_id);
+    const initial_qty = assertNonNegativeInt(row.initial_qty ?? 0, "Initial quantity");
+    const reserved_qty = assertNonNegativeInt(row.reserved_qty ?? 0, "Reserved quantity");
+    const damaged_qty = assertNonNegativeInt(row.damaged_qty ?? 0, "Damaged quantity");
+    if (initial_qty > 0 || reserved_qty > 0 || damaged_qty > 0) {
+      await inventoryRepository.setStockLevelAbsolute(tenantId, variantId, warehouse_id, {
+        available_qty: initial_qty,
+        reserved_qty,
+        damaged_qty,
+      });
+      if (initial_qty > 0) {
+        await inventoryRepository.createMovement(tenantId, userId, {
+          movement_type: "initial_stock",
+          qty: initial_qty,
+          notes: row.stock_notes || "Initial stock on product creation",
+          variant_id: variantId,
+          warehouse_id,
+        });
+      }
+    }
+  }
 }
 
 export const inventoryService = {
@@ -155,7 +292,6 @@ export const inventoryService = {
     };
   },
 
-  // Categories
   async listCategories(tenantId, query) {
     const { page, limit, offset } = parsePagination(query);
     const { rows, total } = await inventoryRepository.listCategories(tenantId, { limit, offset });
@@ -203,7 +339,6 @@ export const inventoryService = {
     return inventoryRepository.softDeleteCategory(tenantId, id);
   },
 
-  // Products
   async listProducts(tenantId, query) {
     const { page, limit, offset } = parsePagination(query);
     const { rows, total } = await inventoryRepository.listProducts(tenantId, { limit, offset });
@@ -213,97 +348,74 @@ export const inventoryService = {
   async getProduct(tenantId, id) {
     const product = await inventoryRepository.getProductById(tenantId, id);
     if (!product) return null;
-    const stock_levels = await inventoryRepository.getProductStockLevels(tenantId, id);
-    return { ...product, stock_levels };
+    const variants = await inventoryRepository.getVariantsByProductId(tenantId, id);
+    for (const v of variants) {
+      v.stock_levels = await inventoryRepository.getVariantStockLevels(tenantId, v.id);
+    }
+    return { ...product, options: reconstructOptionsFromVariants(variants), variants };
   },
 
   async createProduct(tenantId, userId, body) {
     const product_name = String(body.product_name || "").trim();
-    const sku = String(body.sku || "").trim();
     if (!product_name) throw new Error("Product name is required");
-    if (!sku) throw new Error("SKU is required");
 
     const category_id = Number(body.category_id);
     if (!category_id) throw new Error("Category is required");
     await ensureCategory(tenantId, category_id);
 
-    const duplicate = await inventoryRepository.findProductBySku(tenantId, sku);
-    if (duplicate) throw new Error("SKU already exists");
-
     const status = body.status || "active";
     assertStatus(status);
     const unit = String(body.unit || "piece").trim();
-    const pricing = parsePricingFields(body);
+    const productPricing = parseProductPricing(body);
+    const { variants } = resolveVariantsFromBody(body, product_name);
 
-    const initial_qty = assertNonNegativeInt(body.initial_qty ?? 0, "Initial quantity");
-    const warehouse_id = body.warehouse_id ? Number(body.warehouse_id) : null;
-    const damaged_qty = assertNonNegativeInt(body.damaged_qty ?? 0, "Damaged quantity");
-    const reserved_qty = assertNonNegativeInt(body.reserved_qty ?? 0, "Reserved quantity");
-
-    if (initial_qty > 0 && !warehouse_id) {
-      throw new Error("Warehouse is required when setting initial stock");
+    for (const v of variants) {
+      const dup = await inventoryRepository.findVariantBySku(tenantId, v.sku);
+      if (dup) throw new Error(`SKU already exists: ${v.sku}`);
     }
-    if (warehouse_id) await ensureWarehouse(tenantId, warehouse_id);
 
     return withTransaction(async () => {
       const productId = await inventoryRepository.createProduct(tenantId, {
         product_name,
-        sku,
         unit,
-        ...pricing,
+        ...productPricing,
         status,
         category_id,
       });
 
-      if (warehouse_id && (initial_qty > 0 || damaged_qty > 0 || reserved_qty > 0)) {
-        await inventoryRepository.setStockLevelAbsolute(tenantId, productId, warehouse_id, {
-          available_qty: initial_qty,
-          reserved_qty,
-          damaged_qty,
-        });
-        if (initial_qty > 0) {
-          await inventoryRepository.createMovement(tenantId, userId, {
-            movement_type: "initial_stock",
-            qty: initial_qty,
-            notes: body.stock_notes || "Initial stock on product creation",
-            product_id: productId,
-            warehouse_id,
-          });
-        }
+      for (const v of variants) {
+        await persistVariantRow(tenantId, userId, productId, v);
       }
 
       return this.getProduct(tenantId, productId);
     });
   },
 
-  async updateProduct(tenantId, id, body) {
+  async updateProduct(tenantId, userId, id, body) {
     const existing = await inventoryRepository.getProductById(tenantId, id);
     if (!existing) return null;
 
     const product_name = String(body.product_name ?? existing.product_name).trim();
-    const sku = String(body.sku ?? existing.sku).trim();
     if (!product_name) throw new Error("Product name is required");
-    if (!sku) throw new Error("SKU is required");
 
     const category_id = Number(body.category_id ?? existing.category_id);
     await ensureCategory(tenantId, category_id);
 
-    const duplicate = await inventoryRepository.findProductBySku(tenantId, sku, id);
-    if (duplicate) throw new Error("SKU already exists");
-
     const status = body.status ?? existing.status;
     assertStatus(status);
-
-    const pricing = parsePricingFields(body, existing);
+    const productPricing = parseProductPricing(body, existing);
 
     await inventoryRepository.updateProduct(tenantId, id, {
       product_name,
-      sku,
       unit: String(body.unit ?? existing.unit).trim(),
-      ...pricing,
+      ...productPricing,
       status,
       category_id,
     });
+
+    if (body.options != null || Array.isArray(body.variants)) {
+      await syncProductVariants(tenantId, userId, id, body, product_name);
+    }
 
     return this.getProduct(tenantId, id);
   },
@@ -313,8 +425,13 @@ export const inventoryService = {
   },
 
   async exportProducts(tenantId) {
+    const products = [];
     const { rows } = await inventoryRepository.listProducts(tenantId, { limit: 10000, offset: 0 });
-    return rows;
+    for (const p of rows) {
+      const full = await this.getProduct(tenantId, p.id);
+      products.push(full);
+    }
+    return products;
   },
 
   async importProducts(tenantId, userId, rows) {
@@ -334,7 +451,6 @@ export const inventoryService = {
     return results;
   },
 
-  // Warehouses
   async listWarehouses(tenantId, query) {
     const { page, limit, offset } = parsePagination(query);
     const { rows, total } = await inventoryRepository.listWarehouses(tenantId, { limit, offset });
@@ -382,7 +498,6 @@ export const inventoryService = {
     return inventoryRepository.softDeleteWarehouse(tenantId, id);
   },
 
-  // Stock movements
   async listMovements(tenantId, query) {
     const { page, limit, offset } = parsePagination(query);
     const movement_type = query.movement_type || null;
@@ -395,19 +510,18 @@ export const inventoryService = {
   },
 
   async stockIn(tenantId, userId, body) {
-    const product_id = Number(body.product_id);
     const warehouse_id = Number(body.warehouse_id);
     const qty = assertPositiveInt(body.qty, "Quantity");
-    await ensureProduct(tenantId, product_id);
+    const variant = await resolveVariantId(tenantId, body);
     await ensureWarehouse(tenantId, warehouse_id);
 
     return withTransaction(async () => {
-      await applyStockDelta(tenantId, product_id, warehouse_id, qty);
+      await applyStockDelta(tenantId, variant.id, warehouse_id, qty);
       const movementId = await inventoryRepository.createMovement(tenantId, userId, {
         movement_type: "stock_in",
         qty,
         notes: body.notes || null,
-        product_id,
+        variant_id: variant.id,
         warehouse_id,
       });
       const { rows } = await inventoryRepository.listMovements(tenantId, { limit: 1, offset: 0 });
@@ -416,19 +530,18 @@ export const inventoryService = {
   },
 
   async stockOut(tenantId, userId, body) {
-    const product_id = Number(body.product_id);
     const warehouse_id = Number(body.warehouse_id);
     const qty = assertPositiveInt(body.qty, "Quantity");
-    await ensureProduct(tenantId, product_id);
+    const variant = await resolveVariantId(tenantId, body);
     await ensureWarehouse(tenantId, warehouse_id);
 
     return withTransaction(async () => {
-      await applyStockDelta(tenantId, product_id, warehouse_id, -qty);
+      await applyStockDelta(tenantId, variant.id, warehouse_id, -qty);
       const movementId = await inventoryRepository.createMovement(tenantId, userId, {
         movement_type: "stock_out",
         qty,
         notes: body.notes || null,
-        product_id,
+        variant_id: variant.id,
         warehouse_id,
       });
       return { id: movementId };
@@ -439,21 +552,21 @@ export const inventoryService = {
     const warehouse_id = Number(body.warehouse_id);
     if (!warehouse_id) throw new Error("Warehouse is required");
     await ensureWarehouse(tenantId, warehouse_id);
-    const lines = normalizeBulkQtyItems(body, "product");
+    const lines = normalizeBulkQtyItems(body, "variant");
 
     return withTransaction(async () => {
       const created = [];
       for (const line of lines) {
-        await ensureProduct(tenantId, line.product_id);
-        await applyStockDelta(tenantId, line.product_id, warehouse_id, line.qty);
+        await ensureVariant(tenantId, line.variant_id);
+        await applyStockDelta(tenantId, line.variant_id, warehouse_id, line.qty);
         const id = await inventoryRepository.createMovement(tenantId, userId, {
           movement_type: "stock_in",
           qty: line.qty,
           notes: line.notes,
-          product_id: line.product_id,
+          variant_id: line.variant_id,
           warehouse_id,
         });
-        created.push({ id, product_id: line.product_id });
+        created.push({ id, variant_id: line.variant_id });
       }
       return { count: created.length, items: created };
     });
@@ -463,27 +576,26 @@ export const inventoryService = {
     const warehouse_id = Number(body.warehouse_id);
     if (!warehouse_id) throw new Error("Warehouse is required");
     await ensureWarehouse(tenantId, warehouse_id);
-    const lines = normalizeBulkQtyItems(body, "product");
+    const lines = normalizeBulkQtyItems(body, "variant");
 
     return withTransaction(async () => {
       const created = [];
       for (const line of lines) {
-        await ensureProduct(tenantId, line.product_id);
-        await applyStockDelta(tenantId, line.product_id, warehouse_id, -line.qty);
+        await ensureVariant(tenantId, line.variant_id);
+        await applyStockDelta(tenantId, line.variant_id, warehouse_id, -line.qty);
         const id = await inventoryRepository.createMovement(tenantId, userId, {
           movement_type: "stock_out",
           qty: line.qty,
           notes: line.notes,
-          product_id: line.product_id,
+          variant_id: line.variant_id,
           warehouse_id,
         });
-        created.push({ id, product_id: line.product_id });
+        created.push({ id, variant_id: line.variant_id });
       }
       return { count: created.length, items: created };
     });
   },
 
-  // Transfers
   async listTransfers(tenantId, query) {
     const { page, limit, offset } = parsePagination(query);
     const { rows, total } = await inventoryRepository.listTransfers(tenantId, { limit, offset });
@@ -491,16 +603,15 @@ export const inventoryService = {
   },
 
   async createTransfer(tenantId, userId, body) {
-    const product_id = Number(body.product_id);
     const from_warehouse_id = Number(body.from_warehouse_id);
     const to_warehouse_id = Number(body.to_warehouse_id);
     const qty = assertPositiveInt(body.qty, "Quantity");
+    const variant = await resolveVariantId(tenantId, body);
 
     if (from_warehouse_id === to_warehouse_id) {
       throw new Error("Source and destination warehouses must be different");
     }
 
-    await ensureProduct(tenantId, product_id);
     await ensureWarehouse(tenantId, from_warehouse_id);
     await ensureWarehouse(tenantId, to_warehouse_id);
 
@@ -508,20 +619,20 @@ export const inventoryService = {
 
     return withTransaction(async () => {
       if (completeNow) {
-        await applyStockDelta(tenantId, product_id, from_warehouse_id, -qty);
-        await applyStockDelta(tenantId, product_id, to_warehouse_id, qty);
+        await applyStockDelta(tenantId, variant.id, from_warehouse_id, -qty);
+        await applyStockDelta(tenantId, variant.id, to_warehouse_id, qty);
         await inventoryRepository.createMovement(tenantId, userId, {
           movement_type: "transfer_out",
           qty,
           notes: body.notes || `Transfer to warehouse #${to_warehouse_id}`,
-          product_id,
+          variant_id: variant.id,
           warehouse_id: from_warehouse_id,
         });
         await inventoryRepository.createMovement(tenantId, userId, {
           movement_type: "transfer_in",
           qty,
           notes: body.notes || `Transfer from warehouse #${from_warehouse_id}`,
-          product_id,
+          variant_id: variant.id,
           warehouse_id: to_warehouse_id,
         });
       }
@@ -529,7 +640,7 @@ export const inventoryService = {
       const transferId = await inventoryRepository.createTransfer(tenantId, {
         qty,
         transfer_status: completeNow ? "completed" : "pending",
-        product_id,
+        variant_id: variant.id,
         from_warehouse_id,
         to_warehouse_id,
       });
@@ -547,39 +658,39 @@ export const inventoryService = {
     }
     await ensureWarehouse(tenantId, from_warehouse_id);
     await ensureWarehouse(tenantId, to_warehouse_id);
-    const lines = normalizeBulkQtyItems(body, "product");
+    const lines = normalizeBulkQtyItems(body, "variant");
     const completeNow = body.complete !== false;
 
     return withTransaction(async () => {
       const created = [];
       for (const line of lines) {
-        await ensureProduct(tenantId, line.product_id);
+        await ensureVariant(tenantId, line.variant_id);
         if (completeNow) {
-          await applyStockDelta(tenantId, line.product_id, from_warehouse_id, -line.qty);
-          await applyStockDelta(tenantId, line.product_id, to_warehouse_id, line.qty);
+          await applyStockDelta(tenantId, line.variant_id, from_warehouse_id, -line.qty);
+          await applyStockDelta(tenantId, line.variant_id, to_warehouse_id, line.qty);
           await inventoryRepository.createMovement(tenantId, userId, {
             movement_type: "transfer_out",
             qty: line.qty,
             notes: line.notes || `Transfer to warehouse #${to_warehouse_id}`,
-            product_id: line.product_id,
+            variant_id: line.variant_id,
             warehouse_id: from_warehouse_id,
           });
           await inventoryRepository.createMovement(tenantId, userId, {
             movement_type: "transfer_in",
             qty: line.qty,
             notes: line.notes || `Transfer from warehouse #${from_warehouse_id}`,
-            product_id: line.product_id,
+            variant_id: line.variant_id,
             warehouse_id: to_warehouse_id,
           });
         }
         const transferId = await inventoryRepository.createTransfer(tenantId, {
           qty: line.qty,
           transfer_status: completeNow ? "completed" : "pending",
-          product_id: line.product_id,
+          variant_id: line.variant_id,
           from_warehouse_id,
           to_warehouse_id,
         });
-        created.push({ id: transferId, product_id: line.product_id });
+        created.push({ id: transferId, variant_id: line.variant_id });
       }
       return { count: created.length, items: created };
     });
@@ -592,20 +703,20 @@ export const inventoryService = {
     if (transfer.transfer_status === "cancelled") throw new Error("Transfer is cancelled");
 
     return withTransaction(async () => {
-      await applyStockDelta(tenantId, transfer.product_id, transfer.from_warehouse_id, -transfer.qty);
-      await applyStockDelta(tenantId, transfer.product_id, transfer.to_warehouse_id, transfer.qty);
+      await applyStockDelta(tenantId, transfer.variant_id, transfer.from_warehouse_id, -transfer.qty);
+      await applyStockDelta(tenantId, transfer.variant_id, transfer.to_warehouse_id, transfer.qty);
       await inventoryRepository.createMovement(tenantId, userId, {
         movement_type: "transfer_out",
         qty: transfer.qty,
         notes: `Transfer #${id} out`,
-        product_id: transfer.product_id,
+        variant_id: transfer.variant_id,
         warehouse_id: transfer.from_warehouse_id,
       });
       await inventoryRepository.createMovement(tenantId, userId, {
         movement_type: "transfer_in",
         qty: transfer.qty,
         notes: `Transfer #${id} in`,
-        product_id: transfer.product_id,
+        variant_id: transfer.variant_id,
         warehouse_id: transfer.to_warehouse_id,
       });
       await inventoryRepository.updateTransferStatus(tenantId, id, "completed");
@@ -623,17 +734,18 @@ export const inventoryService = {
     return inventoryRepository.getTransferById(tenantId, id);
   },
 
-  // Reference data
   async referenceData(tenantId) {
-    const [categories, warehouses, products] = await Promise.all([
+    const [categories, warehouses, products, variants] = await Promise.all([
       inventoryRepository.listCategories(tenantId, { limit: 10000, offset: 0 }),
       inventoryRepository.listAllWarehousesBrief(tenantId),
       inventoryRepository.listAllProductsBrief(tenantId),
+      inventoryRepository.listAllVariantsBrief(tenantId),
     ]);
     return {
       categories: categories.rows,
       warehouses,
       products,
+      variants,
       movement_types: MOVEMENT_TYPES,
       transfer_statuses: TRANSFER_STATUSES,
       statuses: STATUS_VALUES,

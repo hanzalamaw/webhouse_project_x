@@ -17,8 +17,7 @@ import {
   getStoreById,
 } from "../../repositories/ecommerceRepository.js";
 import {
-  importNormalizedProduct,
-  importAllSyncedProductsForStore,
+  maybeUpdateLinkedProduct,
 } from "./ecomImport.js";
 
 const running = new Set();
@@ -30,7 +29,7 @@ async function persistEntity(storeId, tenantId, entityType, raw, normalized, sou
       : String(raw.order_id || raw.item_id || raw.product_id || raw.id);
   await upsertSyncedRecord(storeId, tenantId, entityType, externalId, raw, normalized, source, platform);
   if (entityType === "product") {
-    await importNormalizedProduct(tenantId, normalized, { storeId });
+    await maybeUpdateLinkedProduct(tenantId, storeId, normalized);
   }
   await touchLastSynced(storeId);
 }
@@ -167,13 +166,11 @@ export async function runDarazInitialSync(storeId) {
       message: `Synced ${customers.length} customer(s) from orders`,
     });
 
-    await importAllSyncedProductsForStore(storeId, store.tenant_id);
-
     await updateInitialSyncStatus(storeId, "completed");
     await addSyncLog(storeId, store.tenant_id, {
       syncType: "initial_sync",
       status: "completed",
-      message: "Daraz initial sync completed",
+      message: "Store data fetched — review and import into your ERP when ready",
     });
   } catch (error) {
     await updateInitialSyncStatus(storeId, "failed");

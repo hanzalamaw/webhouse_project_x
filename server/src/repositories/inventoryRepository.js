@@ -1,10 +1,15 @@
 import { readDb, writeDb } from "../database/db.js";
 
 const PRODUCT_SELECT = `
-  p.id, p.product_name, p.sku, p.unit, p.cost_price, p.selling_price,
-  p.delivery_charges, p.discount, p.tax,
-  p.status, p.created_at, p.updated_at, p.category_id, p.tenant_id,
+  p.id, p.product_name, p.unit, p.delivery_charges, p.discount, p.tax,
+  p.status, p.source, p.created_at, p.updated_at, p.category_id, p.tenant_id,
   c.category_name,
+  COUNT(DISTINCT v.id) AS variant_count,
+  MIN(v.selling_price) AS min_selling_price,
+  MAX(v.selling_price) AS max_selling_price,
+  MIN(v.cost_price) AS min_cost_price,
+  MAX(v.cost_price) AS max_cost_price,
+  GROUP_CONCAT(DISTINCT v.sku ORDER BY v.sku SEPARATOR ', ') AS skus,
   COALESCE(SUM(sl.available_qty), 0) AS total_available,
   COALESCE(SUM(sl.reserved_qty), 0) AS total_reserved,
   COALESCE(SUM(sl.damaged_qty), 0) AS total_damaged,
@@ -14,7 +19,15 @@ const PRODUCT_SELECT = `
 const PRODUCT_FROM = `
   FROM inventory_products p
   LEFT JOIN inventory_categories c ON c.id = p.category_id AND c.deleted_at IS NULL
-  LEFT JOIN inventory_stock_levels sl ON sl.product_id = p.id AND sl.deleted_at IS NULL
+  LEFT JOIN inventory_product_variants v ON v.product_id = p.id AND v.deleted_at IS NULL
+  LEFT JOIN inventory_stock_levels sl ON sl.variant_id = v.id AND sl.deleted_at IS NULL
+`;
+
+const VARIANT_SELECT = `
+  v.id, v.product_id, v.sku, v.variant_name, v.cost_price, v.selling_price,
+  v.status, v.created_at, v.updated_at, v.tenant_id,
+  p.product_name, p.unit, p.delivery_charges, p.discount, p.tax,
+  p.category_id, c.category_name
 `;
 
 function tenantWhere(alias, tenantId) {
@@ -27,6 +40,7 @@ export const inventoryRepository = {
     const [[stats]] = await readDb.query(
       `SELECT
          (SELECT COUNT(*) FROM inventory_products WHERE tenant_id = ? AND deleted_at IS NULL) AS product_count,
+         (SELECT COUNT(*) FROM inventory_product_variants WHERE tenant_id = ? AND deleted_at IS NULL) AS variant_count,
          (SELECT COUNT(*) FROM inventory_products WHERE tenant_id = ? AND deleted_at IS NULL AND status = 'active') AS active_products,
          (SELECT COUNT(*) FROM inventory_products WHERE tenant_id = ? AND deleted_at IS NULL AND status = 'inactive') AS inactive_products,
          (SELECT COUNT(*) FROM inventory_categories WHERE tenant_id = ? AND deleted_at IS NULL) AS category_count,
@@ -37,13 +51,14 @@ export const inventoryRepository = {
          (SELECT COALESCE(SUM(available_qty), 0) FROM inventory_stock_levels WHERE tenant_id = ? AND deleted_at IS NULL) AS available_units,
          (SELECT COALESCE(SUM(reserved_qty), 0) FROM inventory_stock_levels WHERE tenant_id = ? AND deleted_at IS NULL) AS reserved_units,
          (SELECT COALESCE(SUM(damaged_qty), 0) FROM inventory_stock_levels WHERE tenant_id = ? AND deleted_at IS NULL) AS damaged_units,
-         (SELECT COALESCE(SUM(sl.available_qty * p.cost_price), 0)
+         (SELECT COALESCE(SUM(sl.available_qty * v.cost_price), 0)
             FROM inventory_stock_levels sl
-            JOIN inventory_products p ON p.id = sl.product_id AND p.deleted_at IS NULL
+            JOIN inventory_product_variants v ON v.id = sl.variant_id AND v.deleted_at IS NULL
            WHERE sl.tenant_id = ? AND sl.deleted_at IS NULL) AS inventory_value_cost,
-         (SELECT COALESCE(SUM(sl.available_qty * GREATEST(p.selling_price - p.discount + p.tax, 0)), 0)
+         (SELECT COALESCE(SUM(sl.available_qty * GREATEST(v.selling_price - p.discount + p.tax, 0)), 0)
             FROM inventory_stock_levels sl
-            JOIN inventory_products p ON p.id = sl.product_id AND p.deleted_at IS NULL
+            JOIN inventory_product_variants v ON v.id = sl.variant_id AND v.deleted_at IS NULL
+            JOIN inventory_products p ON p.id = v.product_id AND p.deleted_at IS NULL
            WHERE sl.tenant_id = ? AND sl.deleted_at IS NULL) AS inventory_value_retail,
          (SELECT COUNT(*) FROM inventory_stock_movements WHERE tenant_id = ? AND deleted_at IS NULL) AS total_movements,
          (SELECT COUNT(*) FROM inventory_stock_movements WHERE tenant_id = ? AND deleted_at IS NULL AND movement_type = 'stock_in') AS total_stock_in,
@@ -66,14 +81,14 @@ export const inventoryRepository = {
          (SELECT COUNT(*) FROM inventory_stock_transfers WHERE tenant_id = ? AND deleted_at IS NULL AND transfer_status = 'pending') AS pending_transfers,
          (SELECT COUNT(*) FROM inventory_stock_transfers WHERE tenant_id = ? AND deleted_at IS NULL AND transfer_status = 'completed') AS completed_transfers,
          (SELECT COUNT(*) FROM inventory_stock_transfers WHERE tenant_id = ? AND deleted_at IS NULL AND transfer_status = 'cancelled') AS cancelled_transfers,
-         (SELECT COUNT(DISTINCT p.id) FROM inventory_products p
-            JOIN inventory_stock_levels sl ON sl.product_id = p.id AND sl.deleted_at IS NULL
-           WHERE p.tenant_id = ? AND p.deleted_at IS NULL AND sl.available_qty <= 5 AND sl.available_qty > 0) AS low_stock_count,
-         (SELECT COUNT(DISTINCT p.id) FROM inventory_products p
-            LEFT JOIN inventory_stock_levels sl ON sl.product_id = p.id AND sl.deleted_at IS NULL
-           WHERE p.tenant_id = ? AND p.deleted_at IS NULL
+         (SELECT COUNT(DISTINCT v.id) FROM inventory_product_variants v
+            JOIN inventory_stock_levels sl ON sl.variant_id = v.id AND sl.deleted_at IS NULL
+           WHERE v.tenant_id = ? AND v.deleted_at IS NULL AND sl.available_qty <= 5 AND sl.available_qty > 0) AS low_stock_count,
+         (SELECT COUNT(DISTINCT v.id) FROM inventory_product_variants v
+            LEFT JOIN inventory_stock_levels sl ON sl.variant_id = v.id AND sl.deleted_at IS NULL
+           WHERE v.tenant_id = ? AND v.deleted_at IS NULL
              AND (sl.id IS NULL OR sl.available_qty = 0)) AS out_of_stock_count`,
-      Array(30).fill(tenantId)
+      Array(31).fill(tenantId)
     );
     return stats;
   },
@@ -112,10 +127,11 @@ export const inventoryRepository = {
       `SELECT c.category_name AS label,
               COUNT(DISTINCT p.id) AS product_count,
               COALESCE(SUM(sl.total_qty), 0) AS total_qty,
-              COALESCE(SUM(sl.available_qty * p.cost_price), 0) AS value_cost
+              COALESCE(SUM(sl.available_qty * v.cost_price), 0) AS value_cost
        FROM inventory_categories c
        LEFT JOIN inventory_products p ON p.category_id = c.id AND p.deleted_at IS NULL
-       LEFT JOIN inventory_stock_levels sl ON sl.product_id = p.id AND sl.deleted_at IS NULL
+       LEFT JOIN inventory_product_variants v ON v.product_id = p.id AND v.deleted_at IS NULL
+       LEFT JOIN inventory_stock_levels sl ON sl.variant_id = v.id AND sl.deleted_at IS NULL
        WHERE c.tenant_id = ? AND c.deleted_at IS NULL
        GROUP BY c.id, c.category_name
        ORDER BY total_qty DESC
@@ -128,13 +144,13 @@ export const inventoryRepository = {
   async dashboardStockByWarehouse(tenantId) {
     const [rows] = await readDb.query(
       `SELECT w.warehouse_name AS label,
-              COUNT(DISTINCT sl.product_id) AS product_count,
+              COUNT(DISTINCT sl.variant_id) AS product_count,
               COALESCE(SUM(sl.total_qty), 0) AS total_qty,
               COALESCE(SUM(sl.available_qty), 0) AS available_qty,
-              COALESCE(SUM(sl.available_qty * p.cost_price), 0) AS value_cost
+              COALESCE(SUM(sl.available_qty * v.cost_price), 0) AS value_cost
        FROM inventory_warehouses w
        LEFT JOIN inventory_stock_levels sl ON sl.warehouse_id = w.id AND sl.deleted_at IS NULL
-       LEFT JOIN inventory_products p ON p.id = sl.product_id AND p.deleted_at IS NULL
+       LEFT JOIN inventory_product_variants v ON v.id = sl.variant_id AND v.deleted_at IS NULL
        WHERE w.tenant_id = ? AND w.deleted_at IS NULL
        GROUP BY w.id, w.warehouse_name
        ORDER BY total_qty DESC`,
@@ -145,14 +161,16 @@ export const inventoryRepository = {
 
   async dashboardTopProducts(tenantId, limit = 6) {
     const [rows] = await readDb.query(
-      `SELECT p.id, p.product_name, p.sku, c.category_name,
+      `SELECT p.id, p.product_name, c.category_name,
+              COUNT(DISTINCT v.id) AS variant_count,
               COALESCE(SUM(sl.total_qty), 0) AS total_qty,
               COALESCE(SUM(sl.available_qty), 0) AS available_qty
        FROM inventory_products p
        LEFT JOIN inventory_categories c ON c.id = p.category_id AND c.deleted_at IS NULL
-       LEFT JOIN inventory_stock_levels sl ON sl.product_id = p.id AND sl.deleted_at IS NULL
+       LEFT JOIN inventory_product_variants v ON v.product_id = p.id AND v.deleted_at IS NULL
+       LEFT JOIN inventory_stock_levels sl ON sl.variant_id = v.id AND sl.deleted_at IS NULL
        WHERE p.tenant_id = ? AND p.deleted_at IS NULL
-       GROUP BY p.id, p.product_name, p.sku, c.category_name
+       GROUP BY p.id, p.product_name, c.category_name
        ORDER BY total_qty DESC
        LIMIT ?`,
       [tenantId, limit]
@@ -162,14 +180,15 @@ export const inventoryRepository = {
 
   async dashboardLowStockProducts(tenantId, limit = 8) {
     const [rows] = await readDb.query(
-      `SELECT p.product_name, p.sku, c.category_name,
+      `SELECT p.product_name, v.sku, v.variant_name, c.category_name,
               COALESCE(SUM(sl.available_qty), 0) AS available_qty,
               COALESCE(SUM(sl.total_qty), 0) AS total_qty
-       FROM inventory_products p
+       FROM inventory_product_variants v
+       JOIN inventory_products p ON p.id = v.product_id AND p.deleted_at IS NULL
        LEFT JOIN inventory_categories c ON c.id = p.category_id AND c.deleted_at IS NULL
-       JOIN inventory_stock_levels sl ON sl.product_id = p.id AND sl.deleted_at IS NULL
-       WHERE p.tenant_id = ? AND p.deleted_at IS NULL
-       GROUP BY p.id, p.product_name, p.sku, c.category_name
+       JOIN inventory_stock_levels sl ON sl.variant_id = v.id AND sl.deleted_at IS NULL
+       WHERE v.tenant_id = ? AND v.deleted_at IS NULL
+       GROUP BY v.id, p.product_name, v.sku, v.variant_name, c.category_name
        HAVING available_qty <= 5
        ORDER BY available_qty ASC
        LIMIT ?`,
@@ -181,11 +200,12 @@ export const inventoryRepository = {
   async dashboardRecentTransfers(tenantId, limit = 6) {
     const [rows] = await readDb.query(
       `SELECT t.id, t.qty, t.transfer_status, t.created_at,
-              p.product_name, p.sku,
+              p.product_name, v.sku, v.variant_name,
               fw.warehouse_name AS from_warehouse_name,
               tw.warehouse_name AS to_warehouse_name
        FROM inventory_stock_transfers t
-       JOIN inventory_products p ON p.id = t.product_id AND p.deleted_at IS NULL
+       JOIN inventory_product_variants v ON v.id = t.variant_id AND v.deleted_at IS NULL
+       JOIN inventory_products p ON p.id = v.product_id AND p.deleted_at IS NULL
        JOIN inventory_warehouses fw ON fw.id = t.from_warehouse_id AND fw.deleted_at IS NULL
        JOIN inventory_warehouses tw ON tw.id = t.to_warehouse_id AND tw.deleted_at IS NULL
        WHERE t.tenant_id = ? AND t.deleted_at IS NULL
@@ -199,9 +219,10 @@ export const inventoryRepository = {
   async recentMovements(tenantId, limit = 8) {
     const [rows] = await readDb.query(
       `SELECT m.id, m.movement_type, m.qty, m.notes, m.created_at,
-              p.product_name, p.sku, w.warehouse_name, u.name AS created_by_name
+              p.product_name, v.sku, v.variant_name, w.warehouse_name, u.name AS created_by_name
        FROM inventory_stock_movements m
-       JOIN inventory_products p ON p.id = m.product_id AND p.deleted_at IS NULL
+       JOIN inventory_product_variants v ON v.id = m.variant_id AND v.deleted_at IS NULL
+       JOIN inventory_products p ON p.id = v.product_id AND p.deleted_at IS NULL
        JOIN inventory_warehouses w ON w.id = m.warehouse_id AND w.deleted_at IS NULL
        LEFT JOIN users u ON u.id = m.created_by
        WHERE m.tenant_id = ? AND m.deleted_at IS NULL
@@ -262,10 +283,14 @@ export const inventoryRepository = {
 
   async getCategoryProducts(tenantId, categoryId) {
     const [rows] = await readDb.query(
-      `SELECT id, product_name, sku, status, category_id
-       FROM inventory_products
-       WHERE tenant_id = ? AND category_id = ? AND deleted_at IS NULL
-       ORDER BY product_name ASC`,
+      `SELECT p.id, p.product_name, p.status, p.category_id,
+              COUNT(v.id) AS variant_count,
+              GROUP_CONCAT(v.sku ORDER BY v.sku SEPARATOR ', ') AS skus
+       FROM inventory_products p
+       LEFT JOIN inventory_product_variants v ON v.product_id = p.id AND v.deleted_at IS NULL
+       WHERE p.tenant_id = ? AND p.category_id = ? AND p.deleted_at IS NULL
+       GROUP BY p.id
+       ORDER BY p.product_name ASC`,
       [tenantId, categoryId]
     );
     return rows;
@@ -306,7 +331,7 @@ export const inventoryRepository = {
     );
   },
 
-  // ── Products ───────────────────────────────────────────────────────────────
+  // ── Products (parent) ──────────────────────────────────────────────────────
   async listProducts(tenantId, { limit, offset }) {
     const [rows] = await readDb.query(
       `SELECT ${PRODUCT_SELECT}
@@ -336,47 +361,19 @@ export const inventoryRepository = {
     return rows[0] || null;
   },
 
-  async getProductStockLevels(tenantId, productId) {
-    const [rows] = await readDb.query(
-      `SELECT sl.id, sl.available_qty, sl.reserved_qty, sl.damaged_qty, sl.total_qty,
-              sl.updated_at, sl.product_id, sl.warehouse_id, sl.tenant_id,
-              w.warehouse_name, w.location, w.city, w.status AS warehouse_status
-       FROM inventory_stock_levels sl
-       JOIN inventory_warehouses w ON w.id = sl.warehouse_id AND w.deleted_at IS NULL
-       WHERE sl.product_id = ? AND ${tenantWhere("sl", tenantId)}
-       ORDER BY w.warehouse_name ASC`,
-      [productId, tenantId]
-    );
-    return rows;
-  },
-
-  async findProductBySku(tenantId, sku, excludeId = null) {
-    const params = [tenantId, sku];
-    let sql = `SELECT id FROM inventory_products WHERE tenant_id = ? AND sku = ? AND deleted_at IS NULL`;
-    if (excludeId) {
-      sql += ` AND id != ?`;
-      params.push(excludeId);
-    }
-    sql += ` LIMIT 1`;
-    const [rows] = await readDb.query(sql, params);
-    return rows[0] || null;
-  },
-
   async createProduct(tenantId, data) {
     const [result] = await writeDb.query(
       `INSERT INTO inventory_products
-         (product_name, sku, unit, cost_price, selling_price, delivery_charges, discount, tax, status, category_id, tenant_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (product_name, unit, delivery_charges, discount, tax, status, source, category_id, tenant_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         data.product_name,
-        data.sku,
         data.unit,
-        data.cost_price,
-        data.selling_price,
         data.delivery_charges ?? 0,
         data.discount ?? 0,
         data.tax ?? 0,
         data.status,
+        data.source || "manual",
         data.category_id,
         tenantId,
       ]
@@ -385,26 +382,33 @@ export const inventoryRepository = {
   },
 
   async updateProduct(tenantId, id, data) {
+    const sets = [
+      "product_name = ?",
+      "unit = ?",
+      "delivery_charges = ?",
+      "discount = ?",
+      "tax = ?",
+      "status = ?",
+      "category_id = ?",
+    ];
+    const params = [
+      data.product_name,
+      data.unit,
+      data.delivery_charges ?? 0,
+      data.discount ?? 0,
+      data.tax ?? 0,
+      data.status,
+      data.category_id,
+    ];
+    if (data.source != null) {
+      sets.push("source = ?");
+      params.push(data.source);
+    }
+    params.push(id, tenantId);
     await writeDb.query(
-      `UPDATE inventory_products
-       SET product_name = ?, sku = ?, unit = ?, cost_price = ?, selling_price = ?,
-           delivery_charges = ?, discount = ?, tax = ?,
-           status = ?, category_id = ?
+      `UPDATE inventory_products SET ${sets.join(", ")}
        WHERE id = ? AND ${tenantWhere("inventory_products", tenantId)}`,
-      [
-        data.product_name,
-        data.sku,
-        data.unit,
-        data.cost_price,
-        data.selling_price,
-        data.delivery_charges ?? 0,
-        data.discount ?? 0,
-        data.tax ?? 0,
-        data.status,
-        data.category_id,
-        id,
-        tenantId,
-      ]
+      params
     );
   },
 
@@ -414,17 +418,208 @@ export const inventoryRepository = {
        WHERE id = ? AND ${tenantWhere("inventory_products", tenantId)}`,
       [id, tenantId]
     );
+    if (result.affectedRows > 0) {
+      await writeDb.query(
+        `UPDATE inventory_product_variants SET deleted_at = NOW()
+         WHERE product_id = ? AND tenant_id = ? AND deleted_at IS NULL`,
+        [id, tenantId]
+      );
+    }
     return result.affectedRows > 0;
   },
 
   async listAllProductsBrief(tenantId) {
     const [rows] = await readDb.query(
-      `SELECT p.id, p.product_name, p.sku, p.status, p.category_id, c.category_name
+      `SELECT p.id, p.product_name, p.status, p.category_id, c.category_name,
+              COUNT(v.id) AS variant_count
        FROM inventory_products p
        LEFT JOIN inventory_categories c ON c.id = p.category_id AND c.deleted_at IS NULL
+       LEFT JOIN inventory_product_variants v ON v.product_id = p.id AND v.deleted_at IS NULL
        WHERE ${tenantWhere("p", tenantId)}
+       GROUP BY p.id
        ORDER BY p.product_name ASC`,
       [tenantId]
+    );
+    return rows;
+  },
+
+  // ── Variants ───────────────────────────────────────────────────────────────
+  async getVariantsByProductId(tenantId, productId) {
+    const [rows] = await readDb.query(
+      `SELECT ${VARIANT_SELECT},
+              COALESCE(SUM(sl.available_qty), 0) AS total_available,
+              COALESCE(SUM(sl.total_qty), 0) AS total_qty
+       FROM inventory_product_variants v
+       JOIN inventory_products p ON p.id = v.product_id AND p.deleted_at IS NULL
+       LEFT JOIN inventory_categories c ON c.id = p.category_id AND c.deleted_at IS NULL
+       LEFT JOIN inventory_stock_levels sl ON sl.variant_id = v.id AND sl.deleted_at IS NULL
+       WHERE v.product_id = ? AND ${tenantWhere("v", tenantId)}
+       GROUP BY v.id
+       ORDER BY v.variant_name ASC`,
+      [productId, tenantId]
+    );
+    for (const row of rows) {
+      row.attributes = await this.getVariantAttributes(row.id);
+    }
+    return rows;
+  },
+
+  async getVariantById(tenantId, id) {
+    const [rows] = await readDb.query(
+      `SELECT ${VARIANT_SELECT}
+       FROM inventory_product_variants v
+       JOIN inventory_products p ON p.id = v.product_id AND p.deleted_at IS NULL
+       LEFT JOIN inventory_categories c ON c.id = p.category_id AND c.deleted_at IS NULL
+       WHERE v.id = ? AND ${tenantWhere("v", tenantId)}
+       LIMIT 1`,
+      [id, tenantId]
+    );
+    if (!rows[0]) return null;
+    rows[0].attributes = await this.getVariantAttributes(id);
+    return rows[0];
+  },
+
+  async getDefaultVariantForProduct(tenantId, productId) {
+    const [rows] = await readDb.query(
+      `SELECT id FROM inventory_product_variants
+       WHERE product_id = ? AND ${tenantWhere("inventory_product_variants", tenantId)}
+       ORDER BY id ASC LIMIT 1`,
+      [productId, tenantId]
+    );
+    return rows[0] || null;
+  },
+
+  async findVariantBySku(tenantId, sku, excludeId = null) {
+    const params = [tenantId, sku];
+    let sql = `SELECT v.id, v.product_id, v.sku, v.variant_name, v.cost_price, v.selling_price, v.status
+       FROM inventory_product_variants v
+       WHERE v.tenant_id = ? AND v.sku = ? AND v.deleted_at IS NULL`;
+    if (excludeId) {
+      sql += ` AND v.id != ?`;
+      params.push(excludeId);
+    }
+    sql += ` LIMIT 1`;
+    const [rows] = await readDb.query(sql, params);
+    return rows[0] || null;
+  },
+
+  /** @deprecated use findVariantBySku */
+  async findProductBySku(tenantId, sku, excludeId = null) {
+    return this.findVariantBySku(tenantId, sku, excludeId);
+  },
+
+  async createVariant(tenantId, data) {
+    const [result] = await writeDb.query(
+      `INSERT INTO inventory_product_variants
+         (product_id, sku, variant_name, cost_price, selling_price, status, tenant_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        data.product_id,
+        data.sku,
+        data.variant_name,
+        data.cost_price,
+        data.selling_price,
+        data.status,
+        tenantId,
+      ]
+    );
+    return result.insertId;
+  },
+
+  async updateVariant(tenantId, id, data) {
+    await writeDb.query(
+      `UPDATE inventory_product_variants
+       SET sku = ?, variant_name = ?, cost_price = ?, selling_price = ?, status = ?
+       WHERE id = ? AND ${tenantWhere("inventory_product_variants", tenantId)}`,
+      [data.sku, data.variant_name, data.cost_price, data.selling_price, data.status, id, tenantId]
+    );
+  },
+
+  async softDeleteVariant(tenantId, id) {
+    const [result] = await writeDb.query(
+      `UPDATE inventory_product_variants SET deleted_at = NOW()
+       WHERE id = ? AND ${tenantWhere("inventory_product_variants", tenantId)}`,
+      [id, tenantId]
+    );
+    return result.affectedRows > 0;
+  },
+
+  async getVariantAttributes(variantId) {
+    const [rows] = await readDb.query(
+      `SELECT a.attribute_name, av.value
+       FROM inventory_variant_attribute_values av
+       JOIN inventory_variant_attributes a ON a.id = av.attribute_id
+       WHERE av.variant_id = ?
+       ORDER BY a.attribute_name ASC`,
+      [variantId]
+    );
+    return rows;
+  },
+
+  async ensureAttribute(tenantId, attributeName) {
+    const name = String(attributeName || "").trim();
+    if (!name) return null;
+    const [existing] = await readDb.query(
+      `SELECT id FROM inventory_variant_attributes
+       WHERE tenant_id = ? AND LOWER(attribute_name) = LOWER(?)
+       LIMIT 1`,
+      [tenantId, name]
+    );
+    if (existing[0]) return existing[0].id;
+    const [result] = await writeDb.query(
+      `INSERT INTO inventory_variant_attributes (attribute_name, tenant_id) VALUES (?, ?)`,
+      [name, tenantId]
+    );
+    return result.insertId;
+  },
+
+  async setVariantAttributes(tenantId, variantId, attributes) {
+    await writeDb.query(
+      `DELETE av FROM inventory_variant_attribute_values av
+       WHERE av.variant_id = ?`,
+      [variantId]
+    );
+    if (!Array.isArray(attributes) || !attributes.length) return;
+    for (const attr of attributes) {
+      const attrName = String(attr.attribute_name || attr.name || "").trim();
+      const value = String(attr.value || "").trim();
+      if (!attrName || !value) continue;
+      const attributeId = await this.ensureAttribute(tenantId, attrName);
+      await writeDb.query(
+        `INSERT INTO inventory_variant_attribute_values (variant_id, attribute_id, value) VALUES (?, ?, ?)`,
+        [variantId, attributeId, value]
+      );
+    }
+  },
+
+  async listAllVariantsBrief(tenantId) {
+    const [rows] = await readDb.query(
+      `SELECT v.id, v.product_id, v.sku, v.variant_name, v.selling_price, v.cost_price, v.status,
+              p.product_name, p.unit, p.delivery_charges, p.discount, p.tax,
+              p.category_id, c.category_name,
+              COALESCE(SUM(sl.available_qty), 0) AS total_available
+       FROM inventory_product_variants v
+       JOIN inventory_products p ON p.id = v.product_id AND p.deleted_at IS NULL
+       LEFT JOIN inventory_categories c ON c.id = p.category_id AND c.deleted_at IS NULL
+       LEFT JOIN inventory_stock_levels sl ON sl.variant_id = v.id AND sl.deleted_at IS NULL
+       WHERE ${tenantWhere("v", tenantId)} AND LOWER(TRIM(v.status)) = 'active'
+       GROUP BY v.id
+       ORDER BY p.product_name ASC, v.variant_name ASC`,
+      [tenantId]
+    );
+    return rows;
+  },
+
+  async getVariantStockLevels(tenantId, variantId) {
+    const [rows] = await readDb.query(
+      `SELECT sl.id, sl.available_qty, sl.reserved_qty, sl.damaged_qty, sl.total_qty,
+              sl.updated_at, sl.variant_id, sl.warehouse_id, sl.tenant_id,
+              w.warehouse_name, w.location, w.city, w.status AS warehouse_status
+       FROM inventory_stock_levels sl
+       JOIN inventory_warehouses w ON w.id = sl.warehouse_id AND w.deleted_at IS NULL
+       WHERE sl.variant_id = ? AND ${tenantWhere("sl", tenantId)}
+       ORDER BY w.warehouse_name ASC`,
+      [variantId, tenantId]
     );
     return rows;
   },
@@ -451,7 +646,7 @@ export const inventoryRepository = {
   async listWarehouses(tenantId, { limit, offset }) {
     const [rows] = await readDb.query(
       `SELECT w.id, w.warehouse_name, w.location, w.city, w.status, w.created_at, w.tenant_id,
-              COUNT(DISTINCT sl.product_id) AS product_count,
+              COUNT(DISTINCT sl.variant_id) AS product_count,
               COALESCE(SUM(sl.total_qty), 0) AS total_units
        FROM inventory_warehouses w
        LEFT JOIN inventory_stock_levels sl ON sl.warehouse_id = w.id AND sl.deleted_at IS NULL
@@ -517,20 +712,20 @@ export const inventoryRepository = {
     return rows;
   },
 
-  // ── Stock levels ───────────────────────────────────────────────────────────
-  async getStockLevel(tenantId, productId, warehouseId) {
+  // ── Stock levels (variant-scoped) ──────────────────────────────────────────
+  async getStockLevel(tenantId, variantId, warehouseId) {
     const [rows] = await readDb.query(
       `SELECT id, available_qty, reserved_qty, damaged_qty, total_qty
        FROM inventory_stock_levels
-       WHERE product_id = ? AND warehouse_id = ? AND ${tenantWhere("inventory_stock_levels", tenantId)}
+       WHERE variant_id = ? AND warehouse_id = ? AND ${tenantWhere("inventory_stock_levels", tenantId)}
        LIMIT 1`,
-      [productId, warehouseId, tenantId]
+      [variantId, warehouseId, tenantId]
     );
     return rows[0] || null;
   },
 
-  async upsertStockLevel(tenantId, productId, warehouseId, deltaAvailable, deltaDamaged = 0) {
-    const existing = await this.getStockLevel(tenantId, productId, warehouseId);
+  async upsertStockLevel(tenantId, variantId, warehouseId, deltaAvailable, deltaDamaged = 0) {
+    const existing = await this.getStockLevel(tenantId, variantId, warehouseId);
     if (existing) {
       const available = Math.max(0, existing.available_qty + deltaAvailable);
       const damaged = Math.max(0, existing.damaged_qty + deltaDamaged);
@@ -548,19 +743,19 @@ export const inventoryRepository = {
     const total = available + damaged;
     const [result] = await writeDb.query(
       `INSERT INTO inventory_stock_levels
-         (available_qty, reserved_qty, damaged_qty, total_qty, product_id, warehouse_id, tenant_id)
+         (available_qty, reserved_qty, damaged_qty, total_qty, variant_id, warehouse_id, tenant_id)
        VALUES (?, 0, ?, ?, ?, ?, ?)`,
-      [available, damaged, total, productId, warehouseId, tenantId]
+      [available, damaged, total, variantId, warehouseId, tenantId]
     );
     return result.insertId;
   },
 
-  async setStockLevelAbsolute(tenantId, productId, warehouseId, { available_qty, reserved_qty, damaged_qty }) {
+  async setStockLevelAbsolute(tenantId, variantId, warehouseId, { available_qty, reserved_qty, damaged_qty }) {
     const available = Math.max(0, Number(available_qty) || 0);
     const reserved = Math.max(0, Number(reserved_qty) || 0);
     const damaged = Math.max(0, Number(damaged_qty) || 0);
     const total = available + reserved + damaged;
-    const existing = await this.getStockLevel(tenantId, productId, warehouseId);
+    const existing = await this.getStockLevel(tenantId, variantId, warehouseId);
     if (existing) {
       await writeDb.query(
         `UPDATE inventory_stock_levels
@@ -572,9 +767,9 @@ export const inventoryRepository = {
     }
     const [result] = await writeDb.query(
       `INSERT INTO inventory_stock_levels
-         (available_qty, reserved_qty, damaged_qty, total_qty, product_id, warehouse_id, tenant_id)
+         (available_qty, reserved_qty, damaged_qty, total_qty, variant_id, warehouse_id, tenant_id)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [available, reserved, damaged, total, productId, warehouseId, tenantId]
+      [available, reserved, damaged, total, variantId, warehouseId, tenantId]
     );
     return result.insertId;
   },
@@ -583,13 +778,13 @@ export const inventoryRepository = {
   async createMovement(tenantId, userId, data) {
     const [result] = await writeDb.query(
       `INSERT INTO inventory_stock_movements
-         (movement_type, qty, notes, product_id, warehouse_id, created_by, tenant_id)
+         (movement_type, qty, notes, variant_id, warehouse_id, created_by, tenant_id)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [
         data.movement_type,
         data.qty,
         data.notes || null,
-        data.product_id,
+        data.variant_id,
         data.warehouse_id,
         userId,
         tenantId,
@@ -608,10 +803,11 @@ export const inventoryRepository = {
     params.push(limit, offset);
     const [rows] = await readDb.query(
       `SELECT m.id, m.movement_type, m.qty, m.notes, m.created_at,
-              m.product_id, m.warehouse_id, m.created_by, m.tenant_id,
-              p.product_name, p.sku, w.warehouse_name, u.name AS created_by_name
+              m.variant_id, m.warehouse_id, m.created_by, m.tenant_id,
+              p.product_name, v.sku, v.variant_name, w.warehouse_name, u.name AS created_by_name
        FROM inventory_stock_movements m
-       JOIN inventory_products p ON p.id = m.product_id AND p.deleted_at IS NULL
+       JOIN inventory_product_variants v ON v.id = m.variant_id AND v.deleted_at IS NULL
+       JOIN inventory_products p ON p.id = v.product_id AND p.deleted_at IS NULL
        JOIN inventory_warehouses w ON w.id = m.warehouse_id AND w.deleted_at IS NULL
        LEFT JOIN users u ON u.id = m.created_by
        WHERE m.tenant_id = ? AND m.deleted_at IS NULL${typeFilter}
@@ -633,12 +829,12 @@ export const inventoryRepository = {
   async createTransfer(tenantId, data) {
     const [result] = await writeDb.query(
       `INSERT INTO inventory_stock_transfers
-         (qty, transfer_status, product_id, from_warehouse_id, to_warehouse_id, tenant_id)
+         (qty, transfer_status, variant_id, from_warehouse_id, to_warehouse_id, tenant_id)
        VALUES (?, ?, ?, ?, ?, ?)`,
       [
         data.qty,
         data.transfer_status,
-        data.product_id,
+        data.variant_id,
         data.from_warehouse_id,
         data.to_warehouse_id,
         tenantId,
@@ -650,12 +846,13 @@ export const inventoryRepository = {
   async listTransfers(tenantId, { limit, offset }) {
     const [rows] = await readDb.query(
       `SELECT t.id, t.qty, t.transfer_status, t.created_at, t.updated_at,
-              t.product_id, t.from_warehouse_id, t.to_warehouse_id, t.tenant_id,
-              p.product_name, p.sku,
+              t.variant_id, t.from_warehouse_id, t.to_warehouse_id, t.tenant_id,
+              p.product_name, v.sku, v.variant_name,
               fw.warehouse_name AS from_warehouse_name,
               tw.warehouse_name AS to_warehouse_name
        FROM inventory_stock_transfers t
-       JOIN inventory_products p ON p.id = t.product_id AND p.deleted_at IS NULL
+       JOIN inventory_product_variants v ON v.id = t.variant_id AND v.deleted_at IS NULL
+       JOIN inventory_products p ON p.id = v.product_id AND p.deleted_at IS NULL
        JOIN inventory_warehouses fw ON fw.id = t.from_warehouse_id AND fw.deleted_at IS NULL
        JOIN inventory_warehouses tw ON tw.id = t.to_warehouse_id AND tw.deleted_at IS NULL
        WHERE t.tenant_id = ? AND t.deleted_at IS NULL
@@ -672,11 +869,12 @@ export const inventoryRepository = {
 
   async getTransferById(tenantId, id) {
     const [rows] = await readDb.query(
-      `SELECT t.*, p.product_name, p.sku,
+      `SELECT t.*, p.product_name, v.sku, v.variant_name,
               fw.warehouse_name AS from_warehouse_name,
               tw.warehouse_name AS to_warehouse_name
        FROM inventory_stock_transfers t
-       JOIN inventory_products p ON p.id = t.product_id AND p.deleted_at IS NULL
+       JOIN inventory_product_variants v ON v.id = t.variant_id AND v.deleted_at IS NULL
+       JOIN inventory_products p ON p.id = v.product_id AND p.deleted_at IS NULL
        JOIN inventory_warehouses fw ON fw.id = t.from_warehouse_id AND fw.deleted_at IS NULL
        JOIN inventory_warehouses tw ON tw.id = t.to_warehouse_id AND tw.deleted_at IS NULL
        WHERE t.id = ? AND t.tenant_id = ? AND t.deleted_at IS NULL

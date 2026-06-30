@@ -104,7 +104,7 @@ export const inventoryController = {
     try {
       const id = tryParseEntityId(req.params.id);
       if (!id) return res.status(400).json({ message: "Invalid product id" });
-      const row = await inventoryService.updateProduct(req.tenantId, id, req.body);
+      const row = await inventoryService.updateProduct(req.tenantId, req.userId, id, req.body);
       if (!row) return res.status(404).json({ message: "Product not found" });
       res.json(row);
     } catch (e) {

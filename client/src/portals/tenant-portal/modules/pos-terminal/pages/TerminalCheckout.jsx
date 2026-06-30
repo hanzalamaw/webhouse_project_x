@@ -267,6 +267,7 @@ export default function TerminalCheckout() {
       if (activeCategory !== "all" && category !== activeCategory) return false;
       if (!q) return true;
       return (
+        String(product.variant_name || "").toLowerCase().includes(q) ||
         String(product.product_name || "").toLowerCase().includes(q) ||
         String(product.sku || "").toLowerCase().includes(q) ||
         String(category).toLowerCase().includes(q)
@@ -280,7 +281,7 @@ export default function TerminalCheckout() {
     const lineDiscount = Number(product?.discount) || 0;
     const lineTax = Number(product?.tax) || 0;
     setCart((prev) => {
-      const index = prev.findIndex((line) => line.product_id === product.id);
+      const index = prev.findIndex((line) => line.variant_id === product.id);
       if (index >= 0) {
         const next = [...prev];
         next[index] = { ...next[index], quantity: next[index].quantity + 1 };
@@ -289,8 +290,10 @@ export default function TerminalCheckout() {
       return [
         ...prev,
         {
-          product_id: product.id,
+          variant_id: product.id,
+          product_id: product.product_id || product.id,
           product_name: product.product_name,
+          variant_name: product.variant_name || product.product_name,
           sku: product.sku,
           unit_price: unitPrice,
           selling_price: sellingPrice,
@@ -302,11 +305,11 @@ export default function TerminalCheckout() {
     });
   };
 
-  const changeQty = (productId, delta) => {
+  const changeQty = (variantId, delta) => {
     setCart((prev) =>
       prev
         .map((line) =>
-          line.product_id === productId
+          line.variant_id === variantId
             ? { ...line, quantity: line.quantity + delta }
             : line
         )
@@ -314,18 +317,18 @@ export default function TerminalCheckout() {
     );
   };
 
-  const setLineQuantity = (productId, rawValue) => {
+  const setLineQuantity = (variantId, rawValue) => {
     const parsed = parseInt(String(rawValue).trim(), 10);
     if (!Number.isFinite(parsed) || parsed < 1) return;
     setCart((prev) =>
       prev.map((line) =>
-        line.product_id === productId ? { ...line, quantity: parsed } : line
+        line.variant_id === variantId ? { ...line, quantity: parsed } : line
       )
     );
   };
 
-  const removeFromCart = (productId) => {
-    setCart((prev) => prev.filter((line) => line.product_id !== productId));
+  const removeFromCart = (variantId) => {
+    setCart((prev) => prev.filter((line) => line.variant_id !== variantId));
   };
 
   const clearCustomerSelection = () => {
@@ -666,7 +669,12 @@ export default function TerminalCheckout() {
                     className="pos-terminal-v2__product-card"
                     onClick={() => addToCart(product)}
                   >
-                    <div className="pos-terminal-v2__product-name">{product.product_name}</div>
+                    <div className="pos-terminal-v2__product-name">
+                      {product.product_name}
+                      {product.variant_name && product.variant_name !== product.product_name && (
+                        <span className="wh-muted"> — {product.variant_name}</span>
+                      )}
+                    </div>
                     <div className="pos-terminal-v2__product-meta">
                       <span>SKU: {product.sku}</span>
                       <span>{product.category_name || "Uncategorized"}</span>
@@ -764,9 +772,14 @@ export default function TerminalCheckout() {
             <div className="pos-terminal-v2__cart-list">
               {cart.length ? (
                 cart.map((line) => (
-                  <div className="pos-terminal-v2__cart-row" key={line.product_id}>
+                  <div className="pos-terminal-v2__cart-row" key={line.variant_id}>
                     <div className="pos-terminal-v2__cart-main">
-                      <div className="pos-terminal-v2__cart-name">{line.product_name}</div>
+                      <div className="pos-terminal-v2__cart-name">
+                        {line.product_name}
+                        {line.variant_name && line.variant_name !== line.product_name && (
+                          <span className="wh-muted"> — {line.variant_name}</span>
+                        )}
+                      </div>
                       <div className="pos-terminal-v2__cart-price">
                         {formatPKR(round2(line.quantity * line.unit_price))}
                       </div>
@@ -781,7 +794,7 @@ export default function TerminalCheckout() {
                       )}
                     </div>
                     <div className="pos-terminal-v2__cart-qty">
-                      <button type="button" aria-label="Decrease quantity" onClick={() => changeQty(line.product_id, -1)}>
+                      <button type="button" aria-label="Decrease quantity" onClick={() => changeQty(line.variant_id, -1)}>
                         -
                       </button>
                       <input
@@ -790,17 +803,17 @@ export default function TerminalCheckout() {
                         step="1"
                         className="pos-terminal-v2__cart-qty-input"
                         value={line.quantity}
-                        onChange={(event) => setLineQuantity(line.product_id, event.target.value)}
+                        onChange={(event) => setLineQuantity(line.variant_id, event.target.value)}
                         aria-label={`Quantity for ${line.product_name}`}
                       />
-                      <button type="button" aria-label="Increase quantity" onClick={() => changeQty(line.product_id, 1)}>
+                      <button type="button" aria-label="Increase quantity" onClick={() => changeQty(line.variant_id, 1)}>
                         +
                       </button>
                     </div>
                     <button
                       type="button"
                       className="pos-terminal-v2__cart-remove"
-                      onClick={() => removeFromCart(line.product_id)}
+                      onClick={() => removeFromCart(line.variant_id)}
                     >
                       Remove
                     </button>

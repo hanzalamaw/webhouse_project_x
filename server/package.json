@@ -8,7 +8,8 @@
     "check:db": "node scripts/check-db.js",
     "purge:deleted": "node scripts/purge-soft-deleted.js",
     "migrate:crm": "node scripts/migrate-crm.js",
-    "migrate:pos": "node scripts/migrate-pos.js"
+    "migrate:pos": "node scripts/migrate-pos.js",
+    "migrate:ecom": "node scripts/migrate-ecom.js"
   },
   "name": "server",
   "version": "1.0.0",

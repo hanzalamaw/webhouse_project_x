@@ -12,7 +12,7 @@ const SHOPIFY_STEPS = [
   "Enter your Shopify store domain.",
   "Click Integrate — you will be redirected to Shopify.",
   "Install the app and approve access.",
-  "Your orders, products, and customers will sync automatically.",
+  "We fetch your data first, then you choose what to import into your ERP.",
 ];
 
 export default function ShopifyTab() {
@@ -43,7 +43,7 @@ export default function ShopifyTab() {
       window.history.replaceState({}, "", window.location.pathname);
     }
     if (params.get("shopify_connected")) {
-      setNotice("Store connected. We are syncing your data now.");
+      setNotice("Store connected. We are fetching your data — you will review before anything is added to your ERP.");
       window.history.replaceState({}, "", window.location.pathname);
     }
 
@@ -89,10 +89,14 @@ export default function ShopifyTab() {
     setTimeout(() => loadSyncStatus(shop), 1500);
   };
 
-  const handleDisconnect = async () => {
-    await ecomApiPostEmpty("shopify", "oauth/disconnect", authFetch);
+  const handleDisconnect = () => {
     setConnection(null);
     setNotice("");
+  };
+
+  const handleImported = () => {
+    const shop = connection?.shop || shopInput;
+    loadSyncStatus(shop);
   };
 
   if (connected) {
@@ -105,10 +109,17 @@ export default function ShopifyTab() {
           storeName={connection.storeName || connection.shop}
           storeSubtitle={connection.shop}
           syncStatus={connection.initialSyncStatus}
+          erpImportStatus={connection.erpImportStatus}
           lastSyncedAt={connection.lastSyncedAt}
           counts={counts}
+          pendingImportCount={connection.pendingImportCount}
+          pendingConflictCount={connection.pendingConflictCount}
+          apiAccess={connection.apiAccess}
+          connection={connection}
+          authFetch={authFetch}
           onDisconnect={handleDisconnect}
           onRetrySync={handleRetrySync}
+          onImported={handleImported}
           showRetry={connection.initialSyncStatus === "failed"}
         />
       </>
@@ -119,7 +130,7 @@ export default function ShopifyTab() {
     <Card>
       <h3 className="wh-card__title">Connect your Shopify store</h3>
       <p className="wh-muted" style={{ margin: "0.35rem 0 1.25rem" }}>
-        Link your store to import orders, products, and customers into your ERP.
+        Link your store to fetch orders, products, and customers. You review and approve what gets added to your ERP.
       </p>
 
       {notice && <p className="wh-form-message" style={{ marginBottom: "1rem" }}>{notice}</p>}

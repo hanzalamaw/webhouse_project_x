@@ -354,7 +354,8 @@ export const posService = {
       if (!Number.isInteger(qty) || qty <= 0) throw new Error("Invalid quantity");
       if (!Number.isFinite(unitPrice) || unitPrice < 0) throw new Error("Invalid price");
       return {
-        product_id: item.product_id || null,
+        variant_id: item.variant_id || item.product_id || null,
+        product_id: item.product_id || item.variant_id || null,
         product_name: requireText(item.product_name, "Product name"),
         sku: requireText(item.sku, "SKU"),
         quantity: qty,

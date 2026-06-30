@@ -483,21 +483,18 @@ CREATE TABLE IF NOT EXISTS `inventory_categories` (
 CREATE TABLE IF NOT EXISTS `inventory_products` (
   `id` INT NOT NULL AUTO_INCREMENT,
   `product_name` VARCHAR(150) NOT NULL,
-  `sku` VARCHAR(100) NOT NULL,
   `unit` VARCHAR(45) NOT NULL,
-  `cost_price` DECIMAL(12,2) NOT NULL,
-  `selling_price` DECIMAL(12,2) NOT NULL,
   `delivery_charges` DECIMAL(12,2) NOT NULL DEFAULT 0,
   `discount` DECIMAL(12,2) NOT NULL DEFAULT 0,
   `tax` DECIMAL(12,2) NOT NULL DEFAULT 0,
   `status` VARCHAR(45) NOT NULL,
+  `source` VARCHAR(45) NOT NULL DEFAULT 'manual',
   `created_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `category_id` INT NOT NULL,
   `tenant_id` INT NOT NULL,
   `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
-  UNIQUE INDEX `uk_inventory_products_tenant_sku` (`tenant_id` ASC, `sku` ASC),
   INDEX `fk_inventory_products_inventory_categories1_idx` (`category_id` ASC),
   INDEX `fk_inventory_products_wh_tenants1_idx` (`tenant_id` ASC),
   CONSTRAINT `fk_inventory_products_inventory_categories1`
@@ -508,6 +505,74 @@ CREATE TABLE IF NOT EXISTS `inventory_products` (
   CONSTRAINT `fk_inventory_products_wh_tenants1`
     FOREIGN KEY (`tenant_id`)
     REFERENCES `wh_tenants` (`id`)
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- -----------------------------------------------------
+-- Table `inventory_product_variants`
+-- -----------------------------------------------------
+CREATE TABLE IF NOT EXISTS `inventory_product_variants` (
+  `id` INT NOT NULL AUTO_INCREMENT,
+  `product_id` INT NOT NULL,
+  `sku` VARCHAR(100) NOT NULL,
+  `variant_name` VARCHAR(150) NOT NULL,
+  `cost_price` DECIMAL(12,2) NOT NULL DEFAULT 0,
+  `selling_price` DECIMAL(12,2) NOT NULL DEFAULT 0,
+  `status` VARCHAR(45) NOT NULL DEFAULT 'active',
+  `tenant_id` INT NOT NULL,
+  `created_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE INDEX `uk_inventory_variants_tenant_sku` (`tenant_id` ASC, `sku` ASC),
+  INDEX `idx_inventory_variants_product` (`product_id` ASC),
+  CONSTRAINT `fk_inventory_variants_product`
+    FOREIGN KEY (`product_id`)
+    REFERENCES `inventory_products` (`id`)
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
+  CONSTRAINT `fk_inventory_variants_tenant`
+    FOREIGN KEY (`tenant_id`)
+    REFERENCES `wh_tenants` (`id`)
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- -----------------------------------------------------
+-- Table `inventory_variant_attributes`
+-- -----------------------------------------------------
+CREATE TABLE IF NOT EXISTS `inventory_variant_attributes` (
+  `id` INT NOT NULL AUTO_INCREMENT,
+  `attribute_name` VARCHAR(45) NOT NULL,
+  `tenant_id` INT NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE INDEX `uk_inventory_variant_attrs_tenant_name` (`tenant_id` ASC, `attribute_name` ASC),
+  CONSTRAINT `fk_inventory_variant_attrs_tenant`
+    FOREIGN KEY (`tenant_id`)
+    REFERENCES `wh_tenants` (`id`)
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- -----------------------------------------------------
+-- Table `inventory_variant_attribute_values`
+-- -----------------------------------------------------
+CREATE TABLE IF NOT EXISTS `inventory_variant_attribute_values` (
+  `id` INT NOT NULL AUTO_INCREMENT,
+  `variant_id` INT NOT NULL,
+  `attribute_id` INT NOT NULL,
+  `value` VARCHAR(100) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE INDEX `uk_inventory_variant_attr_vals` (`variant_id` ASC, `attribute_id` ASC),
+  CONSTRAINT `fk_inventory_variant_attr_vals_variant`
+    FOREIGN KEY (`variant_id`)
+    REFERENCES `inventory_product_variants` (`id`)
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
+  CONSTRAINT `fk_inventory_variant_attr_vals_attr`
+    FOREIGN KEY (`attribute_id`)
+    REFERENCES `inventory_variant_attributes` (`id`)
     ON DELETE CASCADE
     ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -543,18 +608,18 @@ CREATE TABLE IF NOT EXISTS `inventory_stock_levels` (
   `damaged_qty` INT NOT NULL DEFAULT 0,
   `total_qty` INT NOT NULL DEFAULT 0,
   `updated_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  `product_id` INT NOT NULL,
+  `variant_id` INT NOT NULL,
   `warehouse_id` INT NOT NULL,
   `tenant_id` INT NOT NULL,
   `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
-  UNIQUE INDEX `uk_inventory_stock_levels_tenant_product_warehouse` (`tenant_id` ASC, `product_id` ASC, `warehouse_id` ASC),
-  INDEX `fk_inventory_stock_levels_inventory_products1_idx` (`product_id` ASC),
+  UNIQUE INDEX `uk_inventory_stock_levels_tenant_variant_warehouse` (`tenant_id` ASC, `variant_id` ASC, `warehouse_id` ASC),
+  INDEX `fk_inventory_stock_levels_variant_idx` (`variant_id` ASC),
   INDEX `fk_inventory_stock_levels_inventory_warehouses1_idx` (`warehouse_id` ASC),
   INDEX `fk_inventory_stock_levels_wh_tenants1_idx` (`tenant_id` ASC),
-  CONSTRAINT `fk_inventory_stock_levels_inventory_products1`
-    FOREIGN KEY (`product_id`)
-    REFERENCES `inventory_products` (`id`)
+  CONSTRAINT `fk_inventory_stock_levels_variant`
+    FOREIGN KEY (`variant_id`)
+    REFERENCES `inventory_product_variants` (`id`)
     ON DELETE CASCADE
     ON UPDATE CASCADE,
   CONSTRAINT `fk_inventory_stock_levels_inventory_warehouses1`
@@ -578,19 +643,19 @@ CREATE TABLE IF NOT EXISTS `inventory_stock_movements` (
   `qty` INT NOT NULL,
   `notes` TEXT NULL DEFAULT NULL,
   `created_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
-  `product_id` INT NOT NULL,
+  `variant_id` INT NOT NULL,
   `warehouse_id` INT NOT NULL,
   `created_by` INT NOT NULL,
   `tenant_id` INT NOT NULL,
   `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
-  INDEX `fk_inventory_stock_movements_inventory_products1_idx` (`product_id` ASC),
+  INDEX `fk_inventory_stock_movements_variant_idx` (`variant_id` ASC),
   INDEX `fk_inventory_stock_movements_inventory_warehouses1_idx` (`warehouse_id` ASC),
   INDEX `fk_inventory_stock_movements_users1_idx` (`created_by` ASC),
   INDEX `fk_inventory_stock_movements_wh_tenants1_idx` (`tenant_id` ASC),
-  CONSTRAINT `fk_inventory_stock_movements_inventory_products1`
-    FOREIGN KEY (`product_id`)
-    REFERENCES `inventory_products` (`id`)
+  CONSTRAINT `fk_inventory_stock_movements_variant`
+    FOREIGN KEY (`variant_id`)
+    REFERENCES `inventory_product_variants` (`id`)
     ON DELETE CASCADE
     ON UPDATE CASCADE,
   CONSTRAINT `fk_inventory_stock_movements_inventory_warehouses1`
@@ -619,19 +684,19 @@ CREATE TABLE IF NOT EXISTS `inventory_stock_transfers` (
   `transfer_status` VARCHAR(45) NOT NULL,
   `created_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  `product_id` INT NOT NULL,
+  `variant_id` INT NOT NULL,
   `from_warehouse_id` INT NOT NULL,
   `to_warehouse_id` INT NOT NULL,
   `tenant_id` INT NOT NULL,
   `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
-  INDEX `fk_inventory_stock_transfers_inventory_products1_idx` (`product_id` ASC),
+  INDEX `fk_inventory_stock_transfers_variant_idx` (`variant_id` ASC),
   INDEX `fk_inventory_stock_transfers_from_warehouse_idx` (`from_warehouse_id` ASC),
   INDEX `fk_inventory_stock_transfers_to_warehouse_idx` (`to_warehouse_id` ASC),
   INDEX `fk_inventory_stock_transfers_wh_tenants1_idx` (`tenant_id` ASC),
-  CONSTRAINT `fk_inventory_stock_transfers_inventory_products1`
-    FOREIGN KEY (`product_id`)
-    REFERENCES `inventory_products` (`id`)
+  CONSTRAINT `fk_inventory_stock_transfers_variant`
+    FOREIGN KEY (`variant_id`)
+    REFERENCES `inventory_product_variants` (`id`)
     ON DELETE CASCADE
     ON UPDATE CASCADE,
   CONSTRAINT `fk_inventory_stock_transfers_from_warehouse`
@@ -667,6 +732,7 @@ CREATE TABLE IF NOT EXISTS `crm_customers` (
   `phone` VARCHAR(45) NULL DEFAULT NULL,
   `email` VARCHAR(100) NULL DEFAULT NULL,
   `status` VARCHAR(45) NOT NULL,
+  `source` VARCHAR(45) NOT NULL DEFAULT 'manual',
   `created_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `note` TEXT NULL DEFAULT NULL,
@@ -1104,6 +1170,8 @@ CREATE TABLE IF NOT EXISTS `ecom_store_connections` (
   `api_secret` TEXT NULL DEFAULT NULL,
   `status` VARCHAR(45) NOT NULL,
   `initial_sync_status` VARCHAR(45) NOT NULL DEFAULT 'pending',
+  `erp_import_status` VARCHAR(45) NOT NULL DEFAULT 'pending',
+  `disconnect_data_policy` VARCHAR(45) NULL DEFAULT NULL,
   `webhooks_registered` TINYINT(1) NOT NULL DEFAULT 0,
   `granted_scopes` TEXT NULL DEFAULT NULL,
   `last_synced_at` TIMESTAMP NULL DEFAULT NULL,
@@ -1195,6 +1263,8 @@ CREATE TABLE IF NOT EXISTS `ecom_synced_records` (
   `raw_json` LONGTEXT NOT NULL,
   `normalized_json` LONGTEXT NOT NULL,
   `source` VARCHAR(100) NOT NULL,
+  `platform` VARCHAR(45) NULL DEFAULT NULL,
+  `import_status` VARCHAR(45) NOT NULL DEFAULT 'staged',
   `conflict_status` VARCHAR(20) NOT NULL DEFAULT 'none',
   `pending_raw_json` LONGTEXT NULL DEFAULT NULL,
   `pending_normalized_json` LONGTEXT NULL DEFAULT NULL,
@@ -1206,6 +1276,28 @@ CREATE TABLE IF NOT EXISTS `ecom_synced_records` (
   CONSTRAINT `fk_ecom_synced_records_store`
     FOREIGN KEY (`store_id`) REFERENCES `ecom_store_connections` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT `fk_ecom_synced_records_tenant`
+    FOREIGN KEY (`tenant_id`) REFERENCES `wh_tenants` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- -----------------------------------------------------
+-- Table `ecom_entity_links`
+-- -----------------------------------------------------
+CREATE TABLE IF NOT EXISTS `ecom_entity_links` (
+  `id` INT NOT NULL AUTO_INCREMENT,
+  `tenant_id` INT NOT NULL,
+  `store_id` INT NOT NULL,
+  `platform` VARCHAR(45) NOT NULL,
+  `entity_type` VARCHAR(45) NOT NULL,
+  `external_id` VARCHAR(100) NOT NULL,
+  `internal_id` INT NOT NULL,
+  `created_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+  `deleted_at` TIMESTAMP NULL DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE INDEX `uq_ecom_entity_link` (`store_id`, `entity_type`, `external_id`),
+  INDEX `idx_ecom_entity_internal` (`tenant_id`, `entity_type`, `internal_id`),
+  CONSTRAINT `fk_ecom_entity_links_store`
+    FOREIGN KEY (`store_id`) REFERENCES `ecom_store_connections` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT `fk_ecom_entity_links_tenant`
     FOREIGN KEY (`tenant_id`) REFERENCES `wh_tenants` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -1689,21 +1781,21 @@ CREATE TABLE IF NOT EXISTS `pos_sale_items` (
   `unit_price` DECIMAL(12,2) NOT NULL,
   `total_price` DECIMAL(12,2) NOT NULL,
   `pos_sale_id` INT NOT NULL,
-  `product_id` INT NULL DEFAULT NULL,
+  `variant_id` INT NULL DEFAULT NULL,
   `tenant_id` INT NOT NULL,
   `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   INDEX `fk_pos_sale_items_pos_sales1_idx` (`pos_sale_id` ASC),
-  INDEX `fk_pos_sale_items_pos_products_idx` (`product_id` ASC),
+  INDEX `fk_pos_sale_items_variant_idx` (`variant_id` ASC),
   INDEX `fk_pos_sale_items_wh_tenants1_idx` (`tenant_id` ASC),
   CONSTRAINT `fk_pos_sale_items_pos_sales1`
     FOREIGN KEY (`pos_sale_id`)
     REFERENCES `pos_sales` (`id`)
     ON DELETE CASCADE
     ON UPDATE CASCADE,
-  CONSTRAINT `fk_pos_sale_items_pos_products`
-    FOREIGN KEY (`product_id`)
-    REFERENCES `pos_products` (`id`)
+  CONSTRAINT `fk_pos_sale_items_variant`
+    FOREIGN KEY (`variant_id`)
+    REFERENCES `pos_product_variants` (`id`)
     ON DELETE SET NULL
     ON UPDATE CASCADE,
   CONSTRAINT `fk_pos_sale_items_wh_tenants1`

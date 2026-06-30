@@ -13,6 +13,7 @@ function mapStoreRow(row) {
     ...row,
     access_token: accessToken,
     initial_sync_status: row.initial_sync_status || "pending",
+    erp_import_status: row.erp_import_status || "pending",
     webhooks_registered: Boolean(row.webhooks_registered),
   };
 }
@@ -38,7 +39,8 @@ export async function upsertStoreConnection({
     await writeDb.query(
       `UPDATE ecom_store_connections
        SET access_token = ?, store_name = ?, platform = ?, status = 'connected',
-           initial_sync_status = 'pending', webhooks_registered = 0,
+           initial_sync_status = 'pending', erp_import_status = 'pending',
+           webhooks_registered = 0,
            granted_scopes = ?, deleted_at = NULL
        WHERE id = ?`,
       [encryptedToken, storeName || shop, platform, grantedScopes || null, storeId],
@@ -85,13 +87,177 @@ export async function getStoreById(id) {
   return mapStoreRow(rows[0]);
 }
 
-export async function disconnectStore(storeId) {
+export async function disconnectStore(storeId, { dataPolicy = "keep" } = {}) {
   await writeDb.query(
     `UPDATE ecom_store_connections
-     SET status = 'disconnected', access_token = '', deleted_at = NOW()
+     SET status = 'disconnected', access_token = '', deleted_at = NOW(),
+         disconnect_data_policy = ?
      WHERE id = ?`,
+    [dataPolicy, storeId],
+  );
+}
+
+export async function updateErpImportStatus(storeId, status) {
+  await writeDb.query(
+    `UPDATE ecom_store_connections SET erp_import_status = ? WHERE id = ?`,
+    [status, storeId],
+  );
+}
+
+export async function softDeleteStoreSyncedData(storeId) {
+  const [synced] = await writeDb.query(
+    `UPDATE ecom_synced_records SET deleted_at = NOW()
+     WHERE store_id = ? AND deleted_at IS NULL`,
     [storeId],
   );
+  await writeDb.query(
+    `UPDATE ecom_sync_logs SET deleted_at = NOW()
+     WHERE store_id = ? AND deleted_at IS NULL`,
+    [storeId],
+  );
+  await writeDb.query(
+    `UPDATE ecom_external_orders SET deleted_at = NOW()
+     WHERE store_id = ? AND deleted_at IS NULL`,
+    [storeId],
+  );
+  return synced.affectedRows || 0;
+}
+
+export async function getEntityLinksForStore(storeId, entityType = null) {
+  const params = [storeId];
+  let sql = `SELECT entity_type, external_id, internal_id, platform
+             FROM ecom_entity_links
+             WHERE store_id = ? AND deleted_at IS NULL`;
+  if (entityType) {
+    sql += ` AND entity_type = ?`;
+    params.push(entityType);
+  }
+  const [rows] = await readDb.query(sql, params);
+  return rows;
+}
+
+export async function getEntityLink(storeId, entityType, externalId) {
+  const [rows] = await readDb.query(
+    `SELECT id, internal_id, platform FROM ecom_entity_links
+     WHERE store_id = ? AND entity_type = ? AND external_id = ? AND deleted_at IS NULL
+     LIMIT 1`,
+    [storeId, entityType, String(externalId)],
+  );
+  return rows[0] || null;
+}
+
+export async function upsertEntityLink({
+  tenantId,
+  storeId,
+  platform,
+  entityType,
+  externalId,
+  internalId,
+}) {
+  await writeDb.query(
+    `INSERT INTO ecom_entity_links
+       (tenant_id, store_id, platform, entity_type, external_id, internal_id)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE
+       internal_id = VALUES(internal_id),
+       platform = VALUES(platform),
+       deleted_at = NULL`,
+    [tenantId, storeId, platform, entityType, String(externalId), internalId],
+  );
+}
+
+export async function softDeleteEntityLinksForStore(storeId) {
+  const [result] = await writeDb.query(
+    `UPDATE ecom_entity_links SET deleted_at = NOW()
+     WHERE store_id = ? AND deleted_at IS NULL`,
+    [storeId],
+  );
+  return result.affectedRows || 0;
+}
+
+export async function getLinkedInternalIds(storeId, entityType) {
+  const [rows] = await readDb.query(
+    `SELECT internal_id FROM ecom_entity_links
+     WHERE store_id = ? AND entity_type = ? AND deleted_at IS NULL`,
+    [storeId, entityType],
+  );
+  return rows.map((r) => r.internal_id);
+}
+
+export async function markSyncedRecordImported(storeId, entityType, externalId) {
+  await writeDb.query(
+    `UPDATE ecom_synced_records
+     SET import_status = 'imported'
+     WHERE store_id = ? AND entity_type = ? AND external_id = ? AND deleted_at IS NULL`,
+    [storeId, entityType, String(externalId)],
+  );
+}
+
+export async function getDisconnectPreview(storeId, tenantId) {
+  const counts = await getEntityCounts(storeId);
+  const links = await getEntityLinksForStore(storeId);
+  const linked = {
+    product: links.filter((l) => l.entity_type === "product").length,
+    customer: links.filter((l) => l.entity_type === "customer").length,
+    order: links.filter((l) => l.entity_type === "order").length,
+  };
+  const [logRows] = await readDb.query(
+    `SELECT COUNT(*) AS count FROM ecom_sync_logs
+     WHERE store_id = ? AND deleted_at IS NULL`,
+    [storeId],
+  );
+  return {
+    stagedRecords: counts,
+    importedToErp: linked,
+    syncLogEntries: logRows[0]?.count || 0,
+  };
+}
+
+export async function disconnectStoreWithPolicy(storeId, tenantId, dataPolicy = "keep") {
+  let deletedStaged = 0;
+  const deletedErp = { products: 0, customers: 0, orders: 0 };
+
+  if (dataPolicy === "delete_all") {
+    const productIds = await getLinkedInternalIds(storeId, "product");
+    const customerIds = await getLinkedInternalIds(storeId, "customer");
+    const orderIds = await getLinkedInternalIds(storeId, "order");
+
+    if (productIds.length) {
+      const ph = productIds.map(() => "?").join(",");
+      const [r] = await writeDb.query(
+        `UPDATE inventory_products SET deleted_at = NOW()
+         WHERE tenant_id = ? AND id IN (${ph}) AND source IN ('shopify', 'daraz') AND deleted_at IS NULL`,
+        [tenantId, ...productIds],
+      );
+      deletedErp.products = r.affectedRows || 0;
+    }
+    if (customerIds.length) {
+      const ph = customerIds.map(() => "?").join(",");
+      const [r] = await writeDb.query(
+        `UPDATE crm_customers SET deleted_at = NOW()
+         WHERE tenant_id = ? AND id IN (${ph}) AND source IN ('shopify', 'daraz') AND deleted_at IS NULL`,
+        [tenantId, ...customerIds],
+      );
+      deletedErp.customers = r.affectedRows || 0;
+    }
+    if (orderIds.length) {
+      const ph = orderIds.map(() => "?").join(",");
+      const [r] = await writeDb.query(
+        `UPDATE orders SET deleted_at = NOW()
+         WHERE tenant_id = ? AND id IN (${ph}) AND order_source IN ('shopify', 'daraz') AND deleted_at IS NULL`,
+        [tenantId, ...orderIds],
+      );
+      deletedErp.orders = r.affectedRows || 0;
+    }
+  }
+
+  if (dataPolicy === "delete_staged" || dataPolicy === "delete_all") {
+    deletedStaged = await softDeleteStoreSyncedData(storeId);
+    await softDeleteEntityLinksForStore(storeId);
+  }
+
+  await disconnectStore(storeId, { dataPolicy });
+  return { dataPolicy, deletedStaged, deletedErp };
 }
 
 export async function updateInitialSyncStatus(storeId, status) {
@@ -165,21 +331,24 @@ export async function upsertSyncedRecord(
     }
   }
 
+  const recordPlatform = platform || normalized?.platform || "shopify";
+
   await writeDb.query(
     `INSERT INTO ecom_synced_records
        (store_id, tenant_id, entity_type, external_id, raw_json, normalized_json, source,
-        conflict_status, pending_raw_json, pending_normalized_json)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'none', NULL, NULL)
+        platform, import_status, conflict_status, pending_raw_json, pending_normalized_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'staged', 'none', NULL, NULL)
      ON DUPLICATE KEY UPDATE
        raw_json = VALUES(raw_json),
        normalized_json = VALUES(normalized_json),
        source = VALUES(source),
+       platform = VALUES(platform),
        conflict_status = 'none',
        pending_raw_json = NULL,
        pending_normalized_json = NULL,
        updated_at = NOW(),
        deleted_at = NULL`,
-    [storeId, tenantId, entityType, extId, rawJson, normalizedJson, source],
+    [storeId, tenantId, entityType, extId, rawJson, normalizedJson, source, recordPlatform],
   );
 
   if (entityType === "order") {
@@ -278,23 +447,38 @@ export async function deleteSyncedRecord(storeId, entityType, externalId) {
   );
 }
 
-export async function getSyncedRecords(storeId, entityType, limit = 50) {
-  const [rows] = await readDb.query(
-    `SELECT external_id, raw_json, normalized_json, source, updated_at
-     FROM ecom_synced_records
-     WHERE store_id = ? AND entity_type = ? AND deleted_at IS NULL
-     ORDER BY updated_at DESC
-     LIMIT ?`,
-    [storeId, entityType, limit],
-  );
+export async function getSyncedRecords(storeId, entityType, limit = 50, { importStatus = null } = {}) {
+  const params = [storeId, entityType];
+  let sql = `SELECT external_id, raw_json, normalized_json, source, platform, import_status, updated_at
+             FROM ecom_synced_records
+             WHERE store_id = ? AND entity_type = ? AND deleted_at IS NULL`;
+  if (importStatus) {
+    sql += ` AND import_status = ?`;
+    params.push(importStatus);
+  }
+  sql += ` ORDER BY updated_at DESC LIMIT ?`;
+  params.push(limit);
+
+  const [rows] = await readDb.query(sql, params);
 
   return rows.map((r) => ({
     externalId: r.external_id,
     raw: JSON.parse(r.raw_json),
     normalized: JSON.parse(r.normalized_json),
-    source: r.source,
+    syncEvent: r.source,
+    platform: r.platform,
+    importStatus: r.import_status,
     updatedAt: r.updated_at,
   }));
+}
+
+export async function updateExternalOrderInternalId(storeId, externalOrderId, internalOrderId) {
+  await writeDb.query(
+    `UPDATE ecom_external_orders
+     SET internal_order_id = ?, sync_status = 'imported'
+     WHERE store_id = ? AND external_order_id = ? AND deleted_at IS NULL`,
+    [internalOrderId, storeId, String(externalOrderId)],
+  );
 }
 
 export async function getEntityCounts(storeId) {
