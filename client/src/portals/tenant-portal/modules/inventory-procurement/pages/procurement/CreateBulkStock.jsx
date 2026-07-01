@@ -10,6 +10,8 @@ import { useInventoryReference } from "../../hooks/useInventoryReference";
 import { MODULE_BASE } from "../../constants";
 import { FormBlock } from "../../../../../../components/FormBlock";
 import { FormPageLayout, FormActions } from "../../../../../../components/FormPageLayout";
+import { UnsavedChangesDialog } from "../../../../../../components/UnsavedChangesDialog";
+import { useUnsavedChangesGuard } from "../../../../../../hooks/useUnsavedChangesGuard";
 import ProductPicker from "../../components/ProductPicker";
 
 const CONFIG = {
@@ -45,6 +47,25 @@ function resolveOperation(pathname) {
   return "stock-in";
 }
 
+const EMPTY_BULK_STATE = {
+  selectedIds: [],
+  warehouseId: "",
+  fromWarehouseId: "",
+  toWarehouseId: "",
+  sameQtyForAll: true,
+  sharedQty: "",
+  sharedNotes: "",
+  lineDetails: {},
+  completeNow: true,
+};
+
+function serializeBulkState(state) {
+  return JSON.stringify({
+    ...state,
+    selectedIds: [...state.selectedIds].sort(),
+  });
+}
+
 export default function CreateBulkStock() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
@@ -65,6 +86,39 @@ export default function CreateBulkStock() {
   const [completeNow, setCompleteNow] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+
+  const formSnapshot = useMemo(
+    () =>
+      serializeBulkState({
+        selectedIds,
+        warehouseId,
+        fromWarehouseId,
+        toWarehouseId,
+        sameQtyForAll,
+        sharedQty,
+        sharedNotes,
+        lineDetails,
+        completeNow,
+      }),
+    [
+      selectedIds,
+      warehouseId,
+      fromWarehouseId,
+      toWarehouseId,
+      sameQtyForAll,
+      sharedQty,
+      sharedNotes,
+      lineDetails,
+      completeNow,
+    ]
+  );
+
+  const isDirty = formSnapshot !== serializeBulkState(EMPTY_BULK_STATE);
+
+  const { dialogOpen, stayOnPage, leavePage, reloadPending, navigateSafely } = useUnsavedChangesGuard(isDirty, {
+    enabled: true,
+    mode: "create",
+  });
 
   const warehouseOptions = useMemo(
     () => warehouses.map((w) => ({ value: String(w.id), label: w.warehouse_name })),
@@ -154,7 +208,7 @@ export default function CreateBulkStock() {
     setError("");
     try {
       await apiFetch(config.apiPath, { method: "POST", body: JSON.stringify(buildPayload()) }, authFetch);
-      navigate(config.backPath);
+      navigateSafely(config.backPath);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -286,6 +340,13 @@ export default function CreateBulkStock() {
         </FormActions>
         </form>
       </FormPageLayout>
+
+      <UnsavedChangesDialog
+        open={dialogOpen}
+        onStay={stayOnPage}
+        onDiscard={leavePage}
+        reloadPending={reloadPending}
+      />
     </div>
   );
 }

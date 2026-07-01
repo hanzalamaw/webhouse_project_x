@@ -13,6 +13,7 @@ import { registerPosRoutes } from "./src/routes/pos.js";
 import { registerCrmRoutes } from "./src/routes/crm.js";
 import { registerTenantPortalRoutes } from "./src/routes/tenantPortal.js";
 import { registerEcommerceRoutes } from "./src/routes/ecommerce.js";
+import { registerOrderRoutes } from "./src/routes/orders.js";
 import { shopifyWebhookHandler } from "./src/routes/shopifyWebhooks.js";
 import { purgeSoftDeleted } from "./src/jobs/purgeSoftDeleted.js";
 
@@ -58,9 +59,10 @@ const startServer = async () => {
   registerPosRoutes(app, verifyToken);
   registerTenantPortalRoutes(app, verifyToken);
   registerEcommerceRoutes(app, verifyToken);
+  registerOrderRoutes(app, verifyToken);
 
   app.get("/", (req, res) => {
-    res.send("API running");
+    res.status(204).end();
   });
 
   const runPurge = async () => {

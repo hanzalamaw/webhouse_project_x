@@ -12,7 +12,7 @@ export function registerCrmRoutes(app, verifyToken) {
   const create = requirePermission(CRM_MODULE, "create");
   const edit = requirePermission(CRM_MODULE, "edit");
   const del = requirePermission(CRM_MODULE, "delete");
-  const exp = requirePermission(CRM_MODULE, "export");
+  const exp = requirePermission(CRM_MODULE, "view");
 
   app.get(`${base}/dashboard`, ...auth, view, crmController.dashboard);
   app.get(`${base}/reference`, ...auth, view, crmController.reference);

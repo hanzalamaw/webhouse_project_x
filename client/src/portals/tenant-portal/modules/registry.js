@@ -15,6 +15,7 @@ import { getNavItems as getLogisticsNav } from "./logistics-partners/navConfig";
 
 import OrderManagementDashboard from "./order-management/pages/Dashboard";
 import { getNavItems as getOrderManagementNav } from "./order-management/navConfig";
+import { ORDER_MANAGEMENT_ROUTES } from "./order-management/routes.jsx";
 
 import PosDashboard from "./pos/pages/Dashboard";
 import { getNavItems as getPosNav } from "./pos/navConfig";
@@ -84,6 +85,7 @@ export const TENANT_MODULE_DEFINITIONS = [
     aliases: ["Orders"],
     Dashboard: OrderManagementDashboard,
     getNavItems: getOrderManagementNav,
+    routes: ORDER_MANAGEMENT_ROUTES,
   },
   {
     slug: "pos",

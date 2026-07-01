@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../../../../../../context/AuthContext";
 import { apiFetch } from "../../../../../../api/client";
@@ -7,9 +7,15 @@ import { FormField } from "../../../../../../components/FormField";
 import { Button } from "../../../../../../components/Button";
 import { FormBlock } from "../../../../../../components/FormBlock";
 import { FormPageLayout, FormActions } from "../../../../../../components/FormPageLayout";
+import { UnsavedChangesDialog } from "../../../../../../components/UnsavedChangesDialog";
+import { useUnsavedChangesGuard } from "../../../../../../hooks/useUnsavedChangesGuard";
 import { PRODUCT_STATUS } from "../../constants";
 
 const EMPTY = { warehouse_name: "", location: "", city: "", status: "active" };
+
+function serializeForm(form) {
+  return JSON.stringify(form);
+}
 
 export default function CreateWarehouse() {
   const { warehouseId } = useParams();
@@ -20,23 +26,47 @@ export default function CreateWarehouse() {
   const [loading, setLoading] = useState(isEdit);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [baseline, setBaseline] = useState(null);
+  const createBaseline = useMemo(() => serializeForm(EMPTY), []);
 
   const backPath = "/app/m/inventory-procurement/warehouses";
 
+  const isDirty = useMemo(() => {
+    if (isEdit) return baseline !== null && serializeForm(form) !== baseline;
+    return serializeForm(form) !== createBaseline;
+  }, [baseline, createBaseline, form, isEdit]);
+
+  const { dialogOpen, stayOnPage, leavePage, reloadPending, navigateSafely } = useUnsavedChangesGuard(isDirty, {
+    enabled: isEdit ? baseline !== null : true,
+    mode: isEdit ? "edit" : "create",
+  });
+
   useEffect(() => {
     if (!isEdit) return;
+    let active = true;
     setLoading(true);
+    setBaseline(null);
     apiFetch(`/inventory/warehouses/${warehouseId}`, {}, authFetch)
       .then((row) => {
-        setForm({
+        if (!active) return;
+        const next = {
           warehouse_name: row.warehouse_name || "",
           location: row.location || "",
           city: row.city || "",
           status: row.status || "active",
-        });
+        };
+        setForm(next);
+        setBaseline(serializeForm(next));
       })
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
+      .catch((e) => {
+        if (active) setError(e.message);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
   }, [isEdit, warehouseId, authFetch]);
 
   const submit = async (e) => {
@@ -53,7 +83,7 @@ export default function CreateWarehouse() {
       } else {
         await apiFetch("/inventory/warehouses", { method: "POST", body: JSON.stringify(form) }, authFetch);
       }
-      navigate(backPath);
+      navigateSafely(backPath);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -97,6 +127,13 @@ export default function CreateWarehouse() {
           </FormActions>
         </form>
       </FormPageLayout>
+
+      <UnsavedChangesDialog
+        open={dialogOpen}
+        onStay={stayOnPage}
+        onDiscard={leavePage}
+        reloadPending={reloadPending}
+      />
     </div>
   );
 }

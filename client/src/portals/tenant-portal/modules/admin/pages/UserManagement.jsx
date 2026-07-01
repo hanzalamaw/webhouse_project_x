@@ -64,7 +64,7 @@ export default function UserManagement() {
     setDetailsLoading(true);
     setDetailsError("");
     setDetailsOpen(true);
-    setDetailsTitle(`Sign-in details — ${row.name || row.username}`);
+    setDetailsTitle(`Credentials — ${row.name || row.username}`);
     setDetailsSections([]);
     try {
       const data = await apiFetch(`/tenant/users/${row.id}/credentials`, {}, authFetch);
@@ -73,9 +73,6 @@ export default function UserManagement() {
           loginLink: loginPortalUrl(data.login_portal || authUser?.login_portal || "erp1"),
           username: data.username,
           password: data.password || "—",
-          name: data.name,
-          email: data.email,
-          roleName: data.role_name,
         })
       );
     } catch (err) {
@@ -103,7 +100,7 @@ export default function UserManagement() {
       render: (row) => (
         <div className="wh-action-btns">
           <Button variant="secondary" className="wh-btn--sm" onClick={(e) => { e.stopPropagation(); openDetails(row); }}>
-            Details
+            Credentials
           </Button>
           <Button
             variant="secondary"

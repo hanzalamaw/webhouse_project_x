@@ -10,6 +10,7 @@ export function TableToolbar({
   dateField = "created_at",
   filters = [],
   searchPlaceholder = "Search…",
+  layout = "default",
 }) {
   const fiscalYearStart = useFiscalYear();
   const years = useMemo(() => {
@@ -43,7 +44,7 @@ export function TableToolbar({
     filters.some((f) => value[f.key]);
 
   return (
-    <div className="wh-table-toolbar">
+    <div className={`wh-table-toolbar${layout === "stacked" ? " wh-table-toolbar--stacked" : ""}`}>
       <div className="wh-table-toolbar__search">
         <svg className="wh-table-toolbar__search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
           <circle cx="11" cy="11" r="8" />

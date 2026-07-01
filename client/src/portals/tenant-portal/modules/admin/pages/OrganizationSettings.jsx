@@ -128,7 +128,10 @@ export default function OrganizationSettings() {
     () => baseline !== null && JSON.stringify(form) !== baseline,
     [baseline, form]
   );
-  const { dialogOpen, stayOnPage, leavePage } = useUnsavedChangesGuard(isDirty, { enabled: !loading });
+  const { dialogOpen, stayOnPage, leavePage } = useUnsavedChangesGuard(isDirty, {
+    enabled: baseline !== null,
+    mode: "edit",
+  });
 
   const save = async () => {
     if (!form.company_name.trim()) {

@@ -162,6 +162,8 @@ export const tenantPortalService = {
         title: "User deactivated",
         message: `${old.name} was set to inactive.`,
         priority: "medium",
+        ipAddress: ctx.ipAddress,
+        deviceInfo: ctx.deviceInfo,
       });
     }
 
@@ -201,6 +203,8 @@ export const tenantPortalService = {
       alertType: "role_change",
       title: "Role created",
       message: `Role "${body.role_name}" was created.`,
+      ipAddress: ctx.ipAddress,
+      deviceInfo: ctx.deviceInfo,
     });
     await logTenantAudit({
       ...ctx,
@@ -232,6 +236,8 @@ export const tenantPortalService = {
       alertType: body.permissions ? "permission_change" : "role_change",
       title: body.permissions ? "Permissions updated" : "Role updated",
       message: `Role "${old.role_name}" was updated.`,
+      ipAddress: ctx.ipAddress,
+      deviceInfo: ctx.deviceInfo,
     });
     await logTenantAudit({
       ...ctx,

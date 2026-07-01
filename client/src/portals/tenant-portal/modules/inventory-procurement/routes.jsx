@@ -1,9 +1,12 @@
 import CreateProduct from "./pages/products/CreateProduct";
 import ManageProducts from "./pages/products/ManageProducts";
+import ProductView from "./pages/products/ProductView";
 import Categories from "./pages/products/Categories";
+import CategoryView from "./pages/products/CategoryView";
 import BulkImportExport from "./pages/products/BulkImportExport";
 import CreateWarehouse from "./pages/warehouses/CreateWarehouse";
 import ManageWarehouses from "./pages/warehouses/ManageWarehouses";
+import WarehouseView from "./pages/warehouses/WarehouseView";
 import StockIn from "./pages/procurement/StockIn";
 import StockOut from "./pages/procurement/StockOut";
 import StockTransfers from "./pages/procurement/StockTransfers";
@@ -15,10 +18,13 @@ import ViewStockTransfer from "./pages/procurement/ViewStockTransfer";
 export const INVENTORY_ROUTES = [
   { path: "products/create", element: <CreateProduct /> },
   { path: "products/edit/:productId", element: <CreateProduct /> },
+  { path: "products/view/:productId", element: <ProductView /> },
   { path: "products/manage", element: <ManageProducts /> },
   { path: "products/categories", element: <Categories /> },
+  { path: "products/categories/view/:categoryId", element: <CategoryView /> },
   { path: "products/import-export", element: <BulkImportExport /> },
   { path: "warehouses", element: <ManageWarehouses /> },
+  { path: "warehouses/view/:warehouseId", element: <WarehouseView /> },
   { path: "warehouses/create", element: <CreateWarehouse /> },
   { path: "warehouses/edit/:warehouseId", element: <CreateWarehouse /> },
   { path: "procurement/stock-in", element: <StockIn /> },

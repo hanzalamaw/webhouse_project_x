@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { PageHeader } from "../../../../../components/PageHeader";
 import { FormPageAlerts } from "../../../../../components/FormPageLayout";
 import { Card } from "../../../../../components/Card";
@@ -12,10 +13,14 @@ import { apiFetch, fetchAllTableRows, TABLE_PAGE_SIZE } from "../../../../../api
 import { EMPTY_TOOLBAR } from "../../../../../utils/tableFilters";
 import { useToolbarFilteredRows } from "../../../../../hooks/useToolbarFilteredRows";
 import { formatDateTime } from "../../../../../utils/dateTime";
+import { formatSessionIp, simplifyDeviceInfo } from "../../../../../utils/sessionDisplay";
+
+const MODULE_BASE = "/app/m/admin";
 
 export default function ActivityAlerts() {
   const { authFetch } = useAuth();
   const { canEdit } = useModulePermission("admin");
+  const navigate = useNavigate();
   const [rows, setRows] = useState([]);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
@@ -46,7 +51,8 @@ export default function ActivityAlerts() {
     load();
   }, [load]);
 
-  const markRead = async (id) => {
+  const markRead = async (id, e) => {
+    e?.stopPropagation();
     if (!canEdit) return;
     try {
       await apiFetch(`/tenant/activity-alerts/${id}/read`, { method: "PATCH" }, authFetch);
@@ -58,8 +64,10 @@ export default function ActivityAlerts() {
 
   const columns = [
     { key: "title", label: "Title" },
-    { key: "alert_type", label: "Type" },
+    { key: "alert_type", label: "Type", format: (v) => (v ? String(v).replace(/_/g, " ") : "—") },
     { key: "priority", label: "Priority" },
+    { key: "ip_address", label: "IP", format: (v) => formatSessionIp(v) },
+    { key: "device_info", label: "Device", format: (v) => simplifyDeviceInfo(v) },
     {
       key: "is_read",
       label: "Status",
@@ -69,13 +77,14 @@ export default function ActivityAlerts() {
     {
       label: "Actions",
       filter: false,
+      stopRowClick: true,
       render: (row) =>
         !row.is_read ? (
           <Button
             variant="secondary"
             className="wh-btn--sm"
             disabled={!canEdit}
-            onClick={() => markRead(row.id)}
+            onClick={(e) => markRead(row.id, e)}
           >
             Mark read
           </Button>
@@ -110,6 +119,7 @@ export default function ActivityAlerts() {
               page={page}
               pageSize={TABLE_PAGE_SIZE}
               onPageChange={setPage}
+              onRowClick={(row) => navigate(`${MODULE_BASE}/activity-alerts/view/${row.id}`)}
             />
           </>
         )}

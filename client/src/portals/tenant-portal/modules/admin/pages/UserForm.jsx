@@ -51,6 +51,7 @@ export default function UserForm() {
   const [roles, setRoles] = useState([]);
   const [form, setForm] = useState(EMPTY_FORM);
   const [baseline, setBaseline] = useState(null);
+  const [createBaseline, setCreateBaseline] = useState(null);
   const [loading, setLoading] = useState(isEdit);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -77,10 +78,13 @@ export default function UserForm() {
 
   const isDirty = useMemo(() => {
     if (isEdit) return baseline !== null && serializeForm(form) !== baseline;
-    return serializeForm(form) !== serializeForm(EMPTY_FORM);
-  }, [baseline, form, isEdit]);
+    return createBaseline !== null && serializeForm(form) !== createBaseline;
+  }, [baseline, createBaseline, form, isEdit]);
 
-  const { dialogOpen, stayOnPage, leavePage } = useUnsavedChangesGuard(isDirty, { enabled: isEdit || isDirty });
+  const { dialogOpen, stayOnPage, leavePage, navigateSafely } = useUnsavedChangesGuard(isDirty, {
+    enabled: isEdit ? baseline !== null : createBaseline !== null,
+    mode: isEdit ? "edit" : "create",
+  });
 
   useEffect(() => {
     apiFetch("/tenant/roles", {}, authFetch)
@@ -89,12 +93,17 @@ export default function UserForm() {
   }, [authFetch]);
 
   useEffect(() => {
-    if (isEdit) return;
+    if (isEdit || createBaseline) return;
+    if (!roles.length) return;
+
     const defaultRole = roles.find((r) => r.role_name !== SUPER_ADMIN_ROLE_NAME);
     if (defaultRole && !form.role_id) {
       setForm((f) => ({ ...f, role_id: String(defaultRole.id) }));
+      return;
     }
-  }, [isEdit, roles, form.role_id]);
+
+    setCreateBaseline(serializeForm(form));
+  }, [isEdit, roles, form, createBaseline]);
 
   useEffect(() => {
     if (!isEdit) return undefined;
@@ -179,22 +188,19 @@ export default function UserForm() {
       if (isEdit) {
         await apiFetch(`/tenant/users/${userId}`, { method: "PUT", body: JSON.stringify(payload) }, authFetch);
         setBaseline(serializeForm({ ...form, password: "" }));
-        navigate(`${MODULE_BASE}/user-management`);
+        navigateSafely(`${MODULE_BASE}/user-management`);
         return;
       }
 
       payload.password = form.password;
       const res = await apiFetch("/tenant/users", { method: "POST", body: JSON.stringify(payload) }, authFetch);
       const created = res.data;
-      setDetailsTitle(`Sign-in details — ${created?.name || form.name.trim()}`);
+      setDetailsTitle(`Credentials — ${created?.name || form.name.trim()}`);
       setDetailsSections(
         buildUserLoginSections({
           loginLink,
           username: created?.username || form.username.trim(),
           password: form.password,
-          name: created?.name || form.name.trim(),
-          email: created?.email || form.email.trim(),
-          roleName: created?.role_name,
         })
       );
       setDetailsOpen(true);
@@ -338,7 +344,7 @@ export default function UserForm() {
         open={detailsOpen}
         onClose={() => {
           setDetailsOpen(false);
-          navigate(`${MODULE_BASE}/user-management`);
+          navigateSafely(`${MODULE_BASE}/user-management`);
         }}
         title={detailsTitle}
         sections={detailsSections}

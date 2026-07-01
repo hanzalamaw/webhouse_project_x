@@ -9,7 +9,7 @@ import { Button } from "../../../../../../components/Button";
 import { Modal } from "../../../../../../components/Modal";
 import { ConfirmDeleteModal } from "../../../../../../components/ConfirmDeleteModal";
 import { StatusBadge } from "../../../../../../components/Badge";
-import { PRODUCT_STATUS } from "../../constants";
+import { PRODUCT_STATUS, MODULE_BASE } from "../../constants";
 import { useInventoryReference } from "../../hooks/useInventoryReference";
 import CreateCategoryModal from "../../components/CreateCategoryModal";
 import ProductPicker from "../../components/ProductPicker";
@@ -135,6 +135,10 @@ export default function Categories() {
     }
   };
 
+  const openViewTab = (row) => {
+    window.open(`${MODULE_BASE}/products/categories/view/${row.id}`, "_blank", "noopener,noreferrer");
+  };
+
   const columns = [
     { key: "category_name", label: "Category" },
     { key: "product_count", label: "Products", filter: false },
@@ -142,9 +146,10 @@ export default function Categories() {
     {
       label: "Actions",
       filter: false,
+      stopRowClick: true,
       render: (row) => (
         <div className="wh-action-btns">
-          <Button variant="secondary" className="wh-btn--sm" onClick={() => openDetail(row)}>{expandedId === row.id ? "Hide" : "View"}</Button>
+          <Button variant="secondary" className="wh-btn--sm" onClick={() => openViewTab(row)}>View</Button>
           <Button variant="secondary" className="wh-btn--sm" onClick={() => openEdit(row)}>Edit</Button>
           <Button variant="danger" className="wh-btn--sm" onClick={() => setDeleteRow(row)}>Delete</Button>
         </div>
@@ -165,7 +170,14 @@ export default function Categories() {
         {loading ? (
           <p className="wh-muted">Loading…</p>
         ) : (
-          <DataTable columns={columns} rows={rows} page={page} pageSize={TABLE_PAGE_SIZE} onPageChange={setPage} />
+          <DataTable
+            columns={columns}
+            rows={rows}
+            page={page}
+            pageSize={TABLE_PAGE_SIZE}
+            onPageChange={setPage}
+            onRowClick={openViewTab}
+          />
         )}
         {expandedId && detail && (
           <div className="wh-inv-expand-panel">

@@ -37,6 +37,10 @@ export function FormField({
         >
           {children}
         </select>
+      ) : children ? (
+        <div id={id} className="wh-field__control">
+          {children}
+        </div>
       ) : Component === "textarea" ? (
         <textarea
           id={id}

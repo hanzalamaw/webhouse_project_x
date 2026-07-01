@@ -95,15 +95,20 @@ export const crmController = {
   async exportLeads(req, res) {
     try {
       const data = await crmService.exportLeads(req.tenantId);
-      await crmRepository.logBulkActivity(
-        req.tenantId,
-        req.userId,
-        "lead",
-        "exported",
-        `Exported ${data.length} lead(s) to CSV`
-      );
+      try {
+        await crmRepository.logBulkActivity(
+          req.tenantId,
+          req.userId,
+          "lead",
+          "exported",
+          `Exported ${data.length} lead(s) to CSV`
+        );
+      } catch (logErr) {
+        console.error("CRM export audit log failed:", logErr.message);
+      }
       res.json({ data });
     } catch (e) {
+      console.error("CRM export leads failed:", e.message);
       res.status(500).json({ message: e.message });
     }
   },
@@ -172,15 +177,20 @@ export const crmController = {
   async exportCustomers(req, res) {
     try {
       const data = await crmService.exportCustomers(req.tenantId);
-      await crmRepository.logBulkActivity(
-        req.tenantId,
-        req.userId,
-        "customer",
-        "exported",
-        `Exported ${data.length} customer(s) to CSV`
-      );
+      try {
+        await crmRepository.logBulkActivity(
+          req.tenantId,
+          req.userId,
+          "customer",
+          "exported",
+          `Exported ${data.length} customer(s) to CSV`
+        );
+      } catch (logErr) {
+        console.error("CRM export audit log failed:", logErr.message);
+      }
       res.json({ data });
     } catch (e) {
+      console.error("CRM export customers failed:", e.message);
       res.status(500).json({ message: e.message });
     }
   },

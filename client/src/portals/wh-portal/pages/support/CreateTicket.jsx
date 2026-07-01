@@ -35,7 +35,10 @@ export default function CreateTicket() {
     () => (isEdit ? baseline !== null && serializeForm(form) !== baseline : serializeForm(form) !== serializeForm(EMPTY_FORM)),
     [baseline, form, isEdit]
   );
-  const { dialogOpen, stayOnPage, leavePage } = useUnsavedChangesGuard(isDirty, { enabled: isEdit || isDirty });
+  const { dialogOpen, stayOnPage, leavePage, navigateSafely } = useUnsavedChangesGuard(isDirty, {
+    enabled: isEdit ? baseline !== null : true,
+    mode: isEdit ? "edit" : "create",
+  });
 
   useEffect(() => {
     if (!isEdit) return undefined;
@@ -94,7 +97,7 @@ export default function CreateTicket() {
       if (isEdit) {
         await apiFetch(`/support-tickets/${ticketId}`, { method: "PUT", body: JSON.stringify(payload) }, authFetch);
         setBaseline(serializeForm(form));
-        navigate("/webhouse-portal/support/manage");
+        navigateSafely("/webhouse-portal/support/manage");
         return;
       }
       await apiFetch("/support-tickets", { method: "POST", body: JSON.stringify(payload) }, authFetch);

@@ -303,7 +303,8 @@ export const inventoryService = {
     if (!category) return null;
     const products = await inventoryRepository.getCategoryProducts(tenantId, id);
     const all_products = await inventoryRepository.listAllProductsBrief(tenantId);
-    return { ...category, products, all_products };
+    const stats = await inventoryRepository.getCategoryStats(tenantId, id);
+    return { ...category, products, all_products, stats };
   },
 
   async createCategory(tenantId, body) {
@@ -458,7 +459,21 @@ export const inventoryService = {
   },
 
   async getWarehouse(tenantId, id) {
-    return inventoryRepository.getWarehouseById(tenantId, id);
+    const warehouse = await inventoryRepository.getWarehouseById(tenantId, id);
+    if (!warehouse) return null;
+    const [stats, stock_lines, recent_movements] = await Promise.all([
+      inventoryRepository.getWarehouseStats(tenantId, id),
+      inventoryRepository.getWarehouseStockLines(tenantId, id),
+      inventoryRepository.getWarehouseMovements(tenantId, id),
+    ]);
+    return {
+      ...warehouse,
+      product_count: stats.product_count ?? 0,
+      total_units: stats.total_units ?? 0,
+      stats,
+      stock_lines,
+      recent_movements,
+    };
   },
 
   async createWarehouse(tenantId, body) {

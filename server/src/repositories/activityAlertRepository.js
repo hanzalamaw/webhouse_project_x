@@ -3,7 +3,7 @@ import { readDb, writeDb } from "../database/db.js";
 export const activityAlertRepository = {
   async findByTenant(tenantId, { limit, offset }) {
     const [rows] = await readDb.query(
-      `SELECT id, alert_type, title, message, priority, is_read, user_id, created_at
+      `SELECT id, alert_type, title, message, ip_address, device_info, priority, is_read, user_id, created_at
        FROM activity_alerts
        WHERE tenant_id = ? AND deleted_at IS NULL
        ORDER BY created_at DESC LIMIT ? OFFSET ?`,

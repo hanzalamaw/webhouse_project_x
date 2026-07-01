@@ -78,10 +78,13 @@ async function tenantLogin(
     if (row) {
       await createActivityAlert({
         tenantId: row.tid,
+        userId: row.id,
         alertType: "failed_login",
         title: "Failed login attempt",
         message: `Failed login for ${normalized} from ${ip || "unknown IP"}.`,
         priority: "high",
+        ipAddress: ip || null,
+        deviceInfo: deviceInfo || null,
       });
     }
     return null;

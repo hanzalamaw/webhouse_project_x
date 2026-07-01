@@ -48,7 +48,10 @@ export default function CreateSubscription() {
     () => (isEdit ? baseline !== null && serializeForm(form) !== baseline : serializeForm(form) !== serializeForm(EMPTY_FORM)),
     [baseline, form, isEdit]
   );
-  const { dialogOpen, stayOnPage, leavePage } = useUnsavedChangesGuard(isDirty, { enabled: isEdit || isDirty });
+  const { dialogOpen, stayOnPage, leavePage, navigateSafely } = useUnsavedChangesGuard(isDirty, {
+    enabled: isEdit ? baseline !== null : true,
+    mode: isEdit ? "edit" : "create",
+  });
 
   const loadModules = useCallback(async () => {
     const res = await apiFetch("/modules/all", {}, authFetch);
@@ -140,7 +143,7 @@ export default function CreateSubscription() {
       if (isEdit) {
         await apiFetch(`/subscriptions/${planId}`, { method: "PUT", body: JSON.stringify(payload) }, authFetch);
         setBaseline(serializeForm(form));
-        navigate("/webhouse-portal/subscriptions/manage");
+        navigateSafely("/webhouse-portal/subscriptions/manage");
         return;
       }
       const created = await apiFetch("/subscriptions", { method: "POST", body: JSON.stringify(payload) }, authFetch);
@@ -148,9 +151,9 @@ export default function CreateSubscription() {
         const url = new URL(returnTo, window.location.origin);
         url.searchParams.set("resumed", "1");
         url.searchParams.set("planId", String(created.id));
-        navigate(`${url.pathname}${url.search}`, { replace: true });
+        navigateSafely(`${url.pathname}${url.search}`, { replace: true });
       } else if (resume === "create-tenant") {
-        navigate(`/webhouse-portal/tenants/create?resumed=1&planId=${created.id}`, { replace: true });
+        navigateSafely(`/webhouse-portal/tenants/create?resumed=1&planId=${created.id}`, { replace: true });
       } else {
         setForm(EMPTY_FORM);
       }

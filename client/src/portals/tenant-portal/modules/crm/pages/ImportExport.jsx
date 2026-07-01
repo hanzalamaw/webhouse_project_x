@@ -68,7 +68,7 @@ function ImportResultCard({ title, result }) {
 
 export default function ImportExport() {
   const { authFetch } = useAuth();
-  const { canCreate, canExport } = useModulePermission("crm");
+  const { canCreate, canView } = useModulePermission("crm");
   const [leadExporting, setLeadExporting] = useState(false);
   const [customerExporting, setCustomerExporting] = useState(false);
   const [leadImporting, setLeadImporting] = useState(false);
@@ -81,7 +81,7 @@ export default function ImportExport() {
   const dateStamp = new Date().toISOString().slice(0, 10);
 
   const exportLeads = async () => {
-    if (!canExport) return;
+    if (!canView) return;
     setLeadExporting(true);
     setError("");
     try {
@@ -96,7 +96,7 @@ export default function ImportExport() {
   };
 
   const exportCustomers = async () => {
-    if (!canExport) return;
+    if (!canView) return;
     setCustomerExporting(true);
     setError("");
     try {
@@ -170,12 +170,12 @@ export default function ImportExport() {
             Download all leads with contact details, source, status, notes, and assignee name.
           </p>
           <div className="wh-card__actions">
-            {canExport ? (
+            {canView ? (
               <Button onClick={exportLeads} disabled={leadExporting}>
                 {leadExporting ? "Exporting…" : "Export CSV"}
               </Button>
             ) : (
-              <p className="wh-muted">Export requires CRM export permission.</p>
+              <p className="wh-muted">Export requires CRM view permission.</p>
             )}
           </div>
         </Card>
@@ -217,12 +217,12 @@ export default function ImportExport() {
             Download all customers with type, status, tags, summary note, and default billing address fields.
           </p>
           <div className="wh-card__actions">
-            {canExport ? (
+            {canView ? (
               <Button onClick={exportCustomers} disabled={customerExporting}>
                 {customerExporting ? "Exporting…" : "Export CSV"}
               </Button>
             ) : (
-              <p className="wh-muted">Export requires CRM export permission.</p>
+              <p className="wh-muted">Export requires CRM view permission.</p>
             )}
           </div>
         </Card>

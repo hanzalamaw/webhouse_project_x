@@ -15,7 +15,7 @@ function DetailRow({ label, value, copyValue, sensitive, onCopied }) {
   const textToCopy = copyValue ?? raw;
 
   const handleCopy = async () => {
-    const ok = await copyToClipboard(textToCopy);
+    const ok = await copyToClipboard(`Do not share these credentials with anyone.\n\n${label}: ${textToCopy}`);
     if (ok) onCopied(label);
   };
 
@@ -64,8 +64,9 @@ export function AccountDetailsModal({
 
   const handleCopyAll = async () => {
     const rows = sections.flatMap((section) => section.rows || []);
-    const ok = await copyToClipboard(buildCopyBlock(rows));
-    if (ok) setCopiedLabel("All details");
+    const warning = "Do not share these credentials with anyone.";
+    const ok = await copyToClipboard(`${warning}\n\n${buildCopyBlock(rows)}`);
+    if (ok) setCopiedLabel("All credentials");
   };
 
   const handleCopied = (label) => {
@@ -109,6 +110,10 @@ export function AccountDetailsModal({
       {loading && <p className="wh-muted">Loading…</p>}
       {!loading && error && <div className="wh-alert wh-alert--error">{error}</div>}
       {!loading && !error && (
+        <>
+        <div className="wh-alert wh-alert--warning wh-account-detail-warning">
+          Do not share these credentials with anyone.
+        </div>
         <div className="wh-account-detail-sections">
           {sections.map((section) => (
             <div key={section.title || "default"} className="wh-account-detail-section">
@@ -121,6 +126,7 @@ export function AccountDetailsModal({
             </div>
           ))}
         </div>
+        </>
       )}
     </Modal>
   );

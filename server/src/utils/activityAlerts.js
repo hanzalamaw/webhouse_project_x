@@ -16,11 +16,13 @@ export async function createActivityAlert({
   title,
   message,
   priority = "medium",
+  ipAddress = null,
+  deviceInfo = null,
 }) {
   if (!IMPORTANT_TYPES.has(alertType)) return;
   await writeDb.query(
-    `INSERT INTO activity_alerts (alert_type, title, message, priority, is_read, user_id, tenant_id)
-     VALUES (?, ?, ?, ?, 0, ?, ?)`,
-    [alertType, title, message, priority, userId, tenantId]
+    `INSERT INTO activity_alerts (alert_type, title, message, ip_address, device_info, priority, is_read, user_id, tenant_id)
+     VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+    [alertType, title, message, ipAddress, deviceInfo, priority, userId, tenantId]
   );
 }

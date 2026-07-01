@@ -36,7 +36,10 @@ export default function CreateModule() {
     () => (isEdit ? baseline !== null && moduleName !== baseline : moduleName.trim() !== ""),
     [baseline, moduleName, isEdit]
   );
-  const { dialogOpen, stayOnPage, leavePage } = useUnsavedChangesGuard(isDirty, { enabled: isEdit || isDirty });
+  const { dialogOpen, stayOnPage, leavePage, navigateSafely } = useUnsavedChangesGuard(isDirty, {
+    enabled: isEdit ? baseline !== null : true,
+    mode: isEdit ? "edit" : "create",
+  });
 
   useEffect(() => {
     if (!isEdit) return undefined;
@@ -93,19 +96,19 @@ export default function CreateModule() {
 
   const returnAfterSave = (id) => {
     if (returnTo) {
-      navigate(appendResumeParams(returnTo, id), { replace: true });
+      navigateSafely(appendResumeParams(returnTo, id), { replace: true });
       return;
     }
     if (resume === "create-tenant") {
-      navigate(`/webhouse-portal/tenants/create?resumed=1&moduleId=${id}`, { replace: true });
+      navigateSafely(`/webhouse-portal/tenants/create?resumed=1&moduleId=${id}`, { replace: true });
       return;
     }
     if (resume === "create-subscription") {
-      navigate(`/webhouse-portal/subscriptions/create?resumed=1&moduleId=${id}`, { replace: true });
+      navigateSafely(`/webhouse-portal/subscriptions/create?resumed=1&moduleId=${id}`, { replace: true });
       return;
     }
     if (isEdit) {
-      navigate("/webhouse-portal/modules");
+      navigateSafely("/webhouse-portal/modules");
       return;
     }
     setMessage("Module created successfully.");
@@ -128,7 +131,7 @@ export default function CreateModule() {
           authFetch
         );
         setBaseline(moduleName.trim());
-        navigate("/webhouse-portal/modules");
+        navigateSafely("/webhouse-portal/modules");
         return;
       }
       const created = await apiFetch(

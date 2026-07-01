@@ -674,6 +674,78 @@ export const inventoryRepository = {
     return rows[0] || null;
   },
 
+  async getWarehouseStats(tenantId, warehouseId) {
+    const [[row]] = await readDb.query(
+      `SELECT COUNT(DISTINCT v.product_id) AS product_count,
+              COUNT(DISTINCT sl.variant_id) AS variant_count,
+              COALESCE(SUM(sl.total_qty), 0) AS total_units,
+              COALESCE(SUM(sl.available_qty), 0) AS available_units,
+              COALESCE(SUM(sl.reserved_qty), 0) AS reserved_units,
+              COALESCE(SUM(sl.damaged_qty), 0) AS damaged_units,
+              COALESCE(SUM(sl.available_qty * v.cost_price), 0) AS stock_value_cost,
+              COALESCE(SUM(sl.available_qty * v.selling_price), 0) AS stock_value_retail
+       FROM inventory_stock_levels sl
+       JOIN inventory_product_variants v ON v.id = sl.variant_id AND v.deleted_at IS NULL
+       WHERE sl.warehouse_id = ? AND ${tenantWhere("sl", tenantId)}`,
+      [warehouseId, tenantId]
+    );
+    return row || {};
+  },
+
+  async getWarehouseStockLines(tenantId, warehouseId, limit = 12) {
+    const [rows] = await readDb.query(
+      `SELECT p.id AS product_id, p.product_name, p.status AS product_status,
+              v.id AS variant_id, v.sku, v.variant_name, v.status AS variant_status,
+              sl.available_qty, sl.total_qty, sl.reserved_qty, sl.damaged_qty,
+              v.selling_price, v.cost_price
+       FROM inventory_stock_levels sl
+       JOIN inventory_product_variants v ON v.id = sl.variant_id AND v.deleted_at IS NULL
+       JOIN inventory_products p ON p.id = v.product_id AND p.deleted_at IS NULL
+       WHERE sl.warehouse_id = ? AND ${tenantWhere("sl", tenantId)}
+       ORDER BY sl.total_qty DESC, p.product_name ASC, v.variant_name ASC
+       LIMIT ?`,
+      [warehouseId, tenantId, limit]
+    );
+    return rows;
+  },
+
+  async getWarehouseMovements(tenantId, warehouseId, limit = 8) {
+    const [rows] = await readDb.query(
+      `SELECT m.id, m.movement_type, m.qty, m.notes, m.created_at,
+              p.product_name, v.sku, v.variant_name, u.name AS created_by_name
+       FROM inventory_stock_movements m
+       JOIN inventory_product_variants v ON v.id = m.variant_id AND v.deleted_at IS NULL
+       JOIN inventory_products p ON p.id = v.product_id AND p.deleted_at IS NULL
+       LEFT JOIN users u ON u.id = m.created_by
+       WHERE m.warehouse_id = ? AND ${tenantWhere("m", tenantId)}
+       ORDER BY m.created_at DESC
+       LIMIT ?`,
+      [warehouseId, tenantId, limit]
+    );
+    return rows;
+  },
+
+  async getCategoryStats(tenantId, categoryId) {
+    const [[row]] = await readDb.query(
+      `SELECT COUNT(DISTINCT p.id) AS product_count,
+              SUM(CASE WHEN LOWER(TRIM(p.status)) = 'active' THEN 1 ELSE 0 END) AS active_products,
+              SUM(CASE WHEN LOWER(TRIM(p.status)) != 'active' THEN 1 ELSE 0 END) AS inactive_products,
+              COUNT(DISTINCT v.id) AS variant_count,
+              COALESCE(SUM(sl.total_qty), 0) AS total_units,
+              COALESCE(SUM(sl.available_qty), 0) AS available_units,
+              COALESCE(SUM(sl.reserved_qty), 0) AS reserved_units,
+              COALESCE(SUM(sl.damaged_qty), 0) AS damaged_units,
+              COALESCE(SUM(sl.available_qty * v.cost_price), 0) AS stock_value_cost,
+              COALESCE(SUM(sl.available_qty * v.selling_price), 0) AS stock_value_retail
+       FROM inventory_products p
+       LEFT JOIN inventory_product_variants v ON v.product_id = p.id AND v.deleted_at IS NULL
+       LEFT JOIN inventory_stock_levels sl ON sl.variant_id = v.id AND sl.deleted_at IS NULL
+       WHERE p.category_id = ? AND ${tenantWhere("p", tenantId)}`,
+      [categoryId, tenantId]
+    );
+    return row || {};
+  },
+
   async createWarehouse(tenantId, data) {
     const [result] = await writeDb.query(
       `INSERT INTO inventory_warehouses (warehouse_name, location, city, status, tenant_id)

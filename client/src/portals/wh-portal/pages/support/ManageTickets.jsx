@@ -104,7 +104,7 @@ export default function ManageTickets() {
               pageSize={TABLE_PAGE_SIZE}
               onPageChange={setPage}
               emptyMessage="No support tickets yet."
-              onRowClick={(row) => navigate(`/webhouse-portal/support/edit/${row.id}`)}
+              onRowClick={(row) => navigate(`/webhouse-portal/support/view/${row.id}`)}
             />
           </>
         )}

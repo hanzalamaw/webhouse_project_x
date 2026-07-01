@@ -10,12 +10,14 @@ import ManageTenant from "./portals/wh-portal/pages/tenants/ManageTenant";
 import Sessions from "./portals/wh-portal/pages/tenants/Sessions";
 import Transaction from "./portals/wh-portal/pages/tenants/Transaction";
 import CreateTicket from "./portals/wh-portal/pages/support/CreateTicket";
+import TicketView from "./portals/wh-portal/pages/support/TicketView";
 import ManageTickets from "./portals/wh-portal/pages/support/ManageTickets";
 import Impersonation from "./portals/wh-portal/pages/Impersonation";
 import ImpersonationHandoff from "./portals/wh-portal/pages/ImpersonationHandoff";
 import CreateModule from "./portals/wh-portal/pages/modules/CreateModule";
 import ManageModules from "./portals/wh-portal/pages/modules/ManageModules";
 import CreateSubscription from "./portals/wh-portal/pages/subscriptions/CreateSubscription";
+import SubscriptionView from "./portals/wh-portal/pages/subscriptions/SubscriptionView";
 import ManageSubscriptions from "./portals/wh-portal/pages/subscriptions/ManageSubscriptions";
 import Logs from "./portals/wh-portal/pages/logs/Logs";
 import ErpLogin from "./portals/tenant-portal/pages/ErpLogin";
@@ -70,6 +72,10 @@ function WhLoginGate() {
   return <Login />;
 }
 
+function RootBlank() {
+  return <div style={{ minHeight: "100vh", width: "100%", background: "#ffffff" }} />;
+}
+
 function buildTenantModuleRouteChildren(mod) {
   const ModDashboard = mod.Dashboard;
   const children = [
@@ -110,7 +116,7 @@ function buildTenantModuleRouteChildren(mod) {
 }
 
 const router = createBrowserRouter([
-  { path: "/", element: <WhLoginGate /> },
+  { path: "/", element: <RootBlank /> },
   { path: "/login", element: <Navigate to="/webhouse-portal" replace /> },
   { path: "/webhouse-portal", element: <WhLoginGate /> },
   { path: "/webhouse-portal/impersonate/session", element: <ImpersonationHandoff /> },
@@ -127,6 +133,7 @@ const router = createBrowserRouter([
       { path: "/webhouse-portal/dashboard", element: <Dashboard /> },
       { path: "/webhouse-portal/subscriptions/create", element: <CreateSubscription /> },
       { path: "/webhouse-portal/subscriptions/edit/:planId", element: <CreateSubscription /> },
+      { path: "/webhouse-portal/subscriptions/view/:planId", element: <SubscriptionView /> },
       { path: "/webhouse-portal/subscriptions/manage", element: <ManageSubscriptions /> },
       { path: "/webhouse-portal/modules", element: <ManageModules /> },
       { path: "/webhouse-portal/modules/manage", element: <Navigate to="/webhouse-portal/modules" replace /> },
@@ -141,6 +148,7 @@ const router = createBrowserRouter([
       { path: "/webhouse-portal/tenants/transactions", element: <Transaction /> },
       { path: "/webhouse-portal/support/create", element: <CreateTicket /> },
       { path: "/webhouse-portal/support/edit/:ticketId", element: <CreateTicket /> },
+      { path: "/webhouse-portal/support/view/:ticketId", element: <TicketView /> },
       { path: "/webhouse-portal/support/manage", element: <ManageTickets /> },
       { path: "/webhouse-portal/impersonation", element: <Impersonation /> },
     ],

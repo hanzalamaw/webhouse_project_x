@@ -102,7 +102,7 @@ export default function ManageSubscriptions() {
               page={page}
               pageSize={TABLE_PAGE_SIZE}
               onPageChange={setPage}
-              onRowClick={(row) => navigate(`/webhouse-portal/subscriptions/edit/${row.id}`)}
+              onRowClick={(row) => navigate(`/webhouse-portal/subscriptions/view/${row.id}`)}
             />
           </>
         )}

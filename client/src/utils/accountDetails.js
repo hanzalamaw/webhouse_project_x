@@ -6,8 +6,8 @@ function row(label, value, options = {}) {
   return { label, value: value ?? "—", copyValue, sensitive };
 }
 
-export function buildUserLoginSections({ loginLink, username, password, name, email, roleName }) {
-  const sections = [
+export function buildUserLoginSections({ loginLink, username, password }) {
+  return [
     {
       title: "Sign-in details",
       rows: [
@@ -17,17 +17,6 @@ export function buildUserLoginSections({ loginLink, username, password, name, em
       ],
     },
   ];
-  if (name || email || roleName) {
-    sections.push({
-      title: "Account",
-      rows: [
-        ...(name ? [row("Name", name)] : []),
-        ...(email ? [row("Email", email)] : []),
-        ...(roleName ? [row("Role", roleName)] : []),
-      ],
-    });
-  }
-  return sections;
 }
 
 export function buildTenantAccountSections({

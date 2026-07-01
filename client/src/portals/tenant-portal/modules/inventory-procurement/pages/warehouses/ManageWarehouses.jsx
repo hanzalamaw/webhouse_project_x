@@ -109,7 +109,7 @@ export default function ManageWarehouses() {
             page={page}
             pageSize={TABLE_PAGE_SIZE}
             onPageChange={setPage}
-            onRowClick={(row) => navigate(`${MODULE_BASE}/warehouses/edit/${row.id}`)}
+            onRowClick={(row) => navigate(`${MODULE_BASE}/warehouses/view/${row.id}`)}
           />
         )}
       </Card>

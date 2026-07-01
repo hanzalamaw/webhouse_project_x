@@ -9,6 +9,8 @@ import { SearchableSelect } from "../../../../../../components/SearchableSelect"
 import { useInventoryReference } from "../../hooks/useInventoryReference";
 import { FormBlock } from "../../../../../../components/FormBlock";
 import { FormPageLayout, FormActions } from "../../../../../../components/FormPageLayout";
+import { UnsavedChangesDialog } from "../../../../../../components/UnsavedChangesDialog";
+import { useUnsavedChangesGuard } from "../../../../../../hooks/useUnsavedChangesGuard";
 import CreateCategoryModal from "../../components/CreateCategoryModal";
 import ProductOptionsEditor, {
   makeDefaultOptions,
@@ -82,6 +84,48 @@ function buildVariantRowPayload(row, isEdit) {
   return base;
 }
 
+function normalizeOptions(opts) {
+  return opts
+    .map(({ attribute_name, values }) => ({
+      attribute_name: String(attribute_name || "").trim(),
+      values: [...(values || [])],
+    }))
+    .sort((a, b) => a.attribute_name.localeCompare(b.attribute_name));
+}
+
+function normalizeVariantRows(rows) {
+  return rows.map((row) => ({
+    id: row.id ?? null,
+    combo_key: row.combo_key ?? "",
+    sku: String(row.sku || "").trim(),
+    variant_name: String(row.variant_name || "").trim(),
+    cost_price: row.cost_price,
+    selling_price: row.selling_price,
+    status: row.status || "active",
+    combo: row.combo || {},
+    stock_levels: (row.stock_levels || []).map((sl) => ({
+      warehouse_id: sl.warehouse_id,
+      reserved_qty: Number(sl.reserved_qty) || 0,
+      damaged_qty: Number(sl.damaged_qty) || 0,
+    })),
+    warehouse_stocks: (row.warehouse_stocks || []).map((ws) => ({
+      warehouse_id: ws.warehouse_id,
+      initial_qty: Number(ws.initial_qty) || 0,
+      reserved_qty: Number(ws.reserved_qty) || 0,
+      damaged_qty: Number(ws.damaged_qty) || 0,
+      stock_notes: ws.stock_notes || null,
+    })),
+  }));
+}
+
+function serializeProductState(form, options, variantRows) {
+  return JSON.stringify({
+    form,
+    options: normalizeOptions(options),
+    variantRows: normalizeVariantRows(variantRows),
+  });
+}
+
 export default function CreateProduct() {
   const navigate = useNavigate();
   const { productId } = useParams();
@@ -96,6 +140,9 @@ export default function CreateProduct() {
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState("");
   const [createCategoryOpen, setCreateCategoryOpen] = useState(false);
+  const [baseline, setBaseline] = useState(null);
+  const [createBaseline, setCreateBaseline] = useState(null);
+  const [pendingBaselineCapture, setPendingBaselineCapture] = useState(false);
 
   const set = (key, value) => setForm((f) => ({ ...f, [key]: value }));
 
@@ -108,23 +155,72 @@ export default function CreateProduct() {
     [warehouses]
   );
 
+  const currentSnapshot = useMemo(
+    () => serializeProductState(form, options, variantRows),
+    [form, options, variantRows]
+  );
+
+  const isDirty = useMemo(() => {
+    if (isEdit) return baseline !== null && currentSnapshot !== baseline;
+    return createBaseline !== null && currentSnapshot !== createBaseline;
+  }, [baseline, createBaseline, currentSnapshot, isEdit]);
+
+  const { dialogOpen, stayOnPage, leavePage, reloadPending, navigateSafely } = useUnsavedChangesGuard(isDirty, {
+    enabled: isEdit ? baseline !== null && !loadingProduct : createBaseline !== null && !refLoading,
+    mode: isEdit ? "edit" : "create",
+  });
+
   useEffect(() => {
-    if (!isEdit) return;
+    if (isEdit || createBaseline || refLoading || loadingProduct) return undefined;
+    const timer = window.setTimeout(() => {
+      setCreateBaseline(serializeProductState(form, options, variantRows));
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [isEdit, createBaseline, refLoading, loadingProduct, form, options, variantRows]);
+
+  useEffect(() => {
+    if (!isEdit) return undefined;
+    let active = true;
     setLoadingProduct(true);
+    setBaseline(null);
+    setPendingBaselineCapture(false);
     apiFetch(`/inventory/products/${productId}`, {}, authFetch)
       .then((data) => {
-        setForm(mapProductToForm(data));
-        setOptions(data.options?.length ? data.options.map((o, i) => ({
-          _key: `o-${i}`,
-          attribute_name: o.attribute_name,
-          values: o.values || [],
-          valueInput: "",
-        })) : mapOptionsFromApi(data.variants || []));
-        setVariantRows(mapVariantRowsFromApi(data.variants || []));
+        if (!active) return;
+        const nextForm = mapProductToForm(data);
+        const nextOptions = data.options?.length
+          ? data.options.map((o, i) => ({
+              _key: `o-${i}`,
+              attribute_name: o.attribute_name,
+              values: o.values || [],
+              valueInput: "",
+            }))
+          : mapOptionsFromApi(data.variants || []);
+        const nextRows = mapVariantRowsFromApi(data.variants || []);
+        setForm(nextForm);
+        setOptions(nextOptions);
+        setVariantRows(nextRows);
+        setPendingBaselineCapture(true);
       })
-      .catch((e) => setError(e.message))
-      .finally(() => setLoadingProduct(false));
+      .catch((e) => {
+        if (active) setError(e.message);
+      })
+      .finally(() => {
+        if (active) setLoadingProduct(false);
+      });
+    return () => {
+      active = false;
+    };
   }, [isEdit, productId, authFetch]);
+
+  useEffect(() => {
+    if (!isEdit || loadingProduct || !pendingBaselineCapture) return undefined;
+    const timer = window.setTimeout(() => {
+      setBaseline(currentSnapshot);
+      setPendingBaselineCapture(false);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [isEdit, loadingProduct, pendingBaselineCapture, currentSnapshot]);
 
   const validate = () => {
     if (!form.product_name.trim()) return "Product name is required";
@@ -186,7 +282,7 @@ export default function CreateProduct() {
         setMessage("Product created successfully.");
         await reload();
       }
-      setTimeout(() => navigate(`${MODULE_BASE}/products/manage`), 700);
+      setTimeout(() => navigateSafely(`${MODULE_BASE}/products/manage`), 700);
     } catch (e) {
       setError(e.message);
     } finally {
@@ -303,6 +399,13 @@ export default function CreateProduct() {
           }}
         />
       </FormPageLayout>
+
+      <UnsavedChangesDialog
+        open={dialogOpen}
+        onStay={stayOnPage}
+        onDiscard={leavePage}
+        reloadPending={reloadPending}
+      />
     </div>
   );
 }
