@@ -35,6 +35,7 @@ import { ECOMMERCE_ROUTES } from "./ecommerce/routes.jsx";
 
 import FinanceDashboard from "./finance/pages/Dashboard";
 import { getNavItems as getFinanceNav } from "./finance/navConfig";
+import { FINANCE_ROUTES } from "./finance/routes.jsx";
 
 import InventoryDashboard from "./inventory-procurement/pages/Dashboard";
 import { getNavItems as getInventoryNav } from "./inventory-procurement/navConfig";
@@ -125,6 +126,7 @@ export const TENANT_MODULE_DEFINITIONS = [
     aliases: [],
     Dashboard: FinanceDashboard,
     getNavItems: getFinanceNav,
+    routes: FINANCE_ROUTES,
   },
   {
     slug: "inventory-procurement",

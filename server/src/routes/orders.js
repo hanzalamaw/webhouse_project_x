@@ -21,6 +21,11 @@ export function registerOrderRoutes(app, verifyToken) {
   app.get(`${base}/export`, ...auth, exp, orderController.exportOrders);
   app.post(`${base}/import`, ...auth, create, orderController.importOrders);
 
+  app.get(`${base}/customers/lookup`, ...auth, view, orderController.lookupCustomerByPhone);
+  app.get(`${base}/customers/:id`, ...auth, view, orderController.getCustomerDetail);
+  app.post(`${base}/customers`, ...auth, create, orderController.quickCreateCustomer);
+  app.put(`${base}/customers/:id`, ...auth, edit, orderController.quickUpdateCustomer);
+
   app.get(`${base}/assignments/list`, ...auth, view, orderController.listAssignments);
   app.post(`${base}/assignments`, ...auth, create, orderController.createAssignment);
   app.put(`${base}/assignments/:id`, ...auth, edit, orderController.updateAssignment);

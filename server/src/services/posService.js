@@ -5,7 +5,7 @@ import {
   OUTLET_STATUSES,
   TERMINAL_STATUSES,
 } from "../utils/posConstants.js";
-import { resolveOpeningBalance, formatTime12 } from "../utils/posDrawer.js";
+import { resolveOpeningBalance, formatTime12, getLatestStoreResetAt } from "../utils/posDrawer.js";
 
 function normalizeTime(value, label) {
   if (value == null || value === "") return null;
@@ -58,7 +58,19 @@ async function ensureActiveRegister(tenantId, userId, terminal) {
   const now = new Date();
   let register = await posRepository.getOpenRegister(tenantId, terminal.id);
   const storeOpenTime = terminal.store_open_time;
-  let drawerMeta = { resetApplied: false, resetAt: null };
+  const resetAt = getLatestStoreResetAt(now, storeOpenTime);
+  let drawerMeta = { resetApplied: false, resetAt };
+
+  if (register && resetAt) {
+    const openedAt = new Date(register.opened_at);
+    if (openedAt < resetAt) {
+      const closingBalance =
+        Number(register.opening_balance) + Number(register.cash_collected);
+      await posRepository.closeRegister(tenantId, userId, register.id, closingBalance);
+      register = null;
+      drawerMeta = { resetApplied: true, resetAt };
+    }
+  }
 
   if (!register) {
     const lastClosed = await posRepository.getLastClosedRegister(tenantId, terminal.id);
@@ -69,23 +81,27 @@ async function ensureActiveRegister(tenantId, userId, terminal) {
       defaultOpeningBalance: terminal.store_opening_balance ?? terminal.opening_balance ?? 0,
     });
     register = await posRepository.openRegister(tenantId, userId, terminal, resolved.openingBalance);
-    drawerMeta = {
-      resetApplied: resolved.resetApplied,
-      resetAt: resolved.resetAt,
-    };
+    if (!drawerMeta.resetApplied) {
+      drawerMeta = {
+        resetApplied: resolved.resetApplied,
+        resetAt: resolved.resetAt,
+      };
+    }
   }
 
   return { register, drawerMeta };
 }
 
 function drawerInfo(terminal, drawerMeta) {
+  const resetAt = drawerMeta?.resetAt || getLatestStoreResetAt(new Date(), terminal.store_open_time);
   return {
     store_open_time: terminal.store_open_time,
     store_close_time: terminal.store_close_time,
     store_open_label: formatTime12(terminal.store_open_time),
     store_close_label: formatTime12(terminal.store_close_time),
     reset_applied: Boolean(drawerMeta?.resetApplied),
-    reset_at: drawerMeta?.resetAt || null,
+    reset_at: resetAt || null,
+    store_day_reset_at: resetAt ? resetAt.toISOString() : null,
   };
 }
 

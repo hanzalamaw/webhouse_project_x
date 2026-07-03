@@ -24,7 +24,9 @@ const ORDER_LIST_SELECT = `
          EXISTS (SELECT 1 FROM order_returns ort
             WHERE ort.order_id = o.id AND ort.deleted_at IS NULL) AS has_return,
          EXISTS (SELECT 1 FROM order_exchanges oe
-            WHERE oe.order_id = o.id AND oe.deleted_at IS NULL) AS has_exchange
+            WHERE oe.order_id = o.id AND oe.deleted_at IS NULL) AS has_exchange,
+         EXISTS (SELECT 1 FROM order_refunds orf
+            WHERE orf.order_id = o.id AND orf.deleted_at IS NULL) AS has_refund
   FROM orders o
   LEFT JOIN crm_customers c ON c.id = o.customer_id AND c.deleted_at IS NULL
   LEFT JOIN users u ON u.id = o.created_by AND u.deleted_at IS NULL
@@ -100,7 +102,7 @@ export const orderRepository = {
     const [rows] = await readDb.query(
       `SELECT p.id AS product_id, p.product_name,
               p.delivery_charges, p.discount, p.tax,
-              v.id AS variant_id, v.sku,
+              v.id AS variant_id, v.sku, v.variant_name,
               v.selling_price, v.cost_price,
               COALESCE(sl.available_qty, 0) AS available_qty
        FROM inventory_products p
@@ -239,7 +241,7 @@ export const orderRepository = {
     const [rows] = await readDb.query(
       `${ORDER_LIST_SELECT}
        WHERE o.id = ? AND ${tw("o", tenantId)} LIMIT 1`,
-      [tenantId, id]
+      [id, tenantId]
     );
     if (!rows.length) return null;
     const order = rows[0];
@@ -451,7 +453,7 @@ export const orderRepository = {
 
   async listPaymentsForOrder(tenantId, orderId) {
     const [rows] = await readDb.query(
-      `SELECT id, bank, cash, amount, payment_method, payment_status, paid_at, order_id
+      `SELECT id, amount, payment_method, payment_status, paid_at, order_id
        FROM order_payments
        WHERE order_id = ? AND ${tw("order_payments", tenantId)}
        ORDER BY COALESCE(paid_at, id) DESC, id DESC`,
@@ -465,16 +467,11 @@ export const orderRepository = {
       `SELECT o.id AS order_id, o.order_no, o.order_status, o.payment_status,
               o.payable_amount, o.created_at, c.customer_name,
               COALESCE(pay.total_received, 0) AS total_received,
-              COALESCE(pay.total_bank, 0) AS total_bank,
-              COALESCE(pay.total_cash, 0) AS total_cash,
               GREATEST(0, o.payable_amount - COALESCE(pay.total_received, 0)) AS amount_due
        FROM orders o
        LEFT JOIN crm_customers c ON c.id = o.customer_id AND c.deleted_at IS NULL
        LEFT JOIN (
-         SELECT order_id,
-                SUM(amount) AS total_received,
-                SUM(COALESCE(bank, 0)) AS total_bank,
-                SUM(COALESCE(cash, 0)) AS total_cash
+         SELECT order_id, SUM(amount) AS total_received
          FROM order_payments
          WHERE tenant_id = ? AND deleted_at IS NULL
            AND payment_status IN ('paid', 'partial')
@@ -516,16 +513,12 @@ export const orderRepository = {
   },
 
   async createPayment(tenantId, data) {
-    const bank = Number(data.bank) || 0;
-    const cash = Number(data.cash) || 0;
-    const amount = Number(data.amount) || bank + cash;
+    const amount = Number(data.amount) || 0;
     const [result] = await writeDb.query(
-      `INSERT INTO order_payments (payment_method, bank, cash, amount, payment_status, paid_at, order_id, tenant_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO order_payments (payment_method, amount, payment_status, paid_at, order_id, tenant_id)
+       VALUES (?, ?, ?, ?, ?, ?)`,
       [
-        data.payment_method || (bank > 0 && cash > 0 ? "mixed" : bank > 0 ? "bank_transfer" : "cash"),
-        bank,
-        cash,
+        data.payment_method || "cash",
         amount,
         data.payment_status,
         data.paid_at,
@@ -537,17 +530,13 @@ export const orderRepository = {
   },
 
   async updatePayment(tenantId, id, data) {
-    const bank = Number(data.bank) || 0;
-    const cash = Number(data.cash) || 0;
-    const amount = Number(data.amount) || bank + cash;
+    const amount = Number(data.amount) || 0;
     const [result] = await writeDb.query(
       `UPDATE order_payments
-       SET payment_method = ?, bank = ?, cash = ?, amount = ?, payment_status = ?, paid_at = ?
+       SET payment_method = ?, amount = ?, payment_status = ?, paid_at = ?
        WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL`,
       [
-        data.payment_method || (bank > 0 && cash > 0 ? "mixed" : bank > 0 ? "bank_transfer" : "cash"),
-        bank,
-        cash,
+        data.payment_method || "cash",
         amount,
         data.payment_status,
         data.paid_at,

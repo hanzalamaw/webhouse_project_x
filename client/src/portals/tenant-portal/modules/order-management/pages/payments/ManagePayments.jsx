@@ -14,8 +14,8 @@ import { ConfirmDeleteModal } from "../../../../../../components/ConfirmDeleteMo
 import { StatusBadge } from "../../../../../../components/Badge";
 import { formatPKR } from "../../../../../../utils/currency";
 import { formatDate, formatDateTime } from "../../../../../../utils/dateTime";
-import { addPaymentReceived } from "../../../../../../utils/billing";
 import { applyToolbarFilters, EMPTY_TOOLBAR } from "../../../../../../utils/tableFilters";
+import { ORDER_PAYMENT_CHANNELS, PAYMENT_METHOD_LABELS } from "../../constants";
 
 function SummaryGrid({ items }) {
   return (
@@ -36,6 +36,12 @@ function sumField(payments, field) {
   return payments.reduce((sum, p) => sum + Number(p[field] || 0), 0);
 }
 
+function paymentMethodLabel(method) {
+  return PAYMENT_METHOD_LABELS[method] || method || "—";
+}
+
+const EMPTY_PAYMENT_FORM = { amount: "", payment_method: "cash" };
+
 export default function ManagePayments() {
   const { authFetch } = useAuth();
   const { canCreate, canEdit, canDelete } = useModulePermission("order-management");
@@ -47,11 +53,11 @@ export default function ManagePayments() {
   const [orderPayments, setOrderPayments] = useState([]);
   const [orderPaymentsLoading, setOrderPaymentsLoading] = useState(false);
   const [contextRow, setContextRow] = useState(null);
-  const [addForm, setAddForm] = useState({ bank: "", cash: "" });
+  const [addForm, setAddForm] = useState(EMPTY_PAYMENT_FORM);
   const [addError, setAddError] = useState("");
   const [adding, setAdding] = useState(false);
   const [fixPayment, setFixPayment] = useState(null);
-  const [fixForm, setFixForm] = useState({ bank: "", cash: "" });
+  const [fixForm, setFixForm] = useState(EMPTY_PAYMENT_FORM);
   const [fixError, setFixError] = useState("");
   const [fixing, setFixing] = useState(false);
   const [deletePayment, setDeletePayment] = useState(null);
@@ -67,14 +73,10 @@ export default function ManagePayments() {
 
   const orderTotal = Number(contextRow?.payable_amount) || 0;
   const orderPaidCurrent = useMemo(() => sumField(orderPayments, "amount"), [orderPayments]);
-  const orderBankCurrent = useMemo(() => sumField(orderPayments, "bank"), [orderPayments]);
-  const orderCashCurrent = useMemo(() => sumField(orderPayments, "cash"), [orderPayments]);
   const currentPending = Math.max(0, Number((orderTotal - orderPaidCurrent).toFixed(2)));
 
-  const addBank = Number(addForm.bank) || 0;
-  const addCash = Number(addForm.cash) || 0;
-  const addTotal = addPaymentReceived(addForm.bank, addForm.cash);
-  const newOrderPaid = orderPaidCurrent + addTotal;
+  const addAmount = Number(addForm.amount) || 0;
+  const newOrderPaid = orderPaidCurrent + addAmount;
   const newPending = Math.max(0, Number((orderTotal - newOrderPaid).toFixed(2)));
   const maxAddAllowed = Math.max(0, Number((orderTotal - orderPaidCurrent).toFixed(2)));
 
@@ -85,7 +87,7 @@ export default function ManagePayments() {
       .reduce((sum, p) => sum + Number(p.amount || 0), 0);
   }, [orderPayments, fixPayment]);
 
-  const fixTotal = addPaymentReceived(fixForm.bank, fixForm.cash);
+  const fixAmount = Number(fixForm.amount) || 0;
   const fixMaxAllowed = Math.max(0, Number((orderTotal - fixOtherPaid).toFixed(2)));
 
   useEffect(() => {
@@ -135,7 +137,7 @@ export default function ManagePayments() {
   const openAddModal = async (row) => {
     setContextRow(row);
     setAddModalOpen(true);
-    setAddForm({ bank: "", cash: "" });
+    setAddForm(EMPTY_PAYMENT_FORM);
     setAddError("");
     await loadOrderPayments(row.order_id);
   };
@@ -144,42 +146,43 @@ export default function ManagePayments() {
     setAddModalOpen(false);
     setContextRow(null);
     setOrderPayments([]);
-    setAddForm({ bank: "", cash: "" });
+    setAddForm(EMPTY_PAYMENT_FORM);
     setAddError("");
   };
 
   const openFixModal = (payment) => {
     setFixPayment(payment);
     setFixForm({
-      bank: String(payment.bank ?? 0),
-      cash: String(payment.cash ?? 0),
+      amount: String(payment.amount ?? 0),
+      payment_method: ORDER_PAYMENT_CHANNELS.includes(payment.payment_method)
+        ? payment.payment_method
+        : "cash",
     });
     setFixError("");
   };
 
   const closeFixModal = () => {
     setFixPayment(null);
-    setFixForm({ bank: "", cash: "" });
+    setFixForm(EMPTY_PAYMENT_FORM);
     setFixError("");
   };
 
   const validateAdd = () => {
-    if (Number.isNaN(addBank) || addBank < 0) return "Bank amount cannot be negative.";
-    if (Number.isNaN(addCash) || addCash < 0) return "Cash amount cannot be negative.";
-    if (addBank === 0 && addCash === 0) return "Enter an amount to add.";
-    if (addTotal > maxAddAllowed + 0.001) {
-      return `Total cannot exceed ${formatPKR(maxAddAllowed)} remaining for this order.`;
+    if (Number.isNaN(addAmount) || addAmount < 0) return "Amount cannot be negative.";
+    if (addAmount === 0) return "Enter an amount to add.";
+    if (!ORDER_PAYMENT_CHANNELS.includes(addForm.payment_method)) return "Select bank or cash.";
+    if (addAmount > maxAddAllowed + 0.001) {
+      return `Amount cannot exceed ${formatPKR(maxAddAllowed)} remaining for this order.`;
     }
     return "";
   };
 
   const validateFix = () => {
-    const bank = Number(fixForm.bank);
-    const cash = Number(fixForm.cash);
-    if (Number.isNaN(bank) || bank < 0) return "Bank amount cannot be negative.";
-    if (Number.isNaN(cash) || cash < 0) return "Cash amount cannot be negative.";
-    if (fixTotal > fixMaxAllowed + 0.001) {
-      return `Total cannot exceed ${formatPKR(fixMaxAllowed)} for this order.`;
+    if (Number.isNaN(fixAmount) || fixAmount < 0) return "Amount cannot be negative.";
+    if (fixAmount === 0) return "Enter an amount.";
+    if (!ORDER_PAYMENT_CHANNELS.includes(fixForm.payment_method)) return "Select bank or cash.";
+    if (fixAmount > fixMaxAllowed + 0.001) {
+      return `Amount cannot exceed ${formatPKR(fixMaxAllowed)} for this order.`;
     }
     return "";
   };
@@ -200,14 +203,14 @@ export default function ManagePayments() {
           method: "POST",
           body: JSON.stringify({
             order_id: contextRow.order_id,
-            bank: addBank,
-            cash: addCash,
+            amount: addAmount,
+            payment_method: addForm.payment_method,
             payment_status: "paid",
           }),
         },
         authFetch
       );
-      setAddForm({ bank: "", cash: "" });
+      setAddForm(EMPTY_PAYMENT_FORM);
       await loadOrderPayments(contextRow.order_id);
       await reload();
     } catch (e) {
@@ -232,8 +235,8 @@ export default function ManagePayments() {
         {
           method: "PUT",
           body: JSON.stringify({
-            bank: Number(fixForm.bank) || 0,
-            cash: Number(fixForm.cash) || 0,
+            amount: fixAmount,
+            payment_method: fixForm.payment_method,
             payment_status: "paid",
           }),
         },
@@ -278,16 +281,6 @@ export default function ManagePayments() {
     { key: "total_received", label: "Total Received", format: (v) => formatPKR(v) },
     { key: "amount_due", label: "Amount Due", format: (v) => formatPKR(v) },
     { key: "payment_status", label: "Payment Status", render: (r) => <StatusBadge status={r.payment_status} /> },
-    {
-      label: "Actions",
-      filter: false,
-      stopRowClick: true,
-      render: (row) => (
-        <Button variant="secondary" className="wh-btn--sm" onClick={() => openAddModal(row)}>
-          Open Payment
-        </Button>
-      ),
-    },
   ];
 
   const meta = contextRow;
@@ -334,6 +327,7 @@ export default function ManagePayments() {
               page={page}
               pageSize={TABLE_PAGE_SIZE}
               onPageChange={setPage}
+              onRowClick={openAddModal}
               emptyMessage="No orders yet."
             />
           </>
@@ -366,8 +360,6 @@ export default function ManagePayments() {
               { label: "Order total", value: formatPKR(orderTotal), accent: true },
               { label: "Total received", value: formatPKR(orderPaidCurrent) },
               { label: "Amount due", value: formatPKR(currentPending) },
-              { label: "Current bank", value: formatPKR(orderBankCurrent) },
-              { label: "Current cash", value: formatPKR(orderCashCurrent) },
             ]}
           />
         </div>
@@ -375,37 +367,39 @@ export default function ManagePayments() {
         <div className="wh-tx-inputs">
           <div className="wh-form-grid">
             <FormField
-              id="om_tx_add_bank"
-              label="Add bank (Rs.)"
+              id="om_tx_add_amount"
+              label="Amount (Rs.)"
               type="number"
               step="0.01"
               min="0"
-              value={addForm.bank}
+              value={addForm.amount}
               onChange={(e) => {
                 setAddError("");
-                setAddForm((f) => ({ ...f, bank: e.target.value }));
+                setAddForm((f) => ({ ...f, amount: e.target.value }));
               }}
             />
             <FormField
-              id="om_tx_add_cash"
-              label="Add cash (Rs.)"
-              type="number"
-              step="0.01"
-              min="0"
-              value={addForm.cash}
+              id="om_tx_add_method"
+              label="Payment via"
+              as="select"
+              value={addForm.payment_method}
               onChange={(e) => {
                 setAddError("");
-                setAddForm((f) => ({ ...f, cash: e.target.value }));
+                setAddForm((f) => ({ ...f, payment_method: e.target.value }));
               }}
-            />
+            >
+              {ORDER_PAYMENT_CHANNELS.map((method) => (
+                <option key={method} value={method}>
+                  {paymentMethodLabel(method)}
+                </option>
+              ))}
+            </FormField>
           </div>
         </div>
 
         <div className="wh-tx-panel wh-tx-panel--summary">
           <SummaryGrid
             items={[
-              { label: "New bank total", value: formatPKR(orderBankCurrent + addBank) },
-              { label: "New cash total", value: formatPKR(orderCashCurrent + addCash) },
               { label: "New received total", value: formatPKR(newOrderPaid) },
               { label: "New pending", value: formatPKR(newPending), accent: true },
             ]}
@@ -422,23 +416,21 @@ export default function ManagePayments() {
                 <thead>
                   <tr>
                     <th>Date</th>
-                    <th>Bank</th>
-                    <th>Cash</th>
-                    <th>Total</th>
+                    <th>Method</th>
+                    <th>Amount</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {!orderPayments.length ? (
                     <tr>
-                      <td colSpan={5} className="wh-table-empty">No payments for this order.</td>
+                      <td colSpan={4} className="wh-table-empty">No payments for this order.</td>
                     </tr>
                   ) : (
                     orderPayments.map((p) => (
                       <tr key={p.id}>
                         <td>{p.paid_at ? formatDateTime(p.paid_at) : "—"}</td>
-                        <td>{formatPKR(p.bank)}</td>
-                        <td>{formatPKR(p.cash)}</td>
+                        <td>{paymentMethodLabel(p.payment_method)}</td>
                         <td>{formatPKR(p.amount)}</td>
                         <td>
                           <div className="wh-action-btns">
@@ -480,37 +472,40 @@ export default function ManagePayments() {
         }
       >
         <p className="wh-modal__text">
-          Correct the bank and cash amounts for this payment entry.
+          Update the amount and whether this payment was received via bank or cash.
           {fixPayment?.paid_at && (
             <> Recorded on {formatDateTime(fixPayment.paid_at)}.</>
           )}
         </p>
         <div className="wh-form-grid">
           <FormField
-            id="om_tx_fix_bank"
-            label="Bank (Rs.)"
+            id="om_tx_fix_amount"
+            label="Amount (Rs.)"
             type="number"
             step="0.01"
             min="0"
-            value={fixForm.bank}
+            value={fixForm.amount}
             onChange={(e) => {
               setFixError("");
-              setFixForm((f) => ({ ...f, bank: e.target.value }));
+              setFixForm((f) => ({ ...f, amount: e.target.value }));
             }}
           />
           <FormField
-            id="om_tx_fix_cash"
-            label="Cash (Rs.)"
-            type="number"
-            step="0.01"
-            min="0"
-            value={fixForm.cash}
+            id="om_tx_fix_method"
+            label="Payment via"
+            as="select"
+            value={fixForm.payment_method}
             onChange={(e) => {
               setFixError("");
-              setFixForm((f) => ({ ...f, cash: e.target.value }));
+              setFixForm((f) => ({ ...f, payment_method: e.target.value }));
             }}
-          />
-          <FormField id="om_tx_fix_total" label="Total (Rs.)" value={formatPKR(fixTotal)} readOnly />
+          >
+            {ORDER_PAYMENT_CHANNELS.map((method) => (
+              <option key={method} value={method}>
+                {paymentMethodLabel(method)}
+              </option>
+            ))}
+          </FormField>
         </div>
       </Modal>
 

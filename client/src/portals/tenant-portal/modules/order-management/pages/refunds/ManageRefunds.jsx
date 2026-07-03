@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../../../../../../context/AuthContext";
 import { useModulePermission } from "../../../../../../hooks/useModulePermission";
 import { fetchAllTableRows, TABLE_PAGE_SIZE } from "../../../../../../api/client";
@@ -25,11 +25,17 @@ export default function ManageRefunds() {
   const { authFetch } = useAuth();
   const { canCreate } = useModulePermission("order-management");
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [rows, setRows] = useState([]);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [toolbar, setToolbar] = useState({ ...EMPTY_TOOLBAR, refund_status: "", order_no: "", customer_name: "" });
+  const [toolbar, setToolbar] = useState(() => ({
+    ...EMPTY_TOOLBAR,
+    refund_status: "",
+    order_no: searchParams.get("orderNo") || "",
+    customer_name: "",
+  }));
 
   const filteredRows = useToolbarFilteredRows(rows, toolbar, { dateField: "refunded_at", filters: TOOLBAR_FILTERS });
 
@@ -68,7 +74,14 @@ export default function ManageRefunds() {
         {loading ? <p className="wh-muted">Loading…</p> : (
           <>
             <TableToolbar rows={rows} value={toolbar} onChange={setToolbar} dateField="refunded_at" filters={TOOLBAR_FILTERS} searchPlaceholder="Search refunds…" layout="stacked" />
-            <DataTable columns={columns} rows={filteredRows} page={page} pageSize={TABLE_PAGE_SIZE} onPageChange={setPage} />
+            <DataTable
+              columns={columns}
+              rows={filteredRows}
+              page={page}
+              pageSize={TABLE_PAGE_SIZE}
+              onPageChange={setPage}
+              onRowClick={(row) => row.order_id && navigate(`${MODULE_BASE}/orders/view/${row.order_id}`)}
+            />
           </>
         )}
       </Card>

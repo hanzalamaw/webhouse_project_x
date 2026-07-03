@@ -8,6 +8,8 @@ export const ORDER_SOURCES = ["manual", "shopify", "daraz", "facebook", "instagr
 
 export const PAYMENT_METHODS = ["cod", "card", "bank_transfer", "cash", "online", "other"];
 export const PAYMENT_RECORD_STATUSES = ["pending", "paid", "partial", "failed", "refunded"];
+/** Bank or cash when recording an order payment entry */
+export const ORDER_PAYMENT_CHANNELS = ["bank_transfer", "cash"];
 
 export const ASSIGNMENT_TYPES = ["staff", "warehouse", "fulfillment", "courier", "verification"];
 export const ASSIGNMENT_STATUSES = ["pending", "active", "completed", "cancelled"];
@@ -16,6 +18,36 @@ export const RETURN_STATUSES = ["requested", "approved", "received", "rejected",
 export const EXCHANGE_STATUSES = ["requested", "approved", "completed", "rejected"];
 export const REFUND_STATUSES = ["pending", "processed", "failed", "cancelled"];
 export const REFUND_METHODS = ["original_payment", "bank_transfer", "cash", "store_credit", "other"];
+
+export const RETURN_STATUS_LABELS = {
+  requested: "Requested",
+  approved: "Approved",
+  received: "Received",
+  rejected: "Rejected",
+  completed: "Completed",
+};
+
+export const EXCHANGE_STATUS_LABELS = {
+  requested: "Requested",
+  approved: "Approved",
+  completed: "Completed",
+  rejected: "Rejected",
+};
+
+export const REFUND_STATUS_LABELS = {
+  pending: "Pending",
+  processed: "Processed",
+  failed: "Failed",
+  cancelled: "Cancelled",
+};
+
+export const REFUND_METHOD_LABELS = {
+  original_payment: "Original payment method",
+  bank_transfer: "Bank transfer",
+  cash: "Cash",
+  store_credit: "Store credit",
+  other: "Other",
+};
 
 export const ORDER_STATUS_LABELS = {
   pending: "Pending",

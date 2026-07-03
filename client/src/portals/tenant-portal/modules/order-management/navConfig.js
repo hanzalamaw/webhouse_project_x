@@ -18,7 +18,6 @@ export function getNavItems() {
       icon: ProductIcon,
       children: [
         { id: "orders-manage", label: "Manage Orders", path: `${MODULE_BASE}/orders/manage` },
-        { id: "orders-create", label: "Create Order", path: `${MODULE_BASE}/orders/create` },
         { id: "assignments", label: "Assignments", path: `${MODULE_BASE}/assignments/manage` },
         { id: "printing", label: "Invoice & Printing", path: `${MODULE_BASE}/printing` },
         { id: "import-export", label: "Import / Export", path: `${MODULE_BASE}/import-export` },

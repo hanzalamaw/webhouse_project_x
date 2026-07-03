@@ -27,7 +27,8 @@ export async function logTenantAudit({
 }) {
   const ctx = getAuditContext();
   const resolvedImpersonatedBy = impersonatedBy ?? ctx?.impersonatedBy ?? null;
-  const resolvedIp = ipAddress ?? ctx?.ip ?? null;
+  const resolvedIp = ipAddress ?? ctx?.ipAddress ?? ctx?.ip ?? null;
+  const resolvedDevice = deviceInfo ?? ctx?.deviceInfo ?? null;
 
   if (resolvedImpersonatedBy) {
     await logWhAudit({
@@ -51,7 +52,7 @@ export async function logTenantAudit({
       oldValue ? JSON.stringify(oldValue) : null,
       newValue ? JSON.stringify(newValue) : null,
       resolvedIp,
-      deviceInfo,
+      resolvedDevice,
       tenantId,
       resolvedModuleId,
       userId,

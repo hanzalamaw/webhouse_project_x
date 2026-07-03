@@ -18,6 +18,14 @@ export function extractClientIp(req) {
   return null;
 }
 
+/** IP + user-agent for audit logs and activity alerts (matches WH portal logging). */
+export function getRequestAuditMeta(req) {
+  return {
+    ipAddress: extractClientIp(req),
+    deviceInfo: req.headers["user-agent"]?.trim() || null,
+  };
+}
+
 function normalizeIp(ip) {
   if (ip == null || ip === "") return null;
   const value = String(ip).trim();

@@ -8,6 +8,7 @@ import { Card } from "../../../../../../components/Card";
 import { Button } from "../../../../../../components/Button";
 import { SearchableSelect } from "../../../../../../components/SearchableSelect";
 import { FormField } from "../../../../../../components/FormField";
+import { FormPageLayout } from "../../../../../../components/FormPageLayout";
 import { formatPKR } from "../../../../../../utils/currency";
 import { formatDateTime } from "../../../../../../utils/dateTime";
 import { PRINT_DOC_TYPES } from "../../constants";
@@ -49,9 +50,15 @@ export default function InvoicePrinting() {
   const docTitle = PRINT_DOC_TYPES.find((d) => d.key === docType)?.label || "Document";
 
   const handlePrint = () => {
-    if (!printRef.current) return;
+    if (!printRef.current) {
+      setError("Select an order before printing.");
+      return;
+    }
     const win = window.open("", "_blank");
-    if (!win) return;
+    if (!win) {
+      setError("Unable to open the print window. Please allow pop-ups for this site.");
+      return;
+    }
     win.document.write(`<!doctype html><html><head><title>${docTitle}</title>
       <style>
         body { font-family: Arial, sans-serif; padding: 24px; color: #111; }
@@ -63,8 +70,17 @@ export default function InvoicePrinting() {
       </style></head><body>${printRef.current.innerHTML}</body></html>`);
     win.document.close();
     win.focus();
-    win.print();
-    win.close();
+    // Wait for the new window to finish rendering before invoking print,
+    // otherwise the dialog opens with a blank page (or nothing prints at all).
+    const triggerPrint = () => {
+      win.print();
+      win.close();
+    };
+    if (win.document.readyState === "complete") {
+      setTimeout(triggerPrint, 250);
+    } else {
+      win.onload = () => setTimeout(triggerPrint, 100);
+    }
   };
 
   if (!canView) {
@@ -73,12 +89,13 @@ export default function InvoicePrinting() {
 
   return (
     <div className="wh-page">
-      <PageHeader
-        title="Invoice & Slip Printing"
-        description="Generate invoices, packing slips, order receipts, and delivery documents."
-      />
+      <FormPageLayout>
+        <PageHeader
+          title="Invoice & Slip Printing"
+          description="Generate invoices, packing slips, order receipts, and delivery documents."
+        />
 
-      <Card>
+        <Card>
         <div className="wh-form-grid wh-form-grid--2">
           <FormField label="Order">
             <SearchableSelect
@@ -88,10 +105,14 @@ export default function InvoicePrinting() {
               placeholder={loading ? "Loading orders…" : "Select order"}
             />
           </FormField>
-          <FormField label="Document type">
-            <select className="wh-input" value={docType} onChange={(e) => setDocType(e.target.value)}>
-              {PRINT_DOC_TYPES.map((d) => <option key={d.key} value={d.key}>{d.label}</option>)}
-            </select>
+          <FormField
+            id="print-doc-type"
+            label="Document type"
+            as="select"
+            value={docType}
+            onChange={(e) => setDocType(e.target.value)}
+          >
+            {PRINT_DOC_TYPES.map((d) => <option key={d.key} value={d.key}>{d.label}</option>)}
           </FormField>
         </div>
         <div className="wh-card__actions">
@@ -153,6 +174,7 @@ export default function InvoicePrinting() {
           </div>
         </Card>
       )}
+      </FormPageLayout>
     </div>
   );
 }

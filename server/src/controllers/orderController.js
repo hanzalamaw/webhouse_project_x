@@ -45,6 +45,47 @@ export const orderController = {
     }
   },
 
+  async lookupCustomerByPhone(req, res) {
+    try {
+      const row = await orderService.lookupCustomerByPhone(req.tenantId, req.query.phone);
+      res.json({ data: row });
+    } catch (e) {
+      res.status(500).json({ message: e.message });
+    }
+  },
+
+  async quickCreateCustomer(req, res) {
+    try {
+      const row = await orderService.quickCreateCustomer(req.tenantId, req.userId, req.body);
+      res.status(201).json(row);
+    } catch (e) {
+      res.status(400).json({ message: e.message });
+    }
+  },
+
+  async getCustomerDetail(req, res) {
+    try {
+      const id = tryParseEntityId(req.params.id);
+      if (!id) return res.status(400).json({ message: "Invalid customer id" });
+      const row = await orderService.getCustomerDetail(req.tenantId, id);
+      if (!row) return res.status(404).json({ message: "Customer not found" });
+      res.json({ data: row });
+    } catch (e) {
+      res.status(500).json({ message: e.message });
+    }
+  },
+
+  async quickUpdateCustomer(req, res) {
+    try {
+      const id = tryParseEntityId(req.params.id);
+      if (!id) return res.status(400).json({ message: "Invalid customer id" });
+      const row = await orderService.quickUpdateCustomer(req.tenantId, req.userId, id, req.body);
+      res.json({ data: row });
+    } catch (e) {
+      res.status(400).json({ message: e.message });
+    }
+  },
+
   async exportOrders(req, res) {
     try {
       res.json({ data: await orderService.exportOrders(req.tenantId) });
@@ -86,7 +127,7 @@ export const orderController = {
     try {
       const id = tryParseEntityId(req.params.id);
       if (!id) return res.status(400).json({ message: "Invalid order id" });
-      const row = await orderService.updateOrder(req.tenantId, id, req.body);
+      const row = await orderService.updateOrder(req.tenantId, id, req.body, req.userId);
       if (!row) return res.status(404).json({ message: "Order not found" });
       res.json(row);
     } catch (e) {

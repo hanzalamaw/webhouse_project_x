@@ -4,9 +4,12 @@ import { useAuth } from "../../../../../context/AuthContext";
 import { apiFetch, fetchAllTableRows } from "../../../../../api/client";
 import { PageHeader } from "../../../../../components/PageHeader";
 import { Button } from "../../../../../components/Button";
+import { Card } from "../../../../../components/Card";
+import { StatusBadge } from "../../../../../components/Badge";
 import { FormPageLayout } from "../../../../../components/FormPageLayout";
 import { DiffViewer } from "../../../../../components/DiffViewer";
 import { DetailGrid, DetailValue } from "../../../../../components/RecordView";
+import { getAuditSummary, buildAuditChanges } from "../../../../../utils/humanizeAudit";
 import { formatDateTime } from "../../../../../utils/dateTime";
 import { formatSessionIp, simplifyDeviceInfo } from "../../../../../utils/sessionDisplay";
 import { formatTenantAuditAction } from "../../../../../utils/auditActionLabels";
@@ -58,13 +61,15 @@ export default function AuditLogView() {
 
   const oldValue = typeof log.old_value === "string" ? JSON.parse(log.old_value || "null") : log.old_value;
   const newValue = typeof log.new_value === "string" ? JSON.parse(log.new_value || "null") : log.new_value;
+  const summary = getAuditSummary(newValue) || getAuditSummary(oldValue);
+  const changes = buildAuditChanges(oldValue, newValue);
 
   return (
     <div className="wh-page">
       <FormPageLayout>
         <PageHeader
-          title={formatTenantAuditAction(log.action)}
-          description="Full audit log entry with change details."
+          title="Activity details"
+          description="A plain-language record of what happened."
           actions={
             <Button variant="secondary" onClick={() => navigate("/app/m/admin/audit-logs")}>
               Back to audit logs
@@ -72,24 +77,41 @@ export default function AuditLogView() {
           }
         />
 
-        <DetailGrid>
-          <DetailValue label="Action">{formatTenantAuditAction(log.action)}</DetailValue>
-          <DetailValue label="User">{log.user_name || "—"}</DetailValue>
-          <DetailValue label="Module">{log.module_name || "—"}</DetailValue>
-          <DetailValue label="When">{formatDateTime(log.created_at)}</DetailValue>
-          <DetailValue label="IP address">{formatSessionIp(log.ip_address)}</DetailValue>
-          <DetailValue label="Device">{simplifyDeviceInfo(log.device_info)}</DetailValue>
-        </DetailGrid>
+        <Card className="wh-logview-hero">
+          <div className="wh-logview-hero__top">
+            <span className="wh-logview-hero__action">{formatTenantAuditAction(log.action)}</span>
+            {log.action && <StatusBadge status={log.action} />}
+          </div>
+          <div className="wh-logview-hero__meta">
+            <span>{log.user_name || "System"}</span>
+            <span className="wh-logview-hero__dot">·</span>
+            <span>{formatDateTime(log.created_at)}</span>
+          </div>
+        </Card>
 
-        <div className="wh-panel" style={{ marginTop: 24 }}>
-          <div className="wh-panel__head">
-            <h3 className="wh-panel__title">Changes</h3>
-            <p className="wh-panel__subtitle">Previous values in green, updated values in red.</p>
+        <Card className="wh-logview-detail">
+          <h3 className="wh-card__title">Details</h3>
+          <DetailGrid>
+            <DetailValue label="Performed by">{log.user_name || "—"}</DetailValue>
+            <DetailValue label="Module">{log.module_name || "—"}</DetailValue>
+            <DetailValue label="When">{formatDateTime(log.created_at)}</DetailValue>
+            <DetailValue label="IP address">{formatSessionIp(log.ip_address)}</DetailValue>
+            <DetailValue label="Device">{simplifyDeviceInfo(log.device_info)}</DetailValue>
+          </DetailGrid>
+        </Card>
+
+        <Card className="wh-logview-changes">
+          <div className="wh-logview-changes__head">
+            <h3 className="wh-card__title">What happened</h3>
+            <p className="wh-muted">A plain-language summary of this activity.</p>
           </div>
-          <div className="wh-panel__body">
+          {summary && <p className="wh-logview-summary">{summary}</p>}
+          {changes.length > 0 ? (
             <DiffViewer oldValue={oldValue} newValue={newValue} />
-          </div>
-        </div>
+          ) : (
+            !summary && <p className="wh-muted">This action didn't record any specific field changes.</p>
+          )}
+        </Card>
       </FormPageLayout>
     </div>
   );

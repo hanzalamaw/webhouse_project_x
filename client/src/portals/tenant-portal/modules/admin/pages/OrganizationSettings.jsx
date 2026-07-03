@@ -170,7 +170,7 @@ export default function OrganizationSettings() {
 
   return (
     <div className="wh-page">
-      <FormPageLayout wide>
+      <FormPageLayout>
         <PageHeader
           title="Organization Settings"
           description="Company profile, logo, timezone, currency, language, and fiscal year."

@@ -14,6 +14,7 @@ import { registerCrmRoutes } from "./src/routes/crm.js";
 import { registerTenantPortalRoutes } from "./src/routes/tenantPortal.js";
 import { registerEcommerceRoutes } from "./src/routes/ecommerce.js";
 import { registerOrderRoutes } from "./src/routes/orders.js";
+import { registerFinanceRoutes } from "./src/routes/finance.js";
 import { shopifyWebhookHandler } from "./src/routes/shopifyWebhooks.js";
 import { purgeSoftDeleted } from "./src/jobs/purgeSoftDeleted.js";
 
@@ -60,6 +61,7 @@ const startServer = async () => {
   registerTenantPortalRoutes(app, verifyToken);
   registerEcommerceRoutes(app, verifyToken);
   registerOrderRoutes(app, verifyToken);
+  registerFinanceRoutes(app, verifyToken);
 
   app.get("/", (req, res) => {
     res.status(204).end();

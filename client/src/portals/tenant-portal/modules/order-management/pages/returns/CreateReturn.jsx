@@ -1,92 +1,251 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
+
 import { useNavigate } from "react-router-dom";
+
 import { useAuth } from "../../../../../../context/AuthContext";
+
 import { useModulePermission } from "../../../../../../hooks/useModulePermission";
-import { apiFetch, fetchAllTableRows } from "../../../../../../api/client";
+
+import { apiFetch } from "../../../../../../api/client";
+
 import { PageHeader } from "../../../../../../components/PageHeader";
+
 import { FormField } from "../../../../../../components/FormField";
+
 import { Button } from "../../../../../../components/Button";
-import { SearchableSelect } from "../../../../../../components/SearchableSelect";
+
 import { FormBlock } from "../../../../../../components/FormBlock";
-import { FormPageLayout, FormActions } from "../../../../../../components/FormPageLayout";
-import { MODULE_BASE, RETURN_STATUSES } from "../../constants";
+
+import { FormPageLayout, FormPageAlerts, FormActions } from "../../../../../../components/FormPageLayout";
+
+import { AfterSalesOrderSection } from "../../components/AfterSalesOrderSection";
+
+import { useAfterSalesOrders } from "../../hooks/useAfterSalesOrders";
+
+import { MODULE_BASE, RETURN_STATUSES, RETURN_STATUS_LABELS } from "../../constants";
+
+
 
 export default function CreateReturn() {
+
   const { authFetch } = useAuth();
+
   const { canCreate, readOnly } = useModulePermission("order-management");
+
   const navigate = useNavigate();
+
+  const { orders, loading, error: loadError, prefillOrderId } = useAfterSalesOrders(authFetch);
+
   const [form, setForm] = useState({ order_id: "", return_status: "requested", reason: "" });
-  const [orders, setOrders] = useState([]);
-  const [loading, setLoading] = useState(true);
+
   const [saving, setSaving] = useState(false);
+
   const [error, setError] = useState("");
 
+
+
   const disabled = readOnly || !canCreate;
+
+  const managePath = `${MODULE_BASE}/returns/manage`;
+
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
-  const orderOptions = useMemo(
-    () => orders.map((o) => ({ value: String(o.id), label: `${o.order_no} — ${o.customer_name || "No customer"}` })),
-    [orders]
-  );
+
 
   useEffect(() => {
-    fetchAllTableRows("/orders", authFetch)
-      .then(setOrders)
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
-  }, [authFetch]);
+
+    if (prefillOrderId) {
+
+      setForm((f) => ({ ...f, order_id: String(prefillOrderId) }));
+
+    }
+
+  }, [prefillOrderId]);
+
+
 
   const submit = async (e) => {
+
     e.preventDefault();
+
     if (disabled) return;
+
+    if (!form.order_id) { setError("Select an order for this return."); return; }
+
     setSaving(true);
+
     setError("");
+
     try {
+
       await apiFetch("/orders/returns", {
+
         method: "POST",
+
         body: JSON.stringify({
+
           order_id: Number(form.order_id),
+
           return_status: form.return_status,
+
           reason: form.reason.trim(),
+
         }),
+
       }, authFetch);
-      navigate(`${MODULE_BASE}/returns/manage`);
+
+      navigate(managePath);
+
     } catch (err) {
+
       setError(err.message);
+
     } finally {
+
       setSaving(false);
+
     }
+
   };
 
-  if (loading) return <div className="wh-page"><p className="wh-muted">Loading…</p></div>;
+
+
+  if (loading) {
+
+    return (
+
+      <div className="wh-page">
+
+        <FormPageLayout><p className="wh-muted">Loading…</p></FormPageLayout>
+
+      </div>
+
+    );
+
+  }
+
+
 
   return (
+
     <div className="wh-page">
+
       <FormPageLayout>
-        <PageHeader title="Add New Returns" />
-        <form className="wh-form-stack" onSubmit={submit}>
-          <FormBlock title="Return request">
-            <div className="wh-form-grid wh-form-grid--2">
-              <FormField label="Order">
-                <SearchableSelect options={orderOptions} value={form.order_id} onChange={(v) => set("order_id", v)} disabled={disabled} />
-              </FormField>
-              <FormField label="Status">
-                <select className="wh-input" value={form.return_status} onChange={(e) => set("return_status", e.target.value)} disabled={disabled}>
-                  {RETURN_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-                </select>
-              </FormField>
-            </div>
-            <FormField label="Reason">
-              <textarea className="wh-input" rows={3} value={form.reason} onChange={(e) => set("reason", e.target.value)} disabled={disabled} />
-            </FormField>
+
+        <PageHeader
+
+          title="Record return"
+
+          description="Log a product return against an order and track its progress."
+
+          actions={
+
+            <Button variant="secondary" onClick={() => navigate(managePath)}>Back to returns</Button>
+
+          }
+
+        />
+
+        <FormPageAlerts error={error || loadError} />
+
+
+
+        <form className="wh-form-stack wh-aftersales-form" onSubmit={submit}>
+
+          <FormBlock title="Order" description="Select the order this return belongs to.">
+
+            <AfterSalesOrderSection
+
+              orders={orders}
+
+              value={form.order_id}
+
+              onChange={(v) => set("order_id", v)}
+
+              disabled={disabled}
+
+              prefillLocked={Boolean(prefillOrderId)}
+
+            />
+
           </FormBlock>
-          {error && <p className="wh-field__error">{error}</p>}
+
+
+
+          <FormBlock title="Return details" description="Set the return status and describe what is being sent back.">
+
+            <div className="wh-form-grid wh-form-grid--2">
+
+              <FormField
+
+                id="return-status"
+
+                label="Return status"
+
+                as="select"
+
+                value={form.return_status}
+
+                onChange={(e) => set("return_status", e.target.value)}
+
+                disabled={disabled}
+
+              >
+
+                {RETURN_STATUSES.map((s) => (
+
+                  <option key={s} value={s}>{RETURN_STATUS_LABELS[s] || s}</option>
+
+                ))}
+
+              </FormField>
+
+            </div>
+
+            <FormField
+
+              id="return-reason"
+
+              label="Reason"
+
+              as="textarea"
+
+              rows={4}
+
+              value={form.reason}
+
+              onChange={(e) => set("reason", e.target.value)}
+
+              disabled={disabled}
+
+              placeholder="e.g. Wrong size delivered, customer wants a refund…"
+
+            />
+
+          </FormBlock>
+
+
+
           <FormActions>
-            <Button type="submit" disabled={saving || disabled}>{saving ? "Saving…" : "Save return"}</Button>
-            <Button type="button" variant="secondary" onClick={() => navigate(`${MODULE_BASE}/returns/manage`)}>Back</Button>
+
+            <Button type="button" variant="secondary" onClick={() => navigate(managePath)}>Cancel</Button>
+
+            <Button type="submit" disabled={saving || disabled || !form.order_id}>
+
+              {saving ? "Saving…" : "Save return"}
+
+            </Button>
+
           </FormActions>
+
         </form>
+
       </FormPageLayout>
+
     </div>
+
   );
+
 }
+
+

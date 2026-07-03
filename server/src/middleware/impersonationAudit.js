@@ -1,4 +1,5 @@
 import { logWhAudit, getClientIp } from "../utils/whAudit.js";
+import { getRequestAuditMeta } from "../utils/clientIp.js";
 import { auditContext } from "../utils/auditContext.js";
 import { describeImpersonationApiAction } from "../utils/describeAuditAction.js";
 
@@ -7,9 +8,12 @@ const SERVICE_AUDITED_PREFIXES = ["/api/tenant/", "/api/crm/"];
 
 /** Attach impersonation context and log WH audit for modules without dedicated audit writers. */
 export function impersonationAudit(req, res, next) {
+  const meta = getRequestAuditMeta(req);
   const store = {
     impersonatedBy: req.impersonatedBy ?? null,
-    ip: getClientIp(req),
+    ip: meta.ipAddress ?? getClientIp(req),
+    ipAddress: meta.ipAddress,
+    deviceInfo: meta.deviceInfo,
     tenantId: req.tenantId ?? null,
     userId: req.userId ?? null,
   };

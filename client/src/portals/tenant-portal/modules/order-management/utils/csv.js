@@ -20,12 +20,44 @@ export const ORDER_CSV_HEADERS = [
   "notes",
 ];
 
+function splitCsvLine(line) {
+  const values = [];
+  let current = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (line[i + 1] === '"') {
+          current += '"';
+          i += 1;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        current += ch;
+      }
+    } else if (ch === '"') {
+      inQuotes = true;
+    } else if (ch === ",") {
+      values.push(current);
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+  values.push(current);
+  return values.map((v) => v.trim());
+}
+
 export function parseCsv(text) {
-  const lines = text.trim().split(/\r?\n/).filter(Boolean);
+  // Strip UTF-8 BOM so the first header key is not corrupted.
+  const clean = text.replace(/^\uFEFF/, "");
+  const lines = clean.split(/\r?\n/).filter((l) => l.trim() !== "");
   if (lines.length < 2) return [];
-  const headers = lines[0].split(",").map((h) => h.trim().replace(/^"|"$/g, ""));
+  const headers = splitCsvLine(lines[0]);
   return lines.slice(1).map((line) => {
-    const values = line.match(/("([^"]|"")*"|[^,]*)/g)?.map((v) => v.trim().replace(/^"|"$/g, "").replace(/""/g, '"')) || [];
+    const values = splitCsvLine(line);
     const row = {};
     headers.forEach((h, i) => { row[h] = values[i] ?? ""; });
     return row;

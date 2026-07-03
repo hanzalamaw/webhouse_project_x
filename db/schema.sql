@@ -1475,15 +1475,18 @@ CREATE TABLE IF NOT EXISTS `finance_recurring_expenses` (
   `amount` DECIMAL(12,2) NOT NULL,
   `frequency` VARCHAR(45) NOT NULL,
   `next_due_date` DATE NOT NULL,
+  `last_deducted_at` TIMESTAMP NULL DEFAULT NULL,
   `status` VARCHAR(45) NOT NULL,
   `created_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
   `category_id` INT NOT NULL,
   `sub_category_id` INT NULL DEFAULT NULL,
+  `bank_account_id` INT NULL DEFAULT NULL,
   `tenant_id` INT NOT NULL,
   `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   INDEX `fk_finance_recurring_expenses_finance_expense_categories1_idx` (`category_id` ASC),
   INDEX `fk_fin_recur_exp_fin_exp_sub_cat1_idx` (`sub_category_id` ASC),
+  INDEX `fk_fin_recur_exp_bank_idx` (`bank_account_id` ASC),
   INDEX `fk_finance_recurring_expenses_wh_tenants1_idx` (`tenant_id` ASC),
   CONSTRAINT `fk_finance_recurring_expenses_finance_expense_categories1`
     FOREIGN KEY (`category_id`)
@@ -1494,6 +1497,11 @@ CREATE TABLE IF NOT EXISTS `finance_recurring_expenses` (
     FOREIGN KEY (`sub_category_id`)
     REFERENCES `finance_expense_sub_categories` (`id`)
     ON DELETE CASCADE
+    ON UPDATE CASCADE,
+  CONSTRAINT `fk_fin_recur_exp_bank`
+    FOREIGN KEY (`bank_account_id`)
+    REFERENCES `finance_bank_accounts` (`id`)
+    ON DELETE SET NULL
     ON UPDATE CASCADE,
   CONSTRAINT `fk_finance_recurring_expenses_wh_tenants1`
     FOREIGN KEY (`tenant_id`)

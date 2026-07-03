@@ -426,13 +426,50 @@ export const inventoryService = {
   },
 
   async exportProducts(tenantId) {
-    const products = [];
+    // Emit flat rows (one per variant per warehouse stock level) so the export mirrors
+    // the import format and every product column is populated.
+    const out = [];
     const { rows } = await inventoryRepository.listProducts(tenantId, { limit: 10000, offset: 0 });
     for (const p of rows) {
-      const full = await this.getProduct(tenantId, p.id);
-      products.push(full);
+      const variants = await inventoryRepository.getVariantsByProductId(tenantId, p.id);
+      for (const v of variants) {
+        const base = {
+          product_name: p.product_name,
+          sku: v.sku,
+          unit: p.unit || "piece",
+          cost_price: v.cost_price ?? 0,
+          selling_price: v.selling_price ?? 0,
+          delivery_charges: p.delivery_charges ?? 0,
+          discount: p.discount ?? 0,
+          tax: p.tax ?? 0,
+          status: v.status || p.status || "active",
+          category_name: p.category_name || "",
+        };
+        const stockLevels = await inventoryRepository.getVariantStockLevels(tenantId, v.id);
+        if (stockLevels.length) {
+          for (const sl of stockLevels) {
+            out.push({
+              ...base,
+              warehouse_id: sl.warehouse_id,
+              initial_qty: sl.available_qty ?? 0,
+              reserved_qty: sl.reserved_qty ?? 0,
+              damaged_qty: sl.damaged_qty ?? 0,
+              stock_notes: "",
+            });
+          }
+        } else {
+          out.push({
+            ...base,
+            warehouse_id: "",
+            initial_qty: 0,
+            reserved_qty: 0,
+            damaged_qty: 0,
+            stock_notes: "",
+          });
+        }
+      }
     }
-    return products;
+    return out;
   },
 
   async importProducts(tenantId, userId, rows) {

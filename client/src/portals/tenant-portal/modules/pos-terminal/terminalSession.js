@@ -1,3 +1,5 @@
+import { isTerminalStoreDayExpired } from "./storeDay";
+
 const STORAGE_KEY = "wh_pos_terminal_session";
 
 export function readTerminalSession() {
@@ -15,4 +17,16 @@ export function writeTerminalSession(session) {
 
 export function clearTerminalSession() {
   localStorage.removeItem(STORAGE_KEY);
+}
+
+export function buildTerminalSession({ terminalId, storeOpenTime }) {
+  return {
+    terminal_id: terminalId,
+    store_open_time: storeOpenTime || null,
+    connected_at: Date.now(),
+  };
+}
+
+export function isStoredTerminalSessionExpired(session = readTerminalSession()) {
+  return isTerminalStoreDayExpired(session);
 }

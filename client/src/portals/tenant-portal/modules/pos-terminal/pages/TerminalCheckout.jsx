@@ -7,7 +7,7 @@ import { Modal } from "../../../../../components/Modal";
 import { useAuth } from "../../../../../context/AuthContext";
 import { formatPKR } from "../../../../../utils/currency";
 import { DEVICE_CODE } from "../constants";
-import { clearTerminalSession, readTerminalSession, writeTerminalSession } from "../terminalSession";
+import { clearTerminalSession, readTerminalSession, writeTerminalSession, buildTerminalSession, isStoredTerminalSessionExpired } from "../terminalSession";
 import "../Terminal.css";
 
 function round2(value) {
@@ -94,6 +94,28 @@ export default function TerminalCheckout() {
     setProducts(Array.isArray(res.products) ? res.products : []);
   }, []);
 
+  const resetTerminalState = useCallback(() => {
+    clearTerminalSession();
+    setSession(null);
+    setTerminal(null);
+    setRegister(null);
+    setDrawer(null);
+    setProducts([]);
+    setCart([]);
+  }, []);
+
+  const forceStoreDayLogout = useCallback(async () => {
+    const stored = readTerminalSession();
+    if (!stored?.terminal_id) return;
+    try {
+      await apiFetch(`/pos/terminal/${stored.terminal_id}/shift-off`, { method: "POST" }, authFetch);
+    } catch {
+      // Shift may already be closed server-side after day rollover.
+    }
+    resetTerminalState();
+    await logout();
+  }, [authFetch, logout, resetTerminalState]);
+
   const refreshProducts = useCallback(async (terminalId) => {
     const id = terminalId ?? terminal?.id;
     if (!id) return;
@@ -110,23 +132,29 @@ export default function TerminalCheckout() {
 
   const restoreSession = useCallback(async (stored) => {
     if (!stored?.terminal_id) return;
+    if (isStoredTerminalSessionExpired(stored)) {
+      await forceStoreDayLogout();
+      return;
+    }
     setSessionRestoring(true);
     setError("");
     try {
       const res = await apiFetch(`/pos/terminal/${stored.terminal_id}/session`, {}, authFetch);
       applySessionResponse(res);
-      writeTerminalSession({ terminal_id: res.terminal.id });
+      const nextSession = {
+        terminal_id: res.terminal.id,
+        store_open_time:
+          res.terminal.store_open_time || res.drawer?.store_open_time || stored.store_open_time || null,
+        connected_at: stored.connected_at || Date.now(),
+      };
+      writeTerminalSession(nextSession);
+      setSession(nextSession);
     } catch {
-      clearTerminalSession();
-      setSession(null);
-      setTerminal(null);
-      setRegister(null);
-      setDrawer(null);
-      setProducts([]);
+      resetTerminalState();
     } finally {
       setSessionRestoring(false);
     }
-  }, [applySessionResponse, authFetch]);
+  }, [applySessionResponse, authFetch, forceStoreDayLogout, resetTerminalState]);
 
   const loadGateTerminals = useCallback(async () => {
     setTerminalsLoading(true);
@@ -175,6 +203,24 @@ export default function TerminalCheckout() {
   useEffect(() => {
     if (session?.terminal_id) restoreSession(session).catch(() => {});
   }, [session, restoreSession]);
+
+  useEffect(() => {
+    const checkStoreDay = () => {
+      if (isStoredTerminalSessionExpired()) {
+        forceStoreDayLogout().catch(() => {});
+      }
+    };
+    checkStoreDay();
+    const timer = window.setInterval(checkStoreDay, 60 * 1000);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") checkStoreDay();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [forceStoreDayLogout]);
 
   useEffect(() => {
     if (terminal?.id) return undefined;
@@ -242,7 +288,10 @@ export default function TerminalCheckout() {
         body: JSON.stringify({ device_code: code }),
       }, authFetch);
       applySessionResponse(res);
-      const stored = { terminal_id: res.terminal.id };
+      const stored = buildTerminalSession({
+        terminalId: res.terminal.id,
+        storeOpenTime: res.terminal.store_open_time || res.drawer?.store_open_time,
+      });
       writeTerminalSession(stored);
       setSession(stored);
     } catch (err) {
@@ -476,13 +525,7 @@ export default function TerminalCheckout() {
     try {
       if (shiftOff && terminal?.id) {
         await apiFetch(`/pos/terminal/${terminal.id}/shift-off`, { method: "POST" }, authFetch);
-        clearTerminalSession();
-        setSession(null);
-        setTerminal(null);
-        setRegister(null);
-        setDrawer(null);
-        setProducts([]);
-        setCart([]);
+        resetTerminalState();
       }
       setLogoutOpen(false);
       await logout();

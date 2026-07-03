@@ -1,4 +1,6 @@
 import { orderRepository } from "../repositories/orderRepository.js";
+import { crmService } from "./crmService.js";
+import { crmRepository } from "../repositories/crmRepository.js";
 import { cascadeSoftDeleteOrder } from "../utils/orderSoftDelete.js";
 import {
   ORDER_STATUSES,
@@ -96,6 +98,48 @@ async function syncOrderPaymentStatus(tenantId, orderId) {
   });
 }
 
+// When an order's status transitions to a terminal after-sales state, mirror it
+// into the matching after-sales table so those pages stay the source of truth.
+async function syncAfterSalesFromStatus(tenantId, userId, orderId, order) {
+  const orderStatus = String(order.order_status || "").toLowerCase();
+  const paymentStatus = String(order.payment_status || "").toLowerCase();
+
+  if (orderStatus === "cancelled") {
+    const rows = await orderRepository.listCancellations(tenantId);
+    if (!rows.some((r) => Number(r.order_id) === Number(orderId))) {
+      await orderRepository.createCancellation(tenantId, userId, {
+        order_id: Number(orderId),
+        reason: "Auto-recorded from order status change",
+      });
+    }
+  }
+
+  if (orderStatus === "returned") {
+    const rows = await orderRepository.listReturns(tenantId);
+    if (!rows.some((r) => Number(r.order_id) === Number(orderId))) {
+      await orderRepository.createReturn(tenantId, userId, {
+        order_id: Number(orderId),
+        return_status: "requested",
+        reason: "Auto-recorded from order status change",
+      });
+    }
+  }
+
+  if (paymentStatus === "refunded") {
+    const rows = await orderRepository.listRefunds(tenantId);
+    if (!rows.some((r) => Number(r.order_id) === Number(orderId))) {
+      await orderRepository.createRefund(tenantId, userId, {
+        order_id: Number(orderId),
+        refund_amount: Number(order.payable_amount) || 0,
+        refund_method: "original_payment",
+        refund_status: "processed",
+        reason: "Auto-recorded from payment status change",
+        refunded_at: new Date(),
+      });
+    }
+  }
+}
+
 async function ensureFieldOption(tenantId, fieldKey, value, defaults) {
   const v = String(value || "").trim();
   if (!v) throw new Error(`Invalid ${fieldKey}`);
@@ -174,6 +218,89 @@ export const orderService = {
     return orderRepository.listWarehouseProducts(tenantId, warehouseId);
   },
 
+  async lookupCustomerByPhone(tenantId, phone) {
+    const digits = String(phone || "").replace(/\D/g, "");
+    if (digits.length < 4) return null;
+    const customers = await orderRepository.listCustomers(tenantId);
+    const match = customers.find((c) => String(c.phone || "").replace(/\D/g, "") === digits);
+    if (!match) return null;
+    return this.getCustomerDetail(tenantId, match.id);
+  },
+
+  async getCustomerDetail(tenantId, id) {
+    const customer = await crmRepository.getCustomer(tenantId, id);
+    if (!customer) return null;
+    const defaultAddr = (customer.addresses || []).find((a) => a.is_default) || customer.addresses?.[0] || null;
+    return {
+      id: customer.id,
+      customer_name: customer.customer_name || "",
+      company_name: customer.company_name || "",
+      customer_type: customer.customer_type || "retailer",
+      status: customer.status || "active",
+      phone: customer.phone || "",
+      email: customer.email || "",
+      note: customer.note || "",
+      tags: (customer.tags || []).map((t) => t.tag_name).filter(Boolean),
+      city: defaultAddr?.city || "",
+      delivery_address: defaultAddr?.address || "",
+      address_id: defaultAddr?.id || null,
+    };
+  },
+
+  _customerBodyFromOrder(body) {
+    return {
+      customer_name: requireString(body.customer_name, "Customer name"),
+      company_name: body.company_name ? String(body.company_name).trim() : null,
+      customer_type: body.customer_type ? String(body.customer_type).trim() : "retailer",
+      status: body.status ? String(body.status).trim() : "active",
+      phone: body.phone ? String(body.phone).trim() : null,
+      email: body.email ? String(body.email).trim() : null,
+      note: body.note ? String(body.note).trim() : null,
+      tags: Array.isArray(body.tags)
+        ? body.tags
+        : String(body.tags || "").split(",").map((t) => t.trim()).filter(Boolean),
+    };
+  },
+
+  async quickCreateCustomer(tenantId, userId, body) {
+    const customer = await crmService.createCustomer(tenantId, userId, {
+      ...this._customerBodyFromOrder(body),
+      source: "order",
+    });
+    if ((body.city || body.delivery_address) && customer?.id) {
+      await crmRepository
+        .createAddress(tenantId, customer.id, {
+          address_type: "default",
+          address: body.delivery_address || null,
+          city: body.city || null,
+          is_default: 1,
+        })
+        .catch(() => {});
+    }
+    return customer;
+  },
+
+  async quickUpdateCustomer(tenantId, userId, id, body) {
+    const existing = await crmRepository.getCustomer(tenantId, id);
+    if (!existing) throw new Error("Customer not found");
+    await crmService.updateCustomer(tenantId, userId, id, this._customerBodyFromOrder(body));
+    if (body.city || body.delivery_address) {
+      const defaultAddr = (existing.addresses || []).find((a) => a.is_default) || existing.addresses?.[0] || null;
+      const addrData = {
+        address_type: "default",
+        address: body.delivery_address || null,
+        city: body.city || null,
+        is_default: 1,
+      };
+      if (defaultAddr?.id) {
+        await crmRepository.updateAddress(tenantId, defaultAddr.id, addrData).catch(() => {});
+      } else {
+        await crmRepository.createAddress(tenantId, id, addrData).catch(() => {});
+      }
+    }
+    return this.getCustomerDetail(tenantId, id);
+  },
+
   async addFieldOption(tenantId, fieldKey, optionValue) {
     const allowedKeys = new Set(["channel", "order_status", "payment_status", "fulfillment_status"]);
     if (!allowedKeys.has(fieldKey)) throw new Error("Invalid field key");
@@ -194,10 +321,11 @@ export const orderService = {
     const data = await mapOrderPayload(tenantId, body, items);
     data.order_no = await orderRepository.generateOrderNo(tenantId);
     const orderId = await orderRepository.createOrder(tenantId, userId, data, items);
+    await syncAfterSalesFromStatus(tenantId, userId, orderId, data);
     return orderRepository.getOrder(tenantId, orderId);
   },
 
-  async updateOrder(tenantId, id, body) {
+  async updateOrder(tenantId, id, body, userId = null) {
     const existing = await orderRepository.getOrder(tenantId, id);
     if (!existing) return null;
     const items = body.items ? normalizeItems(body.items) : existing.items;
@@ -205,6 +333,7 @@ export const orderService = {
     const ok = await orderRepository.updateOrder(tenantId, id, data);
     if (!ok) return null;
     if (body.items) await orderRepository.replaceOrderItems(tenantId, id, items);
+    await syncAfterSalesFromStatus(tenantId, userId, id, data);
     return orderRepository.getOrder(tenantId, id);
   },
 
@@ -214,23 +343,52 @@ export const orderService = {
 
   async exportOrders(tenantId) {
     const orders = await orderRepository.listOrders(tenantId);
-    return orders.map((o) => ({
-      order_no: o.order_no,
-      order_source: o.order_source,
-      order_status: o.order_status,
-      payment_status: o.payment_status,
-      fulfillment_status: o.fulfillment_status,
-      customer_name: o.customer_name || "",
-      city: o.city || "",
-      delivery_address: o.delivery_address || "",
-      total_amount: o.total_amount,
-      discount_amount: o.discount_amount,
-      delivery_charges: o.delivery_charges,
-      payable_amount: o.payable_amount,
-      payment_method: o.payment_method || "",
-      notes: o.notes || "",
-      created_at: o.created_at,
-    }));
+    const out = [];
+    for (const o of orders) {
+      const full = await orderRepository.getOrder(tenantId, o.id);
+      const items = full?.items || [];
+      const base = {
+        order_no: o.order_no,
+        customer_name: o.customer_name || "",
+        order_source: o.order_source,
+        order_status: o.order_status,
+        payment_status: o.payment_status,
+        fulfillment_status: o.fulfillment_status,
+        discount_amount: o.discount_amount,
+        delivery_charges: o.delivery_charges,
+        payable_amount: o.payable_amount,
+        city: o.city || "",
+        delivery_address: o.delivery_address || "",
+        payment_method: o.payment_method || "",
+        notes: o.notes || "",
+        created_at: o.created_at,
+      };
+      if (items.length) {
+        // One row per line item so product details are included in the export.
+        for (const item of items) {
+          out.push({
+            ...base,
+            product_name: item.product_name || "",
+            sku: item.sku || "",
+            quantity: item.quantity ?? "",
+            unit_price: item.unit_price ?? "",
+            item_discount: item.discount ?? 0,
+            item_total: item.total_price ?? "",
+          });
+        }
+      } else {
+        out.push({
+          ...base,
+          product_name: "",
+          sku: "",
+          quantity: "",
+          unit_price: "",
+          item_discount: "",
+          item_total: "",
+        });
+      }
+    }
+    return out;
   },
 
   async importOrders(tenantId, userId, rows) {
@@ -338,10 +496,9 @@ export const orderService = {
 
   async createPayment(tenantId, body) {
     await assertOrderExists(tenantId, body.order_id);
-    const bank = Number(body.bank) || 0;
-    const cash = Number(body.cash) || 0;
-    const amount = Number(body.amount) || bank + cash;
+    const amount = Number(body.amount) || 0;
     if (amount <= 0) throw new Error("Enter an amount to add.");
+    const payment_method = body.payment_method || "cash";
     const order = await orderRepository.getOrder(tenantId, body.order_id);
     const paid = await orderRepository.sumPaymentsForOrder(tenantId, body.order_id);
     const payable = Number(order?.payable_amount) || 0;
@@ -352,8 +509,7 @@ export const orderService = {
     const paid_at = body.paid_at || new Date();
     const id = await orderRepository.createPayment(tenantId, {
       order_id: Number(body.order_id),
-      bank,
-      cash,
+      payment_method,
       amount,
       payment_status,
       paid_at,
@@ -367,9 +523,8 @@ export const orderService = {
     const rows = await orderRepository.listPayments(tenantId);
     const existing = rows.find((r) => r.id === id);
     if (!existing) return null;
-    const bank = Number(body.bank ?? existing.bank) || 0;
-    const cash = Number(body.cash ?? existing.cash) || 0;
-    const amount = bank + cash;
+    const amount = Number(body.amount ?? existing.amount) || 0;
+    const payment_method = body.payment_method ?? existing.payment_method ?? "cash";
     const order = await orderRepository.getOrder(tenantId, existing.order_id);
     const otherPaid = await orderRepository.sumPaymentsForOrder(tenantId, existing.order_id);
     const existingAmount = Number(existing.amount) || 0;
@@ -381,8 +536,7 @@ export const orderService = {
     const payment_status = body.payment_status || existing.payment_status || "paid";
     const paid_at = body.paid_at ?? existing.paid_at ?? new Date();
     const ok = await orderRepository.updatePayment(tenantId, id, {
-      bank,
-      cash,
+      payment_method,
       amount,
       payment_status,
       paid_at,

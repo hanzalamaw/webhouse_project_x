@@ -15,6 +15,11 @@ import { formatTenantAuditAction } from "../../../../../utils/auditActionLabels"
 
 const MODULE_BASE = "/app/m/admin";
 
+const AUDIT_TOOLBAR_FILTERS = [
+  { key: "module_name", label: "Module" },
+  { key: "user_name", label: "User" },
+];
+
 export default function AuditLogs() {
   const { authFetch } = useAuth();
   const navigate = useNavigate();
@@ -24,7 +29,10 @@ export default function AuditLogs() {
   const [error, setError] = useState("");
   const [toolbar, setToolbar] = useState({ ...EMPTY_TOOLBAR });
 
-  const filteredRows = useToolbarFilteredRows(rows, toolbar, { dateField: "created_at" });
+  const filteredRows = useToolbarFilteredRows(rows, toolbar, {
+    dateField: "created_at",
+    filters: AUDIT_TOOLBAR_FILTERS,
+  });
 
   useEffect(() => {
     setPage(1);
@@ -75,7 +83,9 @@ export default function AuditLogs() {
               value={toolbar}
               onChange={setToolbar}
               dateField="created_at"
+              filters={AUDIT_TOOLBAR_FILTERS}
               searchPlaceholder="Search audit logs…"
+              layout="stacked"
             />
             <DataTable
               columns={columns}

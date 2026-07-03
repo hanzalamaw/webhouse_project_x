@@ -26,7 +26,7 @@ export function SearchableSelect({
   }, [allowEmpty, emptyOptionLabel, options]);
 
   const selected = useMemo(
-    () => (value === "" || value == null ? null : listOptions.find((o) => o.value === value) || null),
+    () => (value === "" || value == null ? null : listOptions.find((o) => String(o.value) === String(value)) || null),
     [listOptions, value]
   );
 
@@ -125,7 +125,7 @@ export function SearchableSelect({
                 <button
                   type="button"
                   role="option"
-                  className={`wh-search-select__option${option.value === value ? " selected" : ""}`}
+                  className={`wh-search-select__option${String(option.value) === String(value) ? " selected" : ""}`}
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => pick(option)}
                 >

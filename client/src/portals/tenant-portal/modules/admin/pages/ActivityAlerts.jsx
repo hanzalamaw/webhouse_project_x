@@ -17,6 +17,11 @@ import { formatSessionIp, simplifyDeviceInfo } from "../../../../../utils/sessio
 
 const MODULE_BASE = "/app/m/admin";
 
+const ALERT_TOOLBAR_FILTERS = [
+  { key: "alert_type", label: "Type" },
+  { key: "priority", label: "Priority" },
+];
+
 export default function ActivityAlerts() {
   const { authFetch } = useAuth();
   const { canEdit } = useModulePermission("admin");
@@ -27,7 +32,10 @@ export default function ActivityAlerts() {
   const [error, setError] = useState("");
   const [toolbar, setToolbar] = useState({ ...EMPTY_TOOLBAR });
 
-  const filteredRows = useToolbarFilteredRows(rows, toolbar, { dateField: "created_at" });
+  const filteredRows = useToolbarFilteredRows(rows, toolbar, {
+    dateField: "created_at",
+    filters: ALERT_TOOLBAR_FILTERS,
+  });
 
   useEffect(() => {
     setPage(1);
@@ -65,7 +73,7 @@ export default function ActivityAlerts() {
   const columns = [
     { key: "title", label: "Title" },
     { key: "alert_type", label: "Type", format: (v) => (v ? String(v).replace(/_/g, " ") : "—") },
-    { key: "priority", label: "Priority" },
+    { key: "priority", label: "Priority", render: (r) => (r.priority ? <StatusBadge status={r.priority} /> : "—") },
     { key: "ip_address", label: "IP", format: (v) => formatSessionIp(v) },
     { key: "device_info", label: "Device", format: (v) => simplifyDeviceInfo(v) },
     {
@@ -111,7 +119,9 @@ export default function ActivityAlerts() {
               value={toolbar}
               onChange={setToolbar}
               dateField="created_at"
+              filters={ALERT_TOOLBAR_FILTERS}
               searchPlaceholder="Search alerts…"
+              layout="stacked"
             />
             <DataTable
               columns={columns}

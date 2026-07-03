@@ -1,4 +1,5 @@
 import { writeDb } from "../database/db.js";
+import { extractClientIp } from "./clientIp.js";
 
 export async function logWhAudit({ adminUserId, action, oldValue, newValue, ipAddress }) {
   await writeDb.query(
@@ -15,5 +16,5 @@ export async function logWhAudit({ adminUserId, action, oldValue, newValue, ipAd
 }
 
 export function getClientIp(req) {
-  return req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || req.socket?.remoteAddress || "0.0.0.0";
+  return extractClientIp(req) || "0.0.0.0";
 }
