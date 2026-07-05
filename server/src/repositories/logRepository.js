@@ -1,4 +1,5 @@
 import { readDb } from "../database/db.js";
+import { joinOnTenant } from "../utils/tenantScope.js";
 
 export const logRepository = {
   async findWhLogs({ limit, offset }) {
@@ -36,7 +37,7 @@ export const logRepository = {
        FROM audit_logs al
        JOIN wh_tenants t ON t.id = al.tenant_id AND t.deleted_at IS NULL
        LEFT JOIN modules m ON m.id = al.module_id AND m.deleted_at IS NULL
-       JOIN users u ON u.id = al.user_id AND u.deleted_at IS NULL
+       JOIN users u ON u.id = al.user_id AND ${joinOnTenant("al", "u")}
        WHERE al.deleted_at IS NULL AND al.tenant_id = ?
        ORDER BY al.created_at DESC LIMIT ? OFFSET ?`,
       [tenantId, limit, offset]
@@ -67,7 +68,7 @@ export const logRepository = {
               m.module_name, u.name AS user_name
        FROM audit_logs al
        LEFT JOIN modules m ON m.id = al.module_id AND m.deleted_at IS NULL
-       JOIN users u ON u.id = al.user_id AND u.deleted_at IS NULL
+       JOIN users u ON u.id = al.user_id AND ${joinOnTenant("al", "u")}
        WHERE al.deleted_at IS NULL AND al.tenant_id = ? AND al.user_id = ?
        ORDER BY al.created_at DESC`,
       [tenantId, userId]

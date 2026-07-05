@@ -265,7 +265,7 @@ export const tenantPortalService = {
       [sessionId, ctx.tenantId]
     );
     if (!check.length) return false;
-    await sessionRepository.terminate(sessionId);
+    await sessionRepository.terminate(sessionId, ctx.tenantId);
     await logTenantAudit({ ...ctx, action: "session_terminate", newValue: { sessionId } });
     return true;
   },

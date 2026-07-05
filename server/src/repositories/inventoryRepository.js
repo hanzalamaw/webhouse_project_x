@@ -1,4 +1,5 @@
 import { readDb, writeDb } from "../database/db.js";
+import { assertAllowedMovementType, joinOnTenant } from "../utils/tenantScope.js";
 
 const PRODUCT_SELECT = `
   p.id, p.product_name, p.unit, p.delivery_charges, p.discount, p.tax,
@@ -18,9 +19,9 @@ const PRODUCT_SELECT = `
 
 const PRODUCT_FROM = `
   FROM inventory_products p
-  LEFT JOIN inventory_categories c ON c.id = p.category_id AND c.deleted_at IS NULL
-  LEFT JOIN inventory_product_variants v ON v.product_id = p.id AND v.deleted_at IS NULL
-  LEFT JOIN inventory_stock_levels sl ON sl.variant_id = v.id AND sl.deleted_at IS NULL
+  LEFT JOIN inventory_categories c ON c.id = p.category_id AND ${joinOnTenant("p", "c")}
+  LEFT JOIN inventory_product_variants v ON v.product_id = p.id AND ${joinOnTenant("p", "v")}
+  LEFT JOIN inventory_stock_levels sl ON sl.variant_id = v.id AND ${joinOnTenant("v", "sl")}
 `;
 
 const VARIANT_SELECT = `
@@ -53,12 +54,12 @@ export const inventoryRepository = {
          (SELECT COALESCE(SUM(damaged_qty), 0) FROM inventory_stock_levels WHERE tenant_id = ? AND deleted_at IS NULL) AS damaged_units,
          (SELECT COALESCE(SUM(sl.available_qty * v.cost_price), 0)
             FROM inventory_stock_levels sl
-            JOIN inventory_product_variants v ON v.id = sl.variant_id AND v.deleted_at IS NULL
+            JOIN inventory_product_variants v ON v.id = sl.variant_id AND ${joinOnTenant("sl", "v")}
            WHERE sl.tenant_id = ? AND sl.deleted_at IS NULL) AS inventory_value_cost,
          (SELECT COALESCE(SUM(sl.available_qty * GREATEST(v.selling_price - p.discount + p.tax, 0)), 0)
             FROM inventory_stock_levels sl
-            JOIN inventory_product_variants v ON v.id = sl.variant_id AND v.deleted_at IS NULL
-            JOIN inventory_products p ON p.id = v.product_id AND p.deleted_at IS NULL
+            JOIN inventory_product_variants v ON v.id = sl.variant_id AND ${joinOnTenant("sl", "v")}
+            JOIN inventory_products p ON p.id = v.product_id AND ${joinOnTenant("v", "p")}
            WHERE sl.tenant_id = ? AND sl.deleted_at IS NULL) AS inventory_value_retail,
          (SELECT COUNT(*) FROM inventory_stock_movements WHERE tenant_id = ? AND deleted_at IS NULL) AS total_movements,
          (SELECT COUNT(*) FROM inventory_stock_movements WHERE tenant_id = ? AND deleted_at IS NULL AND movement_type = 'stock_in') AS total_stock_in,
@@ -82,10 +83,10 @@ export const inventoryRepository = {
          (SELECT COUNT(*) FROM inventory_stock_transfers WHERE tenant_id = ? AND deleted_at IS NULL AND transfer_status = 'completed') AS completed_transfers,
          (SELECT COUNT(*) FROM inventory_stock_transfers WHERE tenant_id = ? AND deleted_at IS NULL AND transfer_status = 'cancelled') AS cancelled_transfers,
          (SELECT COUNT(DISTINCT v.id) FROM inventory_product_variants v
-            JOIN inventory_stock_levels sl ON sl.variant_id = v.id AND sl.deleted_at IS NULL
+            JOIN inventory_stock_levels sl ON sl.variant_id = v.id AND ${joinOnTenant("v", "sl")}
            WHERE v.tenant_id = ? AND v.deleted_at IS NULL AND sl.available_qty <= 5 AND sl.available_qty > 0) AS low_stock_count,
          (SELECT COUNT(DISTINCT v.id) FROM inventory_product_variants v
-            LEFT JOIN inventory_stock_levels sl ON sl.variant_id = v.id AND sl.deleted_at IS NULL
+            LEFT JOIN inventory_stock_levels sl ON sl.variant_id = v.id AND ${joinOnTenant("v", "sl")}
            WHERE v.tenant_id = ? AND v.deleted_at IS NULL
              AND (sl.id IS NULL OR sl.available_qty = 0)) AS out_of_stock_count`,
       Array(31).fill(tenantId)
@@ -129,9 +130,9 @@ export const inventoryRepository = {
               COALESCE(SUM(sl.total_qty), 0) AS total_qty,
               COALESCE(SUM(sl.available_qty * v.cost_price), 0) AS value_cost
        FROM inventory_categories c
-       LEFT JOIN inventory_products p ON p.category_id = c.id AND p.deleted_at IS NULL
-       LEFT JOIN inventory_product_variants v ON v.product_id = p.id AND v.deleted_at IS NULL
-       LEFT JOIN inventory_stock_levels sl ON sl.variant_id = v.id AND sl.deleted_at IS NULL
+       LEFT JOIN inventory_products p ON p.category_id = c.id AND ${joinOnTenant("c", "p")}
+       LEFT JOIN inventory_product_variants v ON v.product_id = p.id AND ${joinOnTenant("p", "v")}
+       LEFT JOIN inventory_stock_levels sl ON sl.variant_id = v.id AND ${joinOnTenant("v", "sl")}
        WHERE c.tenant_id = ? AND c.deleted_at IS NULL
        GROUP BY c.id, c.category_name
        ORDER BY total_qty DESC
@@ -149,8 +150,8 @@ export const inventoryRepository = {
               COALESCE(SUM(sl.available_qty), 0) AS available_qty,
               COALESCE(SUM(sl.available_qty * v.cost_price), 0) AS value_cost
        FROM inventory_warehouses w
-       LEFT JOIN inventory_stock_levels sl ON sl.warehouse_id = w.id AND sl.deleted_at IS NULL
-       LEFT JOIN inventory_product_variants v ON v.id = sl.variant_id AND v.deleted_at IS NULL
+       LEFT JOIN inventory_stock_levels sl ON sl.warehouse_id = w.id AND ${joinOnTenant("w", "sl")}
+       LEFT JOIN inventory_product_variants v ON v.id = sl.variant_id AND ${joinOnTenant("sl", "v")}
        WHERE w.tenant_id = ? AND w.deleted_at IS NULL
        GROUP BY w.id, w.warehouse_name
        ORDER BY total_qty DESC`,
@@ -166,9 +167,9 @@ export const inventoryRepository = {
               COALESCE(SUM(sl.total_qty), 0) AS total_qty,
               COALESCE(SUM(sl.available_qty), 0) AS available_qty
        FROM inventory_products p
-       LEFT JOIN inventory_categories c ON c.id = p.category_id AND c.deleted_at IS NULL
-       LEFT JOIN inventory_product_variants v ON v.product_id = p.id AND v.deleted_at IS NULL
-       LEFT JOIN inventory_stock_levels sl ON sl.variant_id = v.id AND sl.deleted_at IS NULL
+       LEFT JOIN inventory_categories c ON c.id = p.category_id AND ${joinOnTenant("p", "c")}
+       LEFT JOIN inventory_product_variants v ON v.product_id = p.id AND ${joinOnTenant("p", "v")}
+       LEFT JOIN inventory_stock_levels sl ON sl.variant_id = v.id AND ${joinOnTenant("v", "sl")}
        WHERE p.tenant_id = ? AND p.deleted_at IS NULL
        GROUP BY p.id, p.product_name, c.category_name
        ORDER BY total_qty DESC
@@ -184,9 +185,9 @@ export const inventoryRepository = {
               COALESCE(SUM(sl.available_qty), 0) AS available_qty,
               COALESCE(SUM(sl.total_qty), 0) AS total_qty
        FROM inventory_product_variants v
-       JOIN inventory_products p ON p.id = v.product_id AND p.deleted_at IS NULL
-       LEFT JOIN inventory_categories c ON c.id = p.category_id AND c.deleted_at IS NULL
-       JOIN inventory_stock_levels sl ON sl.variant_id = v.id AND sl.deleted_at IS NULL
+       JOIN inventory_products p ON p.id = v.product_id AND ${joinOnTenant("v", "p")}
+       LEFT JOIN inventory_categories c ON c.id = p.category_id AND ${joinOnTenant("p", "c")}
+       JOIN inventory_stock_levels sl ON sl.variant_id = v.id AND ${joinOnTenant("v", "sl")}
        WHERE v.tenant_id = ? AND v.deleted_at IS NULL
        GROUP BY v.id, p.product_name, v.sku, v.variant_name, c.category_name
        HAVING available_qty <= 5
@@ -204,10 +205,10 @@ export const inventoryRepository = {
               fw.warehouse_name AS from_warehouse_name,
               tw.warehouse_name AS to_warehouse_name
        FROM inventory_stock_transfers t
-       JOIN inventory_product_variants v ON v.id = t.variant_id AND v.deleted_at IS NULL
-       JOIN inventory_products p ON p.id = v.product_id AND p.deleted_at IS NULL
-       JOIN inventory_warehouses fw ON fw.id = t.from_warehouse_id AND fw.deleted_at IS NULL
-       JOIN inventory_warehouses tw ON tw.id = t.to_warehouse_id AND tw.deleted_at IS NULL
+       JOIN inventory_product_variants v ON v.id = t.variant_id AND ${joinOnTenant("t", "v")}
+       JOIN inventory_products p ON p.id = v.product_id AND ${joinOnTenant("v", "p")}
+       JOIN inventory_warehouses fw ON fw.id = t.from_warehouse_id AND ${joinOnTenant("t", "fw")}
+       JOIN inventory_warehouses tw ON tw.id = t.to_warehouse_id AND ${joinOnTenant("t", "tw")}
        WHERE t.tenant_id = ? AND t.deleted_at IS NULL
        ORDER BY t.created_at DESC
        LIMIT ?`,
@@ -221,10 +222,10 @@ export const inventoryRepository = {
       `SELECT m.id, m.movement_type, m.qty, m.notes, m.created_at,
               p.product_name, v.sku, v.variant_name, w.warehouse_name, u.name AS created_by_name
        FROM inventory_stock_movements m
-       JOIN inventory_product_variants v ON v.id = m.variant_id AND v.deleted_at IS NULL
-       JOIN inventory_products p ON p.id = v.product_id AND p.deleted_at IS NULL
-       JOIN inventory_warehouses w ON w.id = m.warehouse_id AND w.deleted_at IS NULL
-       LEFT JOIN users u ON u.id = m.created_by
+       JOIN inventory_product_variants v ON v.id = m.variant_id AND ${joinOnTenant("m", "v")}
+       JOIN inventory_products p ON p.id = v.product_id AND ${joinOnTenant("v", "p")}
+       JOIN inventory_warehouses w ON w.id = m.warehouse_id AND ${joinOnTenant("m", "w")}
+       LEFT JOIN users u ON u.id = m.created_by AND ${joinOnTenant("m", "u")}
        WHERE m.tenant_id = ? AND m.deleted_at IS NULL
        ORDER BY m.created_at DESC
        LIMIT ?`,
@@ -239,7 +240,7 @@ export const inventoryRepository = {
       `SELECT c.id, c.category_name, c.status, c.created_at, c.tenant_id,
               COUNT(p.id) AS product_count
        FROM inventory_categories c
-       LEFT JOIN inventory_products p ON p.category_id = c.id AND p.deleted_at IS NULL
+       LEFT JOIN inventory_products p ON p.category_id = c.id AND ${joinOnTenant("c", "p")}
        WHERE ${tenantWhere("c", tenantId)}
        GROUP BY c.id
        ORDER BY c.category_name ASC
@@ -287,7 +288,7 @@ export const inventoryRepository = {
               COUNT(v.id) AS variant_count,
               GROUP_CONCAT(v.sku ORDER BY v.sku SEPARATOR ', ') AS skus
        FROM inventory_products p
-       LEFT JOIN inventory_product_variants v ON v.product_id = p.id AND v.deleted_at IS NULL
+       LEFT JOIN inventory_product_variants v ON v.product_id = p.id AND ${joinOnTenant("p", "v")}
        WHERE p.tenant_id = ? AND p.category_id = ? AND p.deleted_at IS NULL
        GROUP BY p.id
        ORDER BY p.product_name ASC`,
@@ -433,8 +434,8 @@ export const inventoryRepository = {
       `SELECT p.id, p.product_name, p.status, p.category_id, c.category_name,
               COUNT(v.id) AS variant_count
        FROM inventory_products p
-       LEFT JOIN inventory_categories c ON c.id = p.category_id AND c.deleted_at IS NULL
-       LEFT JOIN inventory_product_variants v ON v.product_id = p.id AND v.deleted_at IS NULL
+       LEFT JOIN inventory_categories c ON c.id = p.category_id AND ${joinOnTenant("p", "c")}
+       LEFT JOIN inventory_product_variants v ON v.product_id = p.id AND ${joinOnTenant("p", "v")}
        WHERE ${tenantWhere("p", tenantId)}
        GROUP BY p.id
        ORDER BY p.product_name ASC`,
@@ -450,16 +451,16 @@ export const inventoryRepository = {
               COALESCE(SUM(sl.available_qty), 0) AS total_available,
               COALESCE(SUM(sl.total_qty), 0) AS total_qty
        FROM inventory_product_variants v
-       JOIN inventory_products p ON p.id = v.product_id AND p.deleted_at IS NULL
-       LEFT JOIN inventory_categories c ON c.id = p.category_id AND c.deleted_at IS NULL
-       LEFT JOIN inventory_stock_levels sl ON sl.variant_id = v.id AND sl.deleted_at IS NULL
+       JOIN inventory_products p ON p.id = v.product_id AND ${joinOnTenant("v", "p")}
+       LEFT JOIN inventory_categories c ON c.id = p.category_id AND ${joinOnTenant("p", "c")}
+       LEFT JOIN inventory_stock_levels sl ON sl.variant_id = v.id AND ${joinOnTenant("v", "sl")}
        WHERE v.product_id = ? AND ${tenantWhere("v", tenantId)}
        GROUP BY v.id
        ORDER BY v.variant_name ASC`,
       [productId, tenantId]
     );
     for (const row of rows) {
-      row.attributes = await this.getVariantAttributes(row.id);
+      row.attributes = await this.getVariantAttributes(tenantId, row.id);
     }
     return rows;
   },
@@ -468,14 +469,14 @@ export const inventoryRepository = {
     const [rows] = await readDb.query(
       `SELECT ${VARIANT_SELECT}
        FROM inventory_product_variants v
-       JOIN inventory_products p ON p.id = v.product_id AND p.deleted_at IS NULL
-       LEFT JOIN inventory_categories c ON c.id = p.category_id AND c.deleted_at IS NULL
+       JOIN inventory_products p ON p.id = v.product_id AND ${joinOnTenant("v", "p")}
+       LEFT JOIN inventory_categories c ON c.id = p.category_id AND ${joinOnTenant("p", "c")}
        WHERE v.id = ? AND ${tenantWhere("v", tenantId)}
        LIMIT 1`,
       [id, tenantId]
     );
     if (!rows[0]) return null;
-    rows[0].attributes = await this.getVariantAttributes(id);
+    rows[0].attributes = await this.getVariantAttributes(tenantId, id);
     return rows[0];
   },
 
@@ -544,14 +545,14 @@ export const inventoryRepository = {
     return result.affectedRows > 0;
   },
 
-  async getVariantAttributes(variantId) {
+  async getVariantAttributes(tenantId, variantId) {
     const [rows] = await readDb.query(
       `SELECT a.attribute_name, av.value
        FROM inventory_variant_attribute_values av
-       JOIN inventory_variant_attributes a ON a.id = av.attribute_id
-       WHERE av.variant_id = ?
-       ORDER BY a.attribute_name ASC`,
-      [variantId]
+       JOIN inventory_variant_attributes a ON a.id = av.attribute_id AND ${tenantWhere("a", tenantId)}
+       INNER JOIN inventory_product_variants v ON v.id = av.variant_id AND ${tenantWhere("v", tenantId)}
+       WHERE av.variant_id = ?`,
+      [tenantId, tenantId, variantId]
     );
     return rows;
   },
@@ -576,8 +577,9 @@ export const inventoryRepository = {
   async setVariantAttributes(tenantId, variantId, attributes) {
     await writeDb.query(
       `DELETE av FROM inventory_variant_attribute_values av
+       INNER JOIN inventory_product_variants v ON v.id = av.variant_id AND ${tenantWhere("v", tenantId)}
        WHERE av.variant_id = ?`,
-      [variantId]
+      [tenantId, variantId]
     );
     if (!Array.isArray(attributes) || !attributes.length) return;
     for (const attr of attributes) {
@@ -599,9 +601,9 @@ export const inventoryRepository = {
               p.category_id, c.category_name,
               COALESCE(SUM(sl.available_qty), 0) AS total_available
        FROM inventory_product_variants v
-       JOIN inventory_products p ON p.id = v.product_id AND p.deleted_at IS NULL
-       LEFT JOIN inventory_categories c ON c.id = p.category_id AND c.deleted_at IS NULL
-       LEFT JOIN inventory_stock_levels sl ON sl.variant_id = v.id AND sl.deleted_at IS NULL
+       JOIN inventory_products p ON p.id = v.product_id AND ${joinOnTenant("v", "p")}
+       LEFT JOIN inventory_categories c ON c.id = p.category_id AND ${joinOnTenant("p", "c")}
+       LEFT JOIN inventory_stock_levels sl ON sl.variant_id = v.id AND ${joinOnTenant("v", "sl")}
        WHERE ${tenantWhere("v", tenantId)} AND LOWER(TRIM(v.status)) = 'active'
        GROUP BY v.id
        ORDER BY p.product_name ASC, v.variant_name ASC`,
@@ -616,7 +618,7 @@ export const inventoryRepository = {
               sl.updated_at, sl.variant_id, sl.warehouse_id, sl.tenant_id,
               w.warehouse_name, w.location, w.city, w.status AS warehouse_status
        FROM inventory_stock_levels sl
-       JOIN inventory_warehouses w ON w.id = sl.warehouse_id AND w.deleted_at IS NULL
+       JOIN inventory_warehouses w ON w.id = sl.warehouse_id AND ${joinOnTenant("sl", "w")}
        WHERE sl.variant_id = ? AND ${tenantWhere("sl", tenantId)}
        ORDER BY w.warehouse_name ASC`,
       [variantId, tenantId]
@@ -649,7 +651,7 @@ export const inventoryRepository = {
               COUNT(DISTINCT sl.variant_id) AS product_count,
               COALESCE(SUM(sl.total_qty), 0) AS total_units
        FROM inventory_warehouses w
-       LEFT JOIN inventory_stock_levels sl ON sl.warehouse_id = w.id AND sl.deleted_at IS NULL
+       LEFT JOIN inventory_stock_levels sl ON sl.warehouse_id = w.id AND ${joinOnTenant("w", "sl")}
        WHERE ${tenantWhere("w", tenantId)}
        GROUP BY w.id
        ORDER BY w.warehouse_name ASC
@@ -685,7 +687,7 @@ export const inventoryRepository = {
               COALESCE(SUM(sl.available_qty * v.cost_price), 0) AS stock_value_cost,
               COALESCE(SUM(sl.available_qty * v.selling_price), 0) AS stock_value_retail
        FROM inventory_stock_levels sl
-       JOIN inventory_product_variants v ON v.id = sl.variant_id AND v.deleted_at IS NULL
+       JOIN inventory_product_variants v ON v.id = sl.variant_id AND ${joinOnTenant("sl", "v")}
        WHERE sl.warehouse_id = ? AND ${tenantWhere("sl", tenantId)}`,
       [warehouseId, tenantId]
     );
@@ -699,8 +701,8 @@ export const inventoryRepository = {
               sl.available_qty, sl.total_qty, sl.reserved_qty, sl.damaged_qty,
               v.selling_price, v.cost_price
        FROM inventory_stock_levels sl
-       JOIN inventory_product_variants v ON v.id = sl.variant_id AND v.deleted_at IS NULL
-       JOIN inventory_products p ON p.id = v.product_id AND p.deleted_at IS NULL
+       JOIN inventory_product_variants v ON v.id = sl.variant_id AND ${joinOnTenant("sl", "v")}
+       JOIN inventory_products p ON p.id = v.product_id AND ${joinOnTenant("v", "p")}
        WHERE sl.warehouse_id = ? AND ${tenantWhere("sl", tenantId)}
        ORDER BY sl.total_qty DESC, p.product_name ASC, v.variant_name ASC
        LIMIT ?`,
@@ -714,9 +716,9 @@ export const inventoryRepository = {
       `SELECT m.id, m.movement_type, m.qty, m.notes, m.created_at,
               p.product_name, v.sku, v.variant_name, u.name AS created_by_name
        FROM inventory_stock_movements m
-       JOIN inventory_product_variants v ON v.id = m.variant_id AND v.deleted_at IS NULL
-       JOIN inventory_products p ON p.id = v.product_id AND p.deleted_at IS NULL
-       LEFT JOIN users u ON u.id = m.created_by
+       JOIN inventory_product_variants v ON v.id = m.variant_id AND ${joinOnTenant("m", "v")}
+       JOIN inventory_products p ON p.id = v.product_id AND ${joinOnTenant("v", "p")}
+       LEFT JOIN users u ON u.id = m.created_by AND ${joinOnTenant("m", "u")}
        WHERE m.warehouse_id = ? AND ${tenantWhere("m", tenantId)}
        ORDER BY m.created_at DESC
        LIMIT ?`,
@@ -738,8 +740,8 @@ export const inventoryRepository = {
               COALESCE(SUM(sl.available_qty * v.cost_price), 0) AS stock_value_cost,
               COALESCE(SUM(sl.available_qty * v.selling_price), 0) AS stock_value_retail
        FROM inventory_products p
-       LEFT JOIN inventory_product_variants v ON v.product_id = p.id AND v.deleted_at IS NULL
-       LEFT JOIN inventory_stock_levels sl ON sl.variant_id = v.id AND sl.deleted_at IS NULL
+       LEFT JOIN inventory_product_variants v ON v.product_id = p.id AND ${joinOnTenant("p", "v")}
+       LEFT JOIN inventory_stock_levels sl ON sl.variant_id = v.id AND ${joinOnTenant("v", "sl")}
        WHERE p.category_id = ? AND ${tenantWhere("p", tenantId)}`,
       [categoryId, tenantId]
     );
@@ -805,8 +807,8 @@ export const inventoryRepository = {
       await writeDb.query(
         `UPDATE inventory_stock_levels
          SET available_qty = ?, damaged_qty = ?, total_qty = ?
-         WHERE id = ?`,
-        [available, damaged, total, existing.id]
+         WHERE id = ? AND ${tenantWhere("inventory_stock_levels", tenantId)}`,
+        [available, damaged, total, existing.id, tenantId]
       );
       return existing.id;
     }
@@ -832,8 +834,8 @@ export const inventoryRepository = {
       await writeDb.query(
         `UPDATE inventory_stock_levels
          SET available_qty = ?, reserved_qty = ?, damaged_qty = ?, total_qty = ?
-         WHERE id = ?`,
-        [available, reserved, damaged, total, existing.id]
+         WHERE id = ? AND ${tenantWhere("inventory_stock_levels", tenantId)}`,
+        [available, reserved, damaged, total, existing.id, tenantId]
       );
       return existing.id;
     }
@@ -866,6 +868,7 @@ export const inventoryRepository = {
   },
 
   async listMovements(tenantId, { limit, offset, movement_type }) {
+    assertAllowedMovementType(movement_type);
     const params = [tenantId];
     let typeFilter = "";
     if (movement_type) {
@@ -878,10 +881,10 @@ export const inventoryRepository = {
               m.variant_id, m.warehouse_id, m.created_by, m.tenant_id,
               p.product_name, v.sku, v.variant_name, w.warehouse_name, u.name AS created_by_name
        FROM inventory_stock_movements m
-       JOIN inventory_product_variants v ON v.id = m.variant_id AND v.deleted_at IS NULL
-       JOIN inventory_products p ON p.id = v.product_id AND p.deleted_at IS NULL
-       JOIN inventory_warehouses w ON w.id = m.warehouse_id AND w.deleted_at IS NULL
-       LEFT JOIN users u ON u.id = m.created_by
+       JOIN inventory_product_variants v ON v.id = m.variant_id AND ${joinOnTenant("m", "v")}
+       JOIN inventory_products p ON p.id = v.product_id AND ${joinOnTenant("v", "p")}
+       JOIN inventory_warehouses w ON w.id = m.warehouse_id AND ${joinOnTenant("m", "w")}
+       LEFT JOIN users u ON u.id = m.created_by AND ${joinOnTenant("m", "u")}
        WHERE m.tenant_id = ? AND m.deleted_at IS NULL${typeFilter}
        ORDER BY m.created_at DESC
        LIMIT ? OFFSET ?`,
@@ -923,10 +926,10 @@ export const inventoryRepository = {
               fw.warehouse_name AS from_warehouse_name,
               tw.warehouse_name AS to_warehouse_name
        FROM inventory_stock_transfers t
-       JOIN inventory_product_variants v ON v.id = t.variant_id AND v.deleted_at IS NULL
-       JOIN inventory_products p ON p.id = v.product_id AND p.deleted_at IS NULL
-       JOIN inventory_warehouses fw ON fw.id = t.from_warehouse_id AND fw.deleted_at IS NULL
-       JOIN inventory_warehouses tw ON tw.id = t.to_warehouse_id AND tw.deleted_at IS NULL
+       JOIN inventory_product_variants v ON v.id = t.variant_id AND ${joinOnTenant("t", "v")}
+       JOIN inventory_products p ON p.id = v.product_id AND ${joinOnTenant("v", "p")}
+       JOIN inventory_warehouses fw ON fw.id = t.from_warehouse_id AND ${joinOnTenant("t", "fw")}
+       JOIN inventory_warehouses tw ON tw.id = t.to_warehouse_id AND ${joinOnTenant("t", "tw")}
        WHERE t.tenant_id = ? AND t.deleted_at IS NULL
        ORDER BY t.created_at DESC
        LIMIT ? OFFSET ?`,
@@ -945,10 +948,10 @@ export const inventoryRepository = {
               fw.warehouse_name AS from_warehouse_name,
               tw.warehouse_name AS to_warehouse_name
        FROM inventory_stock_transfers t
-       JOIN inventory_product_variants v ON v.id = t.variant_id AND v.deleted_at IS NULL
-       JOIN inventory_products p ON p.id = v.product_id AND p.deleted_at IS NULL
-       JOIN inventory_warehouses fw ON fw.id = t.from_warehouse_id AND fw.deleted_at IS NULL
-       JOIN inventory_warehouses tw ON tw.id = t.to_warehouse_id AND tw.deleted_at IS NULL
+       JOIN inventory_product_variants v ON v.id = t.variant_id AND ${joinOnTenant("t", "v")}
+       JOIN inventory_products p ON p.id = v.product_id AND ${joinOnTenant("v", "p")}
+       JOIN inventory_warehouses fw ON fw.id = t.from_warehouse_id AND ${joinOnTenant("t", "fw")}
+       JOIN inventory_warehouses tw ON tw.id = t.to_warehouse_id AND ${joinOnTenant("t", "tw")}
        WHERE t.id = ? AND t.tenant_id = ? AND t.deleted_at IS NULL
        LIMIT 1`,
       [id, tenantId]

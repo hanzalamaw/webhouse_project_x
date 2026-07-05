@@ -43,7 +43,8 @@ async function getStoreFromRequest(req) {
 
   const session = await getSession(req.cookies?.[SESSION_COOKIE]);
   if (session?.storeId) {
-    const store = await getStoreById(session.storeId);
+    const tenantId = session.tenantId ?? req.tenantId;
+    const store = await getStoreById(session.storeId, tenantId);
     if (store?.status === "connected" && store.platform === "daraz") return store;
   }
 
@@ -113,6 +114,13 @@ router.get("/oauth/callback", async (req, res) => {
       `${config.frontendIntegrationsUrl}?platform=daraz&daraz_error=${encodeURIComponent("OAuth session expired — click Connect Daraz again")}`,
     );
   }
+
+  if (stateData.shop !== config.apiBase) {
+    return res.redirect(
+      `${config.frontendIntegrationsUrl}?platform=daraz&daraz_error=${encodeURIComponent("OAuth state mismatch — restart Daraz integration")}`,
+    );
+  }
+
   const consumed = await consumeOAuthState(stateKey);
   if (!consumed?.tenantId) {
     return res.redirect(
@@ -168,7 +176,7 @@ router.get("/oauth/callback", async (req, res) => {
       secure: config.redirectUri.startsWith("https"),
     });
 
-    runDarazInitialSync(storeId).catch((err) => console.error("Daraz post-connect sync:", err));
+    runDarazInitialSync(storeId, consumed.tenantId).catch((err) => console.error("Daraz post-connect sync:", err));
 
     res.redirect(`${config.frontendIntegrationsUrl}?platform=daraz&daraz_connected=1&sync=started`);
   } catch (error) {
@@ -247,7 +255,7 @@ router.post("/sync/import-inventory", async (req, res) => {
 router.post("/sync/retry", async (req, res) => {
   const store = await getStoreFromRequest(req);
   if (!store) return res.status(401).json({ success: false, error: "Not connected" });
-  runDarazInitialSync(store.id).catch((err) => console.error("Daraz retry sync:", err));
+  runDarazInitialSync(store.id, store.tenant_id).catch((err) => console.error("Daraz retry sync:", err));
   res.json({ success: true, message: "Sync started" });
 });
 

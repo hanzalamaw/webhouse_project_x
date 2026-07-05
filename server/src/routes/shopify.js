@@ -34,7 +34,8 @@ async function getStoreFromRequest(req) {
 
   const session = await getSession(req.cookies?.[SESSION_COOKIE]);
   if (session?.storeId) {
-    const store = await getStoreById(session.storeId);
+    const tenantId = session.tenantId ?? req.tenantId;
+    const store = await getStoreById(session.storeId, tenantId);
     if (store?.status === "connected") return store;
   }
 
@@ -141,6 +142,12 @@ router.get("/oauth/callback", async (req, res) => {
     );
   }
 
+  if (stateData.shop !== shopDomain) {
+    return res.redirect(
+      `${config.frontendIntegrationsUrl}?shopify_error=${encodeURIComponent("OAuth shop mismatch — restart integration")}`,
+    );
+  }
+
   const consumed = await consumeOAuthState(stateKey);
   if (!consumed?.tenantId) {
     return res.redirect(
@@ -186,7 +193,7 @@ router.get("/oauth/callback", async (req, res) => {
       secure: config.redirectUri.startsWith("https"),
     });
 
-    onAppInstalled(storeId).catch((err) => console.error("Post-install sync error:", err));
+    onAppInstalled(storeId, consumed.tenantId).catch((err) => console.error("Post-install sync error:", err));
 
     res.redirect(
       `${config.frontendIntegrationsUrl}?shopify_connected=1&shop=${encodeURIComponent(shopDomain)}&sync=started`,
@@ -287,7 +294,7 @@ router.post("/sync/retry", async (req, res) => {
     return res.status(401).json({ success: false, error: "Not connected" });
   }
 
-  retryPostInstall(store.id).catch((err) => console.error("Retry sync error:", err));
+  retryPostInstall(store.id, store.tenant_id).catch((err) => console.error("Retry sync error:", err));
   res.json({ success: true, message: "Retry started — check sync log" });
 });
 

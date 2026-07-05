@@ -1,4 +1,4 @@
-import { writeDb } from "../database/db.js";
+import { writeDb, withoutTenantGuard } from "../database/db.js";
 
 const TABLES_WITH_SOFT_DELETE = [
   "modules",
@@ -32,11 +32,15 @@ const TABLES_WITH_SOFT_DELETE = [
  */
 export async function purgeSoftDeleted() {
   const results = {};
-  for (const table of TABLES_WITH_SOFT_DELETE) {
-    const [result] = await writeDb.query(
-      `DELETE FROM \`${table}\` WHERE deleted_at IS NOT NULL AND deleted_at < DATE_SUB(NOW(), INTERVAL 7 DAY)`
-    );
-    results[table] = result.affectedRows;
-  }
-  return results;
+  return withoutTenantGuard(async () => {
+    for (const table of TABLES_WITH_SOFT_DELETE) {
+      const [result] = await writeDb.query(
+        `DELETE FROM \`${table}\` WHERE deleted_at IS NOT NULL AND deleted_at < DATE_SUB(NOW(), INTERVAL 7 DAY)`,
+        [],
+        { skipTenantGuard: true, skipWriteAudit: true }
+      );
+      results[table] = result.affectedRows;
+    }
+    return results;
+  });
 }

@@ -566,7 +566,7 @@ export async function importEntitiesToErp(storeId, tenantId, platform, entities 
     return { success: false, error: "No valid entity types selected" };
   }
 
-  await updateErpImportStatus(storeId, "in_progress");
+  await updateErpImportStatus(storeId, tenantId, "in_progress");
   const results = {};
 
   for (const entityType of types) {
@@ -580,7 +580,7 @@ export async function importEntitiesToErp(storeId, tenantId, platform, entities 
 
   const preview = await getImportPreview(storeId, tenantId);
   const finalStatus = preview.hasPendingImport ? "partial" : "completed";
-  await updateErpImportStatus(storeId, finalStatus);
+  await updateErpImportStatus(storeId, tenantId, finalStatus);
 
   return { success: true, results, erpImportStatus: finalStatus };
 }

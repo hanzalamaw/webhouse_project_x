@@ -1,11 +1,16 @@
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
 import { verifyPassword } from "../utils/cipher.js";
+import { readDb, writeDb } from "../database/db.js";
 import { sessionRepository } from "../repositories/sessionRepository.js";
 import { tenantRepository } from "../repositories/tenantRepository.js";
 import { createActivityAlert } from "../utils/activityAlerts.js";
 import { tenantPermissionService } from "../services/tenantPermissionService.js";
 import { extractClientIp } from "../utils/clientIp.js";
+import { establishTenantContext } from "../middleware/tenantContext.js";
+
+/** Pre-auth and WH-admin auth queries bypass tenant guard (no JWT tenant context yet). */
+const SKIP = { skipTenantGuard: true, skipWriteAudit: true };
 
 const toWhUserPayload = (user) => ({
   id: user.id,
@@ -28,15 +33,20 @@ const toTenantUserPayload = (user, tenant) => ({
   login_portal: tenant.login_portal,
 });
 
-async function whAdminLogin(db, normalized, password, JWT_SECRET, JWT_EXPIRES_IN, JWT_REFRESH_EXPIRES_IN) {
-  const [rows] = await db.execute(
+async function whAdminLogin(normalized, password, JWT_SECRET, JWT_EXPIRES_IN, JWT_REFRESH_EXPIRES_IN) {
+  const [rows] = await readDb.query(
     "SELECT * FROM wh_admin_users WHERE LOWER(email) = ? AND status = 'active' AND deleted_at IS NULL LIMIT 1",
-    [normalized]
+    [normalized],
+    SKIP
   );
   const user = rows[0];
   if (!user || !verifyPassword(password, user.password)) return null;
 
-  await db.execute("UPDATE wh_admin_users SET last_login_at = NOW() WHERE id = ?", [user.id]);
+  await writeDb.query(
+    "UPDATE wh_admin_users SET last_login_at = NOW() WHERE id = ?",
+    [user.id],
+    SKIP
+  );
 
   const token = jwt.sign({ id: user.id, role: "wh_admin" }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
   const refreshToken = jwt.sign(
@@ -49,7 +59,6 @@ async function whAdminLogin(db, normalized, password, JWT_SECRET, JWT_EXPIRES_IN
 }
 
 async function tenantLogin(
-  db,
   username,
   password,
   portal,
@@ -61,7 +70,7 @@ async function tenantLogin(
   { forceLogoutOthers = false } = {}
 ) {
   const normalized = String(username).trim().toLowerCase();
-  const [rows] = await db.execute(
+  const [rows] = await readDb.query(
     `SELECT u.*, t.id AS tid, t.company_name, t.login_portal, t.status AS tenant_status
      FROM wh_tenants t
      INNER JOIN users u ON u.tenant_id = t.id AND u.deleted_at IS NULL
@@ -71,7 +80,8 @@ async function tenantLogin(
        AND LOWER(u.username) = ?
        AND u.status = 'active'
      LIMIT 1`,
-    [portal, normalized]
+    [portal, normalized],
+    SKIP
   );
   const row = rows[0];
   if (!row || !verifyPassword(password, row.password)) {
@@ -90,9 +100,13 @@ async function tenantLogin(
     return null;
   }
 
-  await db.execute("UPDATE users SET last_login_at = NOW() WHERE id = ?", [row.id]);
+  await writeDb.query(
+    "UPDATE users SET last_login_at = NOW() WHERE id = ? AND tenant_id = ?",
+    [row.id, row.tid],
+    SKIP
+  );
 
-  const existingSession = await sessionRepository.findActiveForUser(row.id);
+  const existingSession = await sessionRepository.findActiveForUser(row.id, row.tid);
   if (existingSession && !forceLogoutOthers) {
     return {
       conflict: true,
@@ -105,7 +119,7 @@ async function tenantLogin(
     };
   }
   if (existingSession && forceLogoutOthers) {
-    await sessionRepository.terminateAllForUser(row.id);
+    await sessionRepository.terminateAllForUser(row.id, null, row.tid);
   }
 
   const sessionToken = crypto.randomBytes(32).toString("hex");
@@ -134,15 +148,15 @@ async function tenantLogin(
   return { token, refreshToken, user: toTenantUserPayload(user, tenant) };
 }
 
-async function assertTenantSessionActive(sessionId) {
+async function assertTenantSessionActive(sessionId, tenantId = null) {
   if (!sessionId) return false;
-  return sessionRepository.isActive(sessionId);
+  return sessionRepository.isActive(sessionId, tenantId);
 }
 
-export function registerAuthRoutes(app, db, { JWT_SECRET, JWT_EXPIRES_IN, JWT_REFRESH_EXPIRES_IN, verifyToken }) {
+export function registerAuthRoutes(app, _db, { JWT_SECRET, JWT_EXPIRES_IN, JWT_REFRESH_EXPIRES_IN, verifyToken }) {
   const requireActiveTenantSession = async (req, res, next) => {
     if (req.userRole !== "tenant") return next();
-    const active = await assertTenantSessionActive(req.sessionId);
+    const active = await assertTenantSessionActive(req.sessionId, req.tenantId);
     if (!active) {
       return res.status(401).json({ message: "Session terminated" });
     }
@@ -160,7 +174,7 @@ export function registerAuthRoutes(app, db, { JWT_SECRET, JWT_EXPIRES_IN, JWT_RE
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
-    const result = await whAdminLogin(db, normalized, password, JWT_SECRET, JWT_EXPIRES_IN, JWT_REFRESH_EXPIRES_IN);
+    const result = await whAdminLogin(normalized, password, JWT_SECRET, JWT_EXPIRES_IN, JWT_REFRESH_EXPIRES_IN);
     if (!result) return res.status(401).json({ message: "Invalid credentials" });
     res.json(result);
   };
@@ -180,7 +194,6 @@ export function registerAuthRoutes(app, db, { JWT_SECRET, JWT_EXPIRES_IN, JWT_RE
     const ip = extractClientIp(req);
     const deviceInfo = req.headers["user-agent"] || null;
     const result = await tenantLogin(
-      db,
       username,
       password,
       portal,
@@ -215,9 +228,10 @@ export function registerAuthRoutes(app, db, { JWT_SECRET, JWT_EXPIRES_IN, JWT_RE
       }
 
       if (decoded.role === "wh_admin") {
-        const [rows] = await db.execute(
+        const [rows] = await readDb.query(
           "SELECT id FROM wh_admin_users WHERE id = ? AND status = 'active' AND deleted_at IS NULL LIMIT 1",
-          [decoded.id]
+          [decoded.id],
+          SKIP
         );
         if (!rows.length) return res.status(401).json({ message: "Invalid refresh token" });
         const token = jwt.sign({ id: decoded.id, role: "wh_admin" }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
@@ -225,12 +239,16 @@ export function registerAuthRoutes(app, db, { JWT_SECRET, JWT_EXPIRES_IN, JWT_RE
       }
 
       if (decoded.role === "tenant") {
-        const [rows] = await db.execute(
-          "SELECT id FROM users WHERE id = ? AND status = 'active' AND deleted_at IS NULL LIMIT 1",
-          [decoded.id]
+        if (!decoded.tenantId) {
+          return res.status(401).json({ message: "Invalid refresh token" });
+        }
+        const [rows] = await readDb.query(
+          "SELECT id FROM users WHERE id = ? AND tenant_id = ? AND status = 'active' AND deleted_at IS NULL LIMIT 1",
+          [decoded.id, decoded.tenantId],
+          SKIP
         );
         if (!rows.length) return res.status(401).json({ message: "Invalid refresh token" });
-        if (!decoded.sessionId || !(await assertTenantSessionActive(decoded.sessionId))) {
+        if (!decoded.sessionId || !(await assertTenantSessionActive(decoded.sessionId, decoded.tenantId))) {
           return res.status(401).json({ message: "Session terminated" });
         }
         const tokenPayload = {
@@ -252,29 +270,30 @@ export function registerAuthRoutes(app, db, { JWT_SECRET, JWT_EXPIRES_IN, JWT_RE
 
   app.post("/api/logout", verifyToken, async (req, res) => {
     if (req.userRole === "tenant" && req.sessionId) {
-      await sessionRepository.terminate(req.sessionId);
+      await sessionRepository.terminate(req.sessionId, req.tenantId);
     }
     res.json({ ok: true });
   });
 
   app.get("/api/me", verifyToken, async (req, res) => {
     if (req.userRole !== "wh_admin") return res.status(403).json({ message: "Forbidden" });
-    const [rows] = await db.execute(
+    const [rows] = await readDb.query(
       "SELECT * FROM wh_admin_users WHERE id = ? AND deleted_at IS NULL LIMIT 1",
-      [req.userId]
+      [req.userId],
+      SKIP
     );
     if (!rows.length) return res.status(404).json({ message: "User not found" });
     res.json({ user: toWhUserPayload(rows[0]) });
   });
 
-  app.get("/api/tenant/me", verifyToken, requireActiveTenantSession, async (req, res) => {
+  app.get("/api/tenant/me", verifyToken, establishTenantContext, requireActiveTenantSession, async (req, res) => {
     if (req.userRole !== "tenant") return res.status(403).json({ message: "Forbidden" });
-    const [rows] = await db.execute(
+    const [rows] = await readDb.query(
       `SELECT u.*, t.company_name, t.login_portal
        FROM users u
        JOIN wh_tenants t ON t.id = u.tenant_id AND t.deleted_at IS NULL
-       WHERE u.id = ? AND u.deleted_at IS NULL LIMIT 1`,
-      [req.userId]
+       WHERE u.id = ? AND u.tenant_id = ? AND u.deleted_at IS NULL LIMIT 1`,
+      [req.userId, req.tenantId]
     );
     if (!rows.length) return res.status(404).json({ message: "User not found" });
     const row = rows[0];
@@ -293,7 +312,7 @@ export function registerAuthRoutes(app, db, { JWT_SECRET, JWT_EXPIRES_IN, JWT_RE
     res.json({ user: enriched });
   });
 
-  app.get("/api/tenant/modules", verifyToken, requireActiveTenantSession, async (req, res) => {
+  app.get("/api/tenant/modules", verifyToken, establishTenantContext, requireActiveTenantSession, async (req, res) => {
     if (req.userRole !== "tenant") return res.status(403).json({ message: "Forbidden" });
     const permCtx = await tenantPermissionService.resolveForUser(req.tenantId, req.userId, {
       impersonating: Boolean(req.impersonatedBy),

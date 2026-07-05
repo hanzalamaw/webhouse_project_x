@@ -31,7 +31,7 @@ async function persistEntity(storeId, tenantId, entityType, raw, normalized, sou
   if (entityType === "product") {
     await maybeUpdateLinkedProduct(tenantId, storeId, normalized);
   }
-  await touchLastSynced(storeId);
+  await touchLastSynced(storeId, tenantId);
 }
 
 function formatDarazError(error) {
@@ -43,11 +43,11 @@ function formatDarazError(error) {
   return error.message || "Unknown error";
 }
 
-export async function runDarazInitialSync(storeId) {
+export async function runDarazInitialSync(storeId, tenantId) {
   if (running.has(storeId)) return;
   running.add(storeId);
 
-  const store = await getStoreById(storeId);
+  const store = await getStoreById(storeId, tenantId);
   if (!store) {
     running.delete(storeId);
     return;
@@ -57,7 +57,7 @@ export async function runDarazInitialSync(storeId) {
   const apiBase = apiBaseFromStore(store);
   const orderParams = orderFetchParams(apiBase);
 
-  await updateInitialSyncStatus(storeId, "running");
+  await updateInitialSyncStatus(storeId, tenantId, "running");
   await addSyncLog(storeId, store.tenant_id, {
     syncType: "initial_sync",
     status: "started",
@@ -166,14 +166,14 @@ export async function runDarazInitialSync(storeId) {
       message: `Synced ${customers.length} customer(s) from orders`,
     });
 
-    await updateInitialSyncStatus(storeId, "completed");
+    await updateInitialSyncStatus(storeId, tenantId, "completed");
     await addSyncLog(storeId, store.tenant_id, {
       syncType: "initial_sync",
       status: "completed",
       message: "Store data fetched — review and import into your ERP when ready",
     });
   } catch (error) {
-    await updateInitialSyncStatus(storeId, "failed");
+    await updateInitialSyncStatus(storeId, tenantId, "failed");
     await addSyncLog(storeId, store.tenant_id, {
       syncType: "initial_sync",
       status: "failed",

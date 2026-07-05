@@ -29,7 +29,7 @@ export async function shopifyWebhookHandler(req, res) {
   try {
     const result = await handleWebhookPayload(store, topic, payload);
     if (result.action === "uninstalled") {
-      await disconnectStore(store.id);
+      await disconnectStore(store.id, store.tenant_id);
     }
     res.status(200).send("OK");
   } catch (error) {

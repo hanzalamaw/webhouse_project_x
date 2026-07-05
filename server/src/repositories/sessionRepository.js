@@ -1,4 +1,5 @@
 import { readDb, writeDb } from "../database/db.js";
+import { getTenantId } from "../utils/tenantContext.js";
 
 const ACTIVE_WHERE = "s.is_active = 1 AND (s.logout_at IS NULL OR s.logout_at = '0000-00-00 00:00:00')";
 
@@ -8,7 +9,7 @@ export const sessionRepository = {
     const baseFrom = `
       FROM sessions s
       INNER JOIN wh_tenants t ON t.id = s.tenant_id AND t.deleted_at IS NULL
-      INNER JOIN users u ON u.id = s.user_id AND u.deleted_at IS NULL
+      INNER JOIN users u ON u.id = s.user_id AND u.tenant_id = s.tenant_id AND u.deleted_at IS NULL
       WHERE s.deleted_at IS NULL ${activeClause}`;
 
     const [rows] = await readDb.query(
@@ -25,24 +26,32 @@ export const sessionRepository = {
     return { rows, total };
   },
 
-  async isActive(id) {
+  async isActive(id, tenantId = null) {
     if (!id) return false;
-    const [rows] = await readDb.query(
-      `SELECT id FROM sessions
+    const tid = tenantId ?? getTenantId();
+    const params = [id];
+    let sql = `SELECT id FROM sessions
        WHERE id = ? AND deleted_at IS NULL AND is_active = 1
-         AND (logout_at IS NULL OR logout_at = '0000-00-00 00:00:00')
-       LIMIT 1`,
-      [id]
-    );
+         AND (logout_at IS NULL OR logout_at = '0000-00-00 00:00:00')`;
+    if (tid != null) {
+      sql += ` AND tenant_id = ?`;
+      params.push(tid);
+    }
+    sql += ` LIMIT 1`;
+    const [rows] = await readDb.query(sql, params);
     return rows.length > 0;
   },
 
-  async terminate(id) {
-    const [result] = await writeDb.query(
-      `UPDATE sessions SET is_active = 0, logout_at = NOW()
-       WHERE id = ? AND deleted_at IS NULL AND is_active = 1`,
-      [id]
-    );
+  async terminate(id, tenantId = null) {
+    const tid = tenantId ?? getTenantId();
+    const params = [id];
+    let sql = `UPDATE sessions SET is_active = 0, logout_at = NOW()
+       WHERE id = ? AND deleted_at IS NULL AND is_active = 1`;
+    if (tid != null) {
+      sql += ` AND tenant_id = ?`;
+      params.push(tid);
+    }
+    const [result] = await writeDb.query(sql, params);
     return result.affectedRows;
   },
 
@@ -55,22 +64,31 @@ export const sessionRepository = {
     return result.insertId;
   },
 
-  async findActiveForUser(userId) {
-    const [rows] = await readDb.query(
-      `SELECT id, ip_address, device_info, login_at
+  async findActiveForUser(userId, tenantId = null) {
+    const tid = tenantId ?? getTenantId();
+    const params = [userId];
+    let sql = `SELECT id, ip_address, device_info, login_at
        FROM sessions
        WHERE user_id = ? AND deleted_at IS NULL AND is_active = 1
-         AND (logout_at IS NULL OR logout_at = '0000-00-00 00:00:00')
-       ORDER BY login_at DESC LIMIT 1`,
-      [userId]
-    );
+         AND (logout_at IS NULL OR logout_at = '0000-00-00 00:00:00')`;
+    if (tid != null) {
+      sql += ` AND tenant_id = ?`;
+      params.push(tid);
+    }
+    sql += ` ORDER BY login_at DESC LIMIT 1`;
+    const [rows] = await readDb.query(sql, params);
     return rows[0] || null;
   },
 
-  async terminateAllForUser(userId, exceptSessionId = null) {
+  async terminateAllForUser(userId, exceptSessionId = null, tenantId = null) {
+    const tid = tenantId ?? getTenantId();
     let sql = `UPDATE sessions SET is_active = 0, logout_at = NOW()
                WHERE user_id = ? AND deleted_at IS NULL AND is_active = 1`;
     const params = [userId];
+    if (tid != null) {
+      sql += ` AND tenant_id = ?`;
+      params.push(tid);
+    }
     if (exceptSessionId) {
       sql += ` AND id != ?`;
       params.push(exceptSessionId);
@@ -95,7 +113,7 @@ export const sessionRepository = {
     const activeClause = activeOnly ? `AND ${ACTIVE_WHERE}` : "";
     const baseFrom = `
       FROM sessions s
-      INNER JOIN users u ON u.id = s.user_id AND u.deleted_at IS NULL
+      INNER JOIN users u ON u.id = s.user_id AND u.tenant_id = s.tenant_id AND u.deleted_at IS NULL
       WHERE s.deleted_at IS NULL AND s.tenant_id = ? ${activeClause}`;
 
     const [rows] = await readDb.query(

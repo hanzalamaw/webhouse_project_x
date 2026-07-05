@@ -62,7 +62,7 @@ export const tenantPermissionService = {
       };
     }
 
-    const rows = await tenantPermissionRepository.findPermissionsByRole(role.role_id);
+    const rows = await tenantPermissionRepository.findPermissionsByRole(tenantId, role.role_id);
     return {
       is_super_admin: false,
       role_name: role.role_name,

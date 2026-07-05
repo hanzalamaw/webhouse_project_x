@@ -4,15 +4,14 @@ import { sessionRepository } from "../repositories/sessionRepository.js";
 
 import { createTenantPermissionMiddleware, ADMIN_MODULE } from "../middleware/tenantPermissions.js";
 import { impersonationAudit } from "../middleware/impersonationAudit.js";
+import { establishTenantContext } from "../middleware/tenantContext.js";
+import { stripTenantIdFromRequest } from "../middleware/stripTenantInput.js";
 
 
 
-async function assertTenantSessionActive(sessionId) {
-
+async function assertTenantSessionActive(sessionId, tenantId = null) {
   if (!sessionId) return false;
-
-  return sessionRepository.isActive(sessionId);
-
+  return sessionRepository.isActive(sessionId, tenantId);
 }
 
 
@@ -23,7 +22,7 @@ export function registerTenantPortalRoutes(app, verifyToken) {
 
   const { loadPermissions, requirePermission } = createTenantPermissionMiddleware();
 
-  const guard = [verifyToken, requireTenant, impersonationAudit, requireSession, loadPermissions];
+  const guard = [verifyToken, establishTenantContext, requireTenant, stripTenantIdFromRequest, impersonationAudit, requireSession, loadPermissions];
 
   const view = requirePermission(ADMIN_MODULE, "view");
 

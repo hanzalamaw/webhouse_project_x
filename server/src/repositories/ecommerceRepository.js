@@ -42,8 +42,8 @@ export async function upsertStoreConnection({
            initial_sync_status = 'pending', erp_import_status = 'pending',
            webhooks_registered = 0,
            granted_scopes = ?, deleted_at = NULL
-       WHERE id = ?`,
-      [encryptedToken, storeName || shop, platform, grantedScopes || null, storeId],
+       WHERE id = ? AND tenant_id = ?`,
+      [encryptedToken, storeName || shop, platform, grantedScopes || null, storeId, tenantId],
     );
     return storeId;
   }
@@ -79,28 +79,31 @@ export async function getStoreByShop(shop, tenantId = null) {
   return mapStoreRow(rows[0]);
 }
 
-export async function getStoreById(id) {
+export async function getStoreById(id, tenantId) {
+  if (tenantId == null) {
+    throw new Error("tenantId required for store lookup");
+  }
   const [rows] = await readDb.query(
-    `SELECT * FROM ecom_store_connections WHERE id = ? AND deleted_at IS NULL`,
-    [id],
+    `SELECT * FROM ecom_store_connections WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL`,
+    [id, tenantId],
   );
   return mapStoreRow(rows[0]);
 }
 
-export async function disconnectStore(storeId, { dataPolicy = "keep" } = {}) {
+export async function disconnectStore(storeId, tenantId, { dataPolicy = "keep" } = {}) {
   await writeDb.query(
     `UPDATE ecom_store_connections
      SET status = 'disconnected', access_token = '', deleted_at = NOW(),
          disconnect_data_policy = ?
-     WHERE id = ?`,
-    [dataPolicy, storeId],
+     WHERE id = ? AND tenant_id = ?`,
+    [dataPolicy, storeId, tenantId],
   );
 }
 
-export async function updateErpImportStatus(storeId, status) {
+export async function updateErpImportStatus(storeId, tenantId, status) {
   await writeDb.query(
-    `UPDATE ecom_store_connections SET erp_import_status = ? WHERE id = ?`,
-    [status, storeId],
+    `UPDATE ecom_store_connections SET erp_import_status = ? WHERE id = ? AND tenant_id = ?`,
+    [status, storeId, tenantId],
   );
 }
 
@@ -256,28 +259,28 @@ export async function disconnectStoreWithPolicy(storeId, tenantId, dataPolicy = 
     await softDeleteEntityLinksForStore(storeId);
   }
 
-  await disconnectStore(storeId, { dataPolicy });
+  await disconnectStore(storeId, tenantId, { dataPolicy });
   return { dataPolicy, deletedStaged, deletedErp };
 }
 
-export async function updateInitialSyncStatus(storeId, status) {
+export async function updateInitialSyncStatus(storeId, tenantId, status) {
   await writeDb.query(
-    `UPDATE ecom_store_connections SET initial_sync_status = ? WHERE id = ?`,
-    [status, storeId],
+    `UPDATE ecom_store_connections SET initial_sync_status = ? WHERE id = ? AND tenant_id = ?`,
+    [status, storeId, tenantId],
   );
 }
 
-export async function markWebhooksRegistered(storeId) {
+export async function markWebhooksRegistered(storeId, tenantId) {
   await writeDb.query(
-    `UPDATE ecom_store_connections SET webhooks_registered = 1 WHERE id = ?`,
-    [storeId],
+    `UPDATE ecom_store_connections SET webhooks_registered = 1 WHERE id = ? AND tenant_id = ?`,
+    [storeId, tenantId],
   );
 }
 
-export async function touchLastSynced(storeId) {
+export async function touchLastSynced(storeId, tenantId) {
   await writeDb.query(
-    `UPDATE ecom_store_connections SET last_synced_at = NOW() WHERE id = ?`,
-    [storeId],
+    `UPDATE ecom_store_connections SET last_synced_at = NOW() WHERE id = ? AND tenant_id = ?`,
+    [storeId, tenantId],
   );
 }
 
