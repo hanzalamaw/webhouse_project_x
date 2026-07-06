@@ -14,6 +14,8 @@ export function AfterSalesOrderSection({
   filterOrders,
   placeholder = "Search by order number or customer…",
   prefillLocked = false,
+  ineligibleMessage = null,
+  footer = null,
 }) {
   const filteredOrders = useMemo(
     () => (filterOrders ? filterOrders(orders) : orders),
@@ -72,13 +74,17 @@ export function AfterSalesOrderSection({
               <span className="wh-aftersales-order-card__date">{formatDateTime(selected.created_at)}</span>
             )}
           </div>
-          {orderViewPath && (
-            <div className="wh-aftersales-order-card__actions">
+          {ineligibleMessage && (
+            <div className="wh-alert wh-alert--warning wh-aftersales-order-card__alert">{ineligibleMessage}</div>
+          )}
+          <div className="wh-aftersales-order-card__actions">
+            {orderViewPath && (
               <Link to={orderViewPath} className="wh-btn wh-btn--secondary wh-btn--sm">
                 View order
               </Link>
-            </div>
-          )}
+            )}
+            {footer}
+          </div>
         </div>
       ) : (
         <p className="wh-muted wh-aftersales-order__hint">Select an order to see its summary here.</p>

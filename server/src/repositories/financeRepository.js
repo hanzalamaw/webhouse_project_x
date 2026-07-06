@@ -195,8 +195,17 @@ export const financeRepository = {
 
   async getVendorBill(tenantId, id) {
     const [rows] = await readDb.query(
-      `SELECT * FROM finance_vendor_bills WHERE id = ? AND ${tw("finance_vendor_bills", tenantId)} LIMIT 1`,
-      [id, tenantId]
+      `SELECT vb.*,
+              COALESCE(pay.total_paid, 0) AS total_paid
+       FROM finance_vendor_bills vb
+       LEFT JOIN (
+         SELECT vendor_bill_id, SUM(amount_paid) AS total_paid
+         FROM finance_vendor_payments
+         WHERE tenant_id = ? AND deleted_at IS NULL
+         GROUP BY vendor_bill_id
+       ) pay ON pay.vendor_bill_id = vb.id
+       WHERE vb.id = ? AND ${tw("vb", tenantId)} LIMIT 1`,
+      [tenantId, id, tenantId]
     );
     return rows[0] || null;
   },
@@ -241,9 +250,11 @@ export const financeRepository = {
 
   async listVendorPayments(tenantId, billId) {
     const [rows] = await readDb.query(
-      `SELECT * FROM finance_vendor_payments
-       WHERE vendor_bill_id = ? AND ${tw("finance_vendor_payments", tenantId)}
-       ORDER BY paid_at DESC`,
+      `SELECT p.*, ba.bank_name, ba.account_title, ba.account_number
+       FROM finance_vendor_payments p
+       LEFT JOIN finance_bank_accounts ba ON ba.id = p.bank_account_id AND ba.deleted_at IS NULL
+       WHERE p.vendor_bill_id = ? AND ${tw("p", tenantId)}
+       ORDER BY p.paid_at DESC`,
       [billId, tenantId]
     );
     return rows;
@@ -252,9 +263,9 @@ export const financeRepository = {
   async createVendorPayment(tenantId, data) {
     const amount = Number(data.amount_paid) || 0;
     const [result] = await writeDb.query(
-      `INSERT INTO finance_vendor_payments (amount_paid, payment_method, paid_at, vendor_bill_id, tenant_id)
-       VALUES (?, ?, ?, ?, ?)`,
-      [amount, data.payment_method, data.paid_at || new Date(), data.vendor_bill_id, tenantId]
+      `INSERT INTO finance_vendor_payments (amount_paid, payment_method, bank_account_id, paid_at, vendor_bill_id, tenant_id)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [amount, data.payment_method, data.bank_account_id || null, data.paid_at || new Date(), data.vendor_bill_id, tenantId]
     );
     return result.insertId;
   },
@@ -341,6 +352,39 @@ export const financeRepository = {
       }
     }
     return this.listExpenseSubCategories(tenantId);
+  },
+
+  async createExpenseCategory(tenantId, categoryName) {
+    const name = String(categoryName || "").trim();
+    if (!name) throw new Error("Category name is required");
+    const [result] = await writeDb.query(
+      `INSERT INTO finance_expense_categories (category_name, tenant_id) VALUES (?, ?)`,
+      [name, tenantId]
+    );
+    const [rows] = await readDb.query(
+      `SELECT * FROM finance_expense_categories WHERE id = ? AND ${tw("finance_expense_categories", tenantId)} LIMIT 1`,
+      [result.insertId, tenantId]
+    );
+    return rows[0] || null;
+  },
+
+  async createExpenseSubCategory(tenantId, categoryId, subCategoryName) {
+    const name = String(subCategoryName || "").trim();
+    if (!name) throw new Error("Sub-category name is required");
+    const [catRows] = await readDb.query(
+      `SELECT id FROM finance_expense_categories WHERE id = ? AND ${tw("finance_expense_categories", tenantId)} LIMIT 1`,
+      [categoryId, tenantId]
+    );
+    if (!catRows.length) throw new Error("Category not found");
+    const [result] = await writeDb.query(
+      `INSERT INTO finance_expense_sub_categories (sub_category_name, category_id, tenant_id) VALUES (?, ?, ?)`,
+      [name, categoryId, tenantId]
+    );
+    const [rows] = await readDb.query(
+      `SELECT * FROM finance_expense_sub_categories WHERE id = ? AND ${tw("finance_expense_sub_categories", tenantId)} LIMIT 1`,
+      [result.insertId, tenantId]
+    );
+    return rows[0] || null;
   },
 
   async listExpenses(tenantId) {

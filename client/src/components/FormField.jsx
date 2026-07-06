@@ -6,10 +6,13 @@ export function FormField({
   onChange,
   placeholder,
   error,
+  hint,
+  hintTone,
   autoComplete,
   as: Component = "input",
   children,
   displayOnly = false,
+  suppressErrorMessage = false,
   ...rest
 }) {
   const inputClass = displayOnly
@@ -62,7 +65,10 @@ export function FormField({
           {...rest}
         />
       )}
-      {error && <span className="wh-field__error">{error}</span>}
+      {hint && !error && (
+        <span className={`wh-field__hint${hintTone ? ` wh-field__hint--${hintTone}` : ""}`}>{hint}</span>
+      )}
+      {error && !suppressErrorMessage && <span className="wh-field__error">{error}</span>}
     </div>
   );
 }

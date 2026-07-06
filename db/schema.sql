@@ -2,7 +2,7 @@
 -- 57 tables: Webhouse Admin, Client Admin, Portal, Inventory, CRM,
 -- E-Commerce, Orders, Finance, Logistics, POS
 --
--- Soft delete: every table has deleted_at (NULL = active). Purge-after-7d is app/cron later.
+-- Soft delete: every table has deleted_at (NULL = active). Hard purge after 7 days via server purge job.
 -- Foreign keys: ON DELETE CASCADE, ON UPDATE CASCADE
 --
 -- Apply: cd server && npm run setup:db

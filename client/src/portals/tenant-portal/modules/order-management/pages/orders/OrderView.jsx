@@ -11,10 +11,21 @@ import { DetailValue } from "../../../../../../components/DetailValue";
 import { formatDateTime } from "../../../../../../utils/dateTime";
 import { formatPKR } from "../../../../../../utils/currency";
 import { MODULE_BASE, ORDER_SOURCE_LABELS, PAYMENT_METHOD_LABELS } from "../../constants";
-
-function truthyFlag(value) {
-  return value === true || value === 1 || value === "1";
-}
+import { OrderItemsCardHead } from "../../components/OrderItemsCardHead";
+import { OrderTotalsSummary } from "../../components/OrderTotalsSummary";
+import {
+  calcLineTotal,
+  computeOrderTotals,
+  lineTaxForQty,
+  mapOrderItemFromApi,
+} from "../../utils/orderLinePricing";
+import {
+  getOrderAfterSalesState,
+  isOrderEligibleForCancellation,
+  isOrderEligibleForExchange,
+  isOrderEligibleForRefund,
+  isOrderEligibleForReturn,
+} from "../../utils/afterSalesRules";
 
 export default function OrderView() {
   const { orderId } = useParams();
@@ -56,18 +67,15 @@ export default function OrderView() {
   }
 
   const items = order.items || [];
-  const itemCount = items.reduce((sum, i) => sum + (Number(i.quantity) || 0), 0);
-  const subtotal = items.reduce(
-    (sum, i) => sum + Math.max(0, (Number(i.quantity) || 0) * (Number(i.unit_price) || 0) - (Number(i.discount) || 0)),
-    0
-  );
+  const mappedItems = items.map((item) => mapOrderItemFromApi(item));
+  const itemCount = items.length;
+  const unitCount = items.reduce((sum, i) => sum + (Number(i.quantity) || 0), 0);
+  const totals = computeOrderTotals(mappedItems, order.discount_amount, order.delivery_charges);
   const totalPaid = payments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
-  const payable = Number(order.payable_amount) || 0;
+  const payable = Number(order.payable_amount) || totals.payable;
   const amountDue = Math.max(0, payable - totalPaid);
-  const hasCancellation = truthyFlag(order.has_cancellation) || order.order_status === "cancelled";
-  const hasReturn = truthyFlag(order.has_return) || order.order_status === "returned";
-  const hasExchange = truthyFlag(order.has_exchange);
-  const hasRefund = truthyFlag(order.has_refund) || order.payment_status === "refunded";
+  const afterSales = getOrderAfterSalesState(order);
+  const hasAfterSales = Boolean(afterSales);
 
   return (
     <div className="wh-page">
@@ -95,17 +103,40 @@ export default function OrderView() {
           value={formatPKR(amountDue)}
           tone={amountDue > 0 ? "warning" : "success"}
         />
-        <StatCard label="Items" value={itemCount} hint={`${items.length} line${items.length === 1 ? "" : "s"}`} />
+        <StatCard label="Items" value={unitCount} hint={`${itemCount} line${itemCount === 1 ? "" : "s"}`} />
       </div>
 
       <Card className="wh-order-aftersales">
         <span className="wh-order-aftersales__label">After sales</span>
-        <div className="wh-order-aftersales__actions">
-          <Button variant="secondary" className="wh-btn--sm" disabled={hasCancellation} onClick={() => navigate(`${MODULE_BASE}/cancellations/create?orderId=${order.id}`)}>Cancel order</Button>
-          <Button variant="secondary" className="wh-btn--sm" disabled={hasReturn} onClick={() => navigate(`${MODULE_BASE}/returns/create?orderId=${order.id}`)}>Return</Button>
-          <Button variant="secondary" className="wh-btn--sm" disabled={hasExchange} onClick={() => navigate(`${MODULE_BASE}/exchanges/create?orderId=${order.id}`)}>Exchange</Button>
-          <Button variant="secondary" className="wh-btn--sm" disabled={hasRefund} onClick={() => navigate(`${MODULE_BASE}/refunds/create?orderId=${order.id}`)}>Refund</Button>
-        </div>
+        {hasAfterSales ? (
+          <div className="wh-order-aftersales__status">
+            <StatusBadge status={afterSales.type === "cancellation" ? "cancelled" : afterSales.type === "return" ? "returned" : afterSales.type} />
+            <span className="wh-muted">This order is recorded as <strong>{afterSales.label}</strong>.</span>
+            <Button
+              variant="secondary"
+              className="wh-btn--sm"
+              onClick={() => navigate(`${MODULE_BASE}/${afterSales.managePath}`)}
+            >
+              View in {afterSales.label.toLowerCase()} list
+            </Button>
+            {afterSales.canRefund && (
+              <Button
+                variant="secondary"
+                className="wh-btn--sm"
+                onClick={() => navigate(`${MODULE_BASE}/refunds/create?orderId=${order.id}`)}
+              >
+                Record refund
+              </Button>
+            )}
+          </div>
+        ) : (
+          <div className="wh-order-aftersales__actions">
+            <Button variant="secondary" className="wh-btn--sm" disabled={!isOrderEligibleForCancellation(order)} onClick={() => navigate(`${MODULE_BASE}/cancellations/create?orderId=${order.id}`)}>Cancel order</Button>
+            <Button variant="secondary" className="wh-btn--sm" disabled={!isOrderEligibleForReturn(order)} onClick={() => navigate(`${MODULE_BASE}/returns/create?orderId=${order.id}`)}>Return</Button>
+            <Button variant="secondary" className="wh-btn--sm" disabled={!isOrderEligibleForExchange(order)} onClick={() => navigate(`${MODULE_BASE}/exchanges/create?orderId=${order.id}`)}>Exchange</Button>
+            <Button variant="secondary" className="wh-btn--sm" disabled={!isOrderEligibleForRefund(order)} onClick={() => navigate(`${MODULE_BASE}/refunds/create?orderId=${order.id}`)}>Refund</Button>
+          </div>
+        )}
       </Card>
 
       <div className="wh-order-view-grid">
@@ -133,47 +164,40 @@ export default function OrderView() {
       </div>
 
       <Card className="wh-card--table wh-order-items-card">
-        <div className="wh-order-items-card__head">
-          <h3 className="wh-card__title">Line items</h3>
-          <span className="wh-order-items-card__count">{items.length} product{items.length === 1 ? "" : "s"} · {itemCount} unit{itemCount === 1 ? "" : "s"}</span>
-        </div>
+        <OrderItemsCardHead itemCount={itemCount} unitCount={unitCount} />
         <ul className="wh-order-item-list">
-          {items.map((item) => (
-            <li key={item.id} className="wh-order-item-row">
-              <div className="wh-order-item-row__main">
+          {items.map((item, index) => {
+            const row = mappedItems[index];
+            const qty = Number(item.quantity) || 0;
+            const lineTax = lineTaxForQty(qty, row.product_tax);
+            const metaParts = [];
+            if (item.sku) metaParts.push(`SKU ${item.sku}`);
+            metaParts.push(`${formatPKR(item.unit_price)} each`);
+            if (Number(item.discount) > 0) metaParts.push(`− ${formatPKR(item.discount)} discount`);
+            if (lineTax > 0) metaParts.push(`+ ${formatPKR(lineTax)} tax`);
+
+            return (
+              <li key={item.id} className="wh-order-item-row">
                 <span className="wh-order-item-qty">×{item.quantity}</span>
                 <div className="wh-order-item-row__text">
                   <span className="wh-order-item-product__name">{item.product_name}</span>
-                  <span className="wh-order-item-product__sub">
-                    {item.sku ? `SKU ${item.sku} · ` : ""}{formatPKR(item.unit_price)} each
-                    {Number(item.discount) > 0 ? ` · − ${formatPKR(item.discount)} discount` : ""}
-                  </span>
+                  <span className="wh-order-item-product__sub">{metaParts.join(" · ")}</span>
                 </div>
-              </div>
-              <span className="wh-order-item-row__total">{formatPKR(item.total_price)}</span>
-            </li>
-          ))}
+                <span className="wh-order-item-row__total">{formatPKR(calcLineTotal(row))}</span>
+              </li>
+            );
+          })}
           {items.length === 0 && <li className="wh-muted wh-order-item-row wh-order-item-row--empty">No line items.</li>}
         </ul>
 
-        <div className="wh-order-summary">
-          <div className="wh-order-summary__row">
-            <span>Subtotal</span>
-            <span>{formatPKR(subtotal)}</span>
-          </div>
-          <div className="wh-order-summary__row">
-            <span>Order discount</span>
-            <span>− {formatPKR(order.discount_amount)}</span>
-          </div>
-          <div className="wh-order-summary__row">
-            <span>Delivery</span>
-            <span>+ {formatPKR(order.delivery_charges)}</span>
-          </div>
-          <div className="wh-order-summary__row wh-order-summary__row--total">
-            <span>Payable</span>
-            <span>{formatPKR(payable)}</span>
-          </div>
-        </div>
+        <OrderTotalsSummary
+          subtotal={totals.subtotal}
+          lineDiscountTotal={totals.lineDiscountTotal}
+          taxTotal={totals.taxTotal}
+          orderDiscount={totals.orderDiscount}
+          delivery={totals.delivery}
+          payable={payable}
+        />
       </Card>
 
       {payments.length > 0 && (

@@ -102,7 +102,7 @@ export default function RecurringExpenses() {
         {loading ? <p className="wh-muted">Loading…</p> : (
           <>
             <TableToolbar rows={rows} value={toolbar} onChange={setToolbar} dateField="next_due_date" filters={TOOLBAR_FILTERS} searchPlaceholder="Search recurring…" layout="stacked" />
-            <DataTable columns={columns} rows={filteredRows} page={page} pageSize={TABLE_PAGE_SIZE} onPageChange={setPage} />
+            <DataTable columns={columns} rows={filteredRows} page={page} pageSize={TABLE_PAGE_SIZE} onPageChange={setPage} onRowClick={(row) => navigate(`${MODULE_BASE}/recurring-expenses/view/${row.id}`)} />
           </>
         )}
       </Card>

@@ -93,7 +93,7 @@ export default function Expenses() {
         {loading ? <p className="wh-muted">Loading…</p> : (
           <>
             <TableToolbar rows={rows} value={toolbar} onChange={setToolbar} dateField="expense_date" filters={TOOLBAR_FILTERS} searchPlaceholder="Search expenses…" layout="stacked" />
-            <DataTable columns={columns} rows={filteredRows} page={page} pageSize={TABLE_PAGE_SIZE} onPageChange={setPage} />
+            <DataTable columns={columns} rows={filteredRows} page={page} pageSize={TABLE_PAGE_SIZE} onPageChange={setPage} onRowClick={(row) => navigate(`${MODULE_BASE}/expenses/view/${row.id}`)} />
           </>
         )}
       </Card>

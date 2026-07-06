@@ -9,8 +9,8 @@ const pool = await createPool();
 await initDb(pool);
 
 try {
-  const results = await purgeSoftDeleted();
-  console.log("Purge complete:", results);
+  const { total, tables, errors } = await purgeSoftDeleted();
+  console.log("Purge complete:", { total, tables, errors });
 } finally {
   await closePool(pool);
 }

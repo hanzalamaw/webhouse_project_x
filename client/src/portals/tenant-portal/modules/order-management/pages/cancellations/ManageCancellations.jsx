@@ -12,6 +12,7 @@ import { EMPTY_TOOLBAR } from "../../../../../../utils/tableFilters";
 import { useToolbarFilteredRows } from "../../../../../../hooks/useToolbarFilteredRows";
 import { formatDateTime } from "../../../../../../utils/dateTime";
 import { MODULE_BASE } from "../../constants";
+import { isOrderEligibleForRefund, isOrderPaid } from "../../utils/afterSalesRules";
 
 const TOOLBAR_FILTERS = [
   { key: "order_no", label: "Order #" },
@@ -57,6 +58,30 @@ export default function ManageCancellations() {
     { key: "reason", label: "Reason", format: (v) => v || "—" },
     { key: "cancelled_by_name", label: "Cancelled By" },
     { key: "cancelled_at", label: "Cancelled", format: formatDateTime },
+    {
+      key: "actions",
+      label: "",
+      sortable: false,
+      format: (_, row) => {
+        const canRefund = isOrderPaid(row)
+          && isOrderEligibleForRefund(row)
+          && canCreate;
+        if (!canRefund) return null;
+        return (
+          <Button
+            type="button"
+            variant="secondary"
+            className="wh-btn--sm"
+            onClick={(e) => {
+              e.stopPropagation();
+              navigate(`${MODULE_BASE}/refunds/create?orderId=${row.order_id}`);
+            }}
+          >
+            Record refund
+          </Button>
+        );
+      },
+    },
   ];
 
   return (

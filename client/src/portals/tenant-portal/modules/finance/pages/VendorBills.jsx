@@ -8,14 +8,17 @@ import { Card } from "../../../../../components/Card";
 import { DataTable } from "../../../../../components/DataTable";
 import { TableToolbar } from "../../../../../components/TableToolbar";
 import { Modal } from "../../../../../components/Modal";
-import { FormField } from "../../../../../components/FormField";
 import { Button } from "../../../../../components/Button";
+import { PaymentAmountField } from "../../../../../components/PaymentAmountField";
+import { PaymentAmountFeedback } from "../../../../../components/PaymentAmountFeedback";
+import { PaymentViaSelect } from "../../../../../components/PaymentViaSelect";
 import { StatusBadge } from "../../../../../components/Badge";
 import { EMPTY_TOOLBAR } from "../../../../../utils/tableFilters";
 import { useToolbarFilteredRows } from "../../../../../hooks/useToolbarFilteredRows";
 import { formatPKR } from "../../../../../utils/currency";
 import { formatDate, formatDateTime } from "../../../../../utils/dateTime";
-import { MODULE_BASE, PAYMENT_METHOD_LABELS, VENDOR_BILL_STATUSES, labelFor } from "../constants";
+import { parsePaymentVia } from "../../../../../utils/paymentVia";
+import { MODULE_BASE, VENDOR_BILL_STATUSES } from "../constants";
 
 function SummaryGrid({ items }) {
   return (
@@ -36,6 +39,13 @@ const TOOLBAR_FILTERS = [
   { key: "status", label: "Status", options: VENDOR_BILL_STATUSES },
 ];
 
+const EMPTY_FORM = { amount_paid: "", payment_via: "cash" };
+
+function canSubmitAmount(amount, maxAllowed) {
+  const amt = Number(amount) || 0;
+  return amt > 0 && amt <= maxAllowed + 0.001;
+}
+
 export default function VendorBills() {
   const { authFetch } = useAuth();
   const { canCreate } = useModulePermission("finance");
@@ -49,7 +59,7 @@ export default function VendorBills() {
   const [contextRow, setContextRow] = useState(null);
   const [payments, setPayments] = useState([]);
   const [paymentsLoading, setPaymentsLoading] = useState(false);
-  const [addForm, setAddForm] = useState({ amount_paid: "", payment_method: "bank_transfer" });
+  const [addForm, setAddForm] = useState(EMPTY_FORM);
   const [addError, setAddError] = useState("");
   const [adding, setAdding] = useState(false);
 
@@ -63,6 +73,7 @@ export default function VendorBills() {
   const amountDue = Number(contextRow?.amount_due) || 0;
   const addAmount = Number(addForm.amount_paid) || 0;
   const maxPay = Math.max(0, amountDue);
+  const newTotalPaid = totalPaid + addAmount;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -92,10 +103,10 @@ export default function VendorBills() {
   useEffect(() => { load().catch(() => {}); }, [load]);
   useEffect(() => { setPage(1); }, [toolbar]);
 
-  const openModal = async (row) => {
+  const openPaymentModal = async (row) => {
     setContextRow(row);
     setModalOpen(true);
-    setAddForm({ amount_paid: "", payment_method: "bank_transfer" });
+    setAddForm(EMPTY_FORM);
     setAddError("");
     await loadPayments(row.id);
   };
@@ -107,24 +118,20 @@ export default function VendorBills() {
   };
 
   const submitPayment = async () => {
-    if (!contextRow) return;
-    if (addAmount <= 0) { setAddError("Enter a payment amount."); return; }
-    if (addAmount > maxPay + 0.001) {
-      setAddError(`Amount cannot exceed ${formatPKR(maxPay)} due.`);
-      return;
-    }
+    if (!contextRow || !canSubmitAmount(addAmount, maxPay) || !canCreate) return;
+    const { payment_method, bank_account_id } = parsePaymentVia(addForm.payment_via);
     setAdding(true);
     setAddError("");
     try {
       await apiFetch(`/finance/vendor-bills/${contextRow.id}/payments`, {
         method: "POST",
-        body: JSON.stringify({ amount_paid: addAmount, payment_method: addForm.payment_method }),
+        body: JSON.stringify({ amount_paid: addAmount, payment_method, bank_account_id }),
       }, authFetch);
       await load();
       const updated = (await fetchAllTableRows("/finance/vendor-bills", authFetch)).find((r) => r.id === contextRow.id);
       if (updated) setContextRow(updated);
       await loadPayments(contextRow.id);
-      setAddForm({ amount_paid: "", payment_method: "bank_transfer" });
+      setAddForm(EMPTY_FORM);
     } catch (e) {
       setAddError(e.message);
     } finally {
@@ -139,6 +146,20 @@ export default function VendorBills() {
     { key: "amount_due", label: "Due", format: (v) => formatPKR(v) },
     { key: "due_date", label: "Due date", format: formatDate },
     { key: "status", label: "Status", render: (r) => <StatusBadge status={r.status} /> },
+    {
+      label: "Actions",
+      filter: false,
+      stopRowClick: true,
+      render: (row) => (
+        <div className="wh-action-btns">
+          {Number(row.amount_due) > 0 && (
+            <Button className="wh-btn--sm" disabled={!canCreate} onClick={() => openPaymentModal(row)}>
+              Record payment
+            </Button>
+          )}
+        </div>
+      ),
+    },
   ];
 
   return (
@@ -153,7 +174,14 @@ export default function VendorBills() {
         {loading ? <p className="wh-muted">Loading…</p> : (
           <>
             <TableToolbar rows={rows} value={toolbar} onChange={setToolbar} dateField="due_date" filters={TOOLBAR_FILTERS} searchPlaceholder="Search bills…" layout="stacked" />
-            <DataTable columns={columns} rows={filteredRows} page={page} pageSize={TABLE_PAGE_SIZE} onPageChange={setPage} onRowClick={openModal} />
+            <DataTable
+              columns={columns}
+              rows={filteredRows}
+              page={page}
+              pageSize={TABLE_PAGE_SIZE}
+              onPageChange={setPage}
+              onRowClick={(row) => navigate(`${MODULE_BASE}/vendor-bills/view/${row.id}`)}
+            />
           </>
         )}
       </Card>
@@ -168,7 +196,9 @@ export default function VendorBills() {
             {addError && <p className="wh-field__error">{addError}</p>}
             <Button variant="secondary" onClick={closeModal}>Close</Button>
             {amountDue > 0 && (
-              <Button onClick={submitPayment} disabled={adding || !canCreate}>{adding ? "Saving…" : "Record payment"}</Button>
+              <Button onClick={submitPayment} disabled={adding || !canCreate || !canSubmitAmount(addAmount, maxPay)}>
+                {adding ? "Saving…" : "Record payment"}
+              </Button>
             )}
           </>
         }
@@ -190,12 +220,34 @@ export default function VendorBills() {
 
             {amountDue > 0 && (
               <div className="wh-tx-inputs">
-                <div className="wh-form-grid">
-                  <FormField id="vb_amount" label="Payment amount (Rs.)" type="number" step="0.01" min="0" value={addForm.amount_paid} onChange={(e) => { setAddError(""); setAddForm((f) => ({ ...f, amount_paid: e.target.value })); }} />
-                  <FormField id="vb_method" label="Payment via" as="select" value={addForm.payment_method} onChange={(e) => setAddForm((f) => ({ ...f, payment_method: e.target.value }))}>
-                    {Object.entries(PAYMENT_METHOD_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-                  </FormField>
+                <div className="wh-form-grid wh-form-grid--2">
+                  <PaymentAmountField
+                    id="vb_amount"
+                    label="Payment amount (Rs.)"
+                    value={addForm.amount_paid}
+                    onChange={(e) => setAddForm((f) => ({ ...f, amount_paid: e.target.value }))}
+                    amount={addAmount}
+                    maxAllowed={maxPay}
+                    totalAfter={newTotalPaid}
+                    totalTarget={billAmount}
+                    showZeroHint
+                    inlineFeedback={false}
+                  />
+                  <PaymentViaSelect
+                    authFetch={authFetch}
+                    id="vb_method"
+                    value={addForm.payment_via}
+                    onChange={(e) => setAddForm((f) => ({ ...f, payment_via: e.target.value }))}
+                  />
                 </div>
+                <PaymentAmountFeedback
+                  amount={addAmount}
+                  maxAllowed={maxPay}
+                  totalAfter={newTotalPaid}
+                  totalTarget={billAmount}
+                  showZeroHint
+                  value={addForm.amount_paid}
+                />
               </div>
             )}
 
@@ -208,7 +260,7 @@ export default function VendorBills() {
                   {payments.map((p) => (
                     <li key={p.id} className="wh-tx-payment-row">
                       <span>{formatDateTime(p.paid_at)}</span>
-                      <span>{labelFor(PAYMENT_METHOD_LABELS, p.payment_method)}</span>
+                      <span>{p.bank_name ? `${p.bank_name} (${p.account_number})` : "Cash"}</span>
                       <strong>{formatPKR(p.amount_paid)}</strong>
                     </li>
                   ))}

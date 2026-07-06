@@ -50,6 +50,26 @@ export function buildLineItemFromProduct(product) {
   };
 }
 
+export function computeOrderTotals(items, orderDiscountAmount = 0, deliveryChargesAmount = 0) {
+  const subtotal = items.reduce((sum, row) => {
+    const qty = Number(row.quantity) || 0;
+    const price = Number(row.unit_price) || 0;
+    return sum + qty * price;
+  }, 0);
+  const lineDiscountTotal = items.reduce((sum, row) => {
+    const qty = Number(row.quantity) || 0;
+    const price = Number(row.unit_price) || 0;
+    return sum + Math.min(Number(row.discount) || 0, qty * price);
+  }, 0);
+  const taxTotal = productTaxTotal(items);
+  const lineNet = Math.max(0, subtotal - lineDiscountTotal);
+  const itemsGross = lineNet + taxTotal;
+  const orderDiscount = Number(orderDiscountAmount) || 0;
+  const delivery = Number(deliveryChargesAmount) || 0;
+  const payable = Math.max(0, itemsGross - orderDiscount + delivery);
+  return { subtotal, lineDiscountTotal, taxTotal, lineNet, itemsGross, orderDiscount, delivery, payable };
+}
+
 export function mapOrderItemFromApi(item) {
   const productDiscount = Number(item.product_discount_unit ?? item.product_discount ?? 0);
   const productTax = Number(item.product_tax_unit ?? item.product_tax ?? 0);

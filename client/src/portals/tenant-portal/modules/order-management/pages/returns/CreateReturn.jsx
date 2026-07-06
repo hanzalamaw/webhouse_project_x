@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 
 import { useNavigate } from "react-router-dom";
 
@@ -23,6 +23,7 @@ import { AfterSalesOrderSection } from "../../components/AfterSalesOrderSection"
 import { useAfterSalesOrders } from "../../hooks/useAfterSalesOrders";
 
 import { MODULE_BASE, RETURN_STATUSES, RETURN_STATUS_LABELS } from "../../constants";
+import { afterSalesIneligibilityMessage, isOrderEligibleForReturn } from "../../utils/afterSalesRules";
 
 
 
@@ -50,7 +51,14 @@ export default function CreateReturn() {
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
-
+  const selectedOrder = useMemo(
+    () => orders.find((o) => String(o.id) === String(form.order_id)) || null,
+    [orders, form.order_id]
+  );
+  const orderEligible = selectedOrder ? isOrderEligibleForReturn(selectedOrder) : false;
+  const ineligibleMessage = selectedOrder && !orderEligible
+    ? afterSalesIneligibilityMessage(selectedOrder, "return")
+    : null;
 
   useEffect(() => {
 
@@ -71,6 +79,10 @@ export default function CreateReturn() {
     if (disabled) return;
 
     if (!form.order_id) { setError("Select an order for this return."); return; }
+    if (!orderEligible) {
+      setError(ineligibleMessage || "This order cannot be returned.");
+      return;
+    }
 
     setSaving(true);
 
@@ -166,6 +178,10 @@ export default function CreateReturn() {
 
               prefillLocked={Boolean(prefillOrderId)}
 
+              filterOrders={(rows) => rows.filter(isOrderEligibleForReturn)}
+
+              ineligibleMessage={ineligibleMessage}
+
             />
 
           </FormBlock>
@@ -230,7 +246,7 @@ export default function CreateReturn() {
 
             <Button type="button" variant="secondary" onClick={() => navigate(managePath)}>Cancel</Button>
 
-            <Button type="submit" disabled={saving || disabled || !form.order_id}>
+            <Button type="submit" disabled={saving || disabled || !form.order_id || !orderEligible}>
 
               {saving ? "Saving…" : "Save return"}
 

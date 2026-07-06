@@ -92,7 +92,7 @@ export default function BankAccounts() {
         {loading ? <p className="wh-muted">Loading…</p> : (
           <>
             <TableToolbar rows={rows} value={toolbar} onChange={setToolbar} filters={TOOLBAR_FILTERS} searchPlaceholder="Search accounts…" layout="stacked" />
-            <DataTable columns={columns} rows={filteredRows} page={page} pageSize={TABLE_PAGE_SIZE} onPageChange={setPage} />
+            <DataTable columns={columns} rows={filteredRows} page={page} pageSize={TABLE_PAGE_SIZE} onPageChange={setPage} onRowClick={(row) => navigate(`${MODULE_BASE}/bank-accounts/view/${row.id}`)} />
           </>
         )}
       </Card>

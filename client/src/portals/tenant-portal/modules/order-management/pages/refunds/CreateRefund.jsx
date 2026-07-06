@@ -38,6 +38,11 @@ import {
 
 } from "../../constants";
 
+import {
+  afterSalesIneligibilityMessage,
+  isOrderEligibleForRefund,
+} from "../../utils/afterSalesRules";
+
 
 
 export default function CreateRefund() {
@@ -81,8 +86,10 @@ export default function CreateRefund() {
 
 
   const selectedOrder = orders.find((o) => String(o.id) === String(form.order_id)) || null;
-
-
+  const orderEligible = selectedOrder ? isOrderEligibleForRefund(selectedOrder) : false;
+  const ineligibleMessage = selectedOrder && !orderEligible
+    ? afterSalesIneligibilityMessage(selectedOrder, "refund")
+    : null;
 
   const applyOrderSelection = (orderId) => {
 
@@ -117,6 +124,10 @@ export default function CreateRefund() {
     if (disabled) return;
 
     if (!form.order_id) { setError("Select an order for this refund."); return; }
+    if (!orderEligible) {
+      setError(ineligibleMessage || "This order cannot be refunded.");
+      return;
+    }
 
     setSaving(true);
 
@@ -204,7 +215,7 @@ export default function CreateRefund() {
 
         <form className="wh-form-stack wh-aftersales-form" onSubmit={submit}>
 
-          <FormBlock title="Order" description="Select the order being refunded. The payable amount is suggested automatically.">
+          <FormBlock title="Order" description="Select the order being refunded. Cancelled and paid orders are eligible. The payable amount is suggested automatically.">
 
             <AfterSalesOrderSection
 
@@ -217,6 +228,10 @@ export default function CreateRefund() {
               disabled={disabled}
 
               prefillLocked={Boolean(prefillOrderId)}
+
+              filterOrders={(rows) => rows.filter(isOrderEligibleForRefund)}
+
+              ineligibleMessage={ineligibleMessage}
 
             />
 
@@ -354,7 +369,7 @@ export default function CreateRefund() {
 
             <Button type="button" variant="secondary" onClick={() => navigate(managePath)}>Cancel</Button>
 
-            <Button type="submit" disabled={saving || disabled || !form.order_id}>
+            <Button type="submit" disabled={saving || disabled || !form.order_id || !orderEligible}>
 
               {saving ? "Saving…" : "Save refund"}
 

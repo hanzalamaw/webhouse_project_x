@@ -5,6 +5,8 @@ import { apiFetch } from "../../../../../api/client";
 import { PageHeader } from "../../../../../components/PageHeader";
 import { Card } from "../../../../../components/Card";
 import { Button } from "../../../../../components/Button";
+import { CsvImportPreviewModal } from "../../../../../components/CsvImportPreviewModal";
+import { useCsvImportPreview } from "../../../../../hooks/useCsvImportPreview";
 import {
   LEAD_CSV_HEADERS,
   CUSTOMER_CSV_HEADERS,
@@ -77,6 +79,8 @@ export default function ImportExport() {
   const [customerResult, setCustomerResult] = useState(null);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const leadPreview = useCsvImportPreview();
+  const customerPreview = useCsvImportPreview();
 
   const dateStamp = new Date().toISOString().slice(0, 10);
 
@@ -110,16 +114,12 @@ export default function ImportExport() {
     }
   };
 
-  const importLeads = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file || !canCreate) return;
+  const runLeadImport = async (rows) => {
     setLeadImporting(true);
     setError("");
     setMessage("");
     setLeadResult(null);
     try {
-      const rows = parseCsv(await file.text());
-      if (!rows.length) throw new Error("CSV file has no data rows");
       const res = await apiFetch("/crm/leads/import", { method: "POST", body: JSON.stringify({ rows }) }, authFetch);
       setLeadResult(res);
       setMessage(`Leads import finished: ${res.created} created.`);
@@ -127,20 +127,15 @@ export default function ImportExport() {
       setError(err.message);
     } finally {
       setLeadImporting(false);
-      e.target.value = "";
     }
   };
 
-  const importCustomers = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file || !canCreate) return;
+  const runCustomerImport = async (rows) => {
     setCustomerImporting(true);
     setError("");
     setMessage("");
     setCustomerResult(null);
     try {
-      const rows = parseCsv(await file.text());
-      if (!rows.length) throw new Error("CSV file has no data rows");
       const res = await apiFetch("/crm/customers/import", { method: "POST", body: JSON.stringify({ rows }) }, authFetch);
       setCustomerResult(res);
       setMessage(`Customers import finished: ${res.created} created, ${res.updated} updated.`);
@@ -148,7 +143,34 @@ export default function ImportExport() {
       setError(err.message);
     } finally {
       setCustomerImporting(false);
-      e.target.value = "";
+    }
+  };
+
+  const importLeads = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file || !canCreate) return;
+    e.target.value = "";
+    setError("");
+    try {
+      const rows = parseCsv(await file.text());
+      if (!rows.length) throw new Error("CSV file has no data rows");
+      leadPreview.stage(rows, runLeadImport);
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const importCustomers = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file || !canCreate) return;
+    e.target.value = "";
+    setError("");
+    try {
+      const rows = parseCsv(await file.text());
+      if (!rows.length) throw new Error("CSV file has no data rows");
+      customerPreview.stage(rows, runCustomerImport);
+    } catch (err) {
+      setError(err.message);
     }
   };
 
@@ -197,8 +219,8 @@ export default function ImportExport() {
             </Button>
             {canCreate ? (
               <label className="wh-btn wh-btn--primary" style={{ cursor: "pointer" }}>
-                {leadImporting ? "Importing…" : "Choose CSV file"}
-                <input type="file" accept=".csv,text/csv" onChange={importLeads} disabled={leadImporting} style={{ display: "none" }} />
+                {leadImporting || leadPreview.importing ? "Importing…" : "Choose CSV file"}
+                <input type="file" accept=".csv,text/csv" onChange={importLeads} disabled={leadImporting || leadPreview.importing} style={{ display: "none" }} />
               </label>
             ) : (
               <p className="wh-muted">Import requires CRM create permission.</p>
@@ -208,6 +230,23 @@ export default function ImportExport() {
       </div>
 
       <ImportResultCard title="Lead import results" result={leadResult} />
+
+      <CsvImportPreviewModal
+        open={leadPreview.open}
+        onClose={leadPreview.cancel}
+        onConfirm={leadPreview.confirm}
+        rows={leadPreview.rows}
+        loading={leadPreview.importing}
+        title="Lead import preview"
+      />
+      <CsvImportPreviewModal
+        open={customerPreview.open}
+        onClose={customerPreview.cancel}
+        onConfirm={customerPreview.confirm}
+        rows={customerPreview.rows}
+        loading={customerPreview.importing}
+        title="Customer import preview"
+      />
 
       <h3 className="wh-card__title" style={{ marginTop: 24, marginBottom: 12 }}>Customers</h3>
       <div className="wh-inv-import-export__grid">
@@ -244,8 +283,8 @@ export default function ImportExport() {
             </Button>
             {canCreate ? (
               <label className="wh-btn wh-btn--primary" style={{ cursor: "pointer" }}>
-                {customerImporting ? "Importing…" : "Choose CSV file"}
-                <input type="file" accept=".csv,text/csv" onChange={importCustomers} disabled={customerImporting} style={{ display: "none" }} />
+                {customerImporting || customerPreview.importing ? "Importing…" : "Choose CSV file"}
+                <input type="file" accept=".csv,text/csv" onChange={importCustomers} disabled={customerImporting || customerPreview.importing} style={{ display: "none" }} />
               </label>
             ) : (
               <p className="wh-muted">Import requires CRM create permission.</p>

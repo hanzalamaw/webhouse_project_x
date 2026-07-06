@@ -19,6 +19,7 @@ export function registerFinanceRoutes(app, verifyToken) {
   app.get(`${base}/customer-payments/:id`, ...auth, view, financeController.getCustomerPayment);
 
   app.get(`${base}/vendor-bills`, ...auth, view, financeController.listVendorBills);
+  app.get(`${base}/vendor-bills/:id`, ...auth, view, financeController.getVendorBill);
   app.post(`${base}/vendor-bills`, ...auth, create, financeController.createVendorBill);
   app.put(`${base}/vendor-bills/:id`, ...auth, edit, financeController.updateVendorBill);
   app.delete(`${base}/vendor-bills/:id`, ...auth, del, financeController.deleteVendorBill);
@@ -26,17 +27,22 @@ export function registerFinanceRoutes(app, verifyToken) {
   app.post(`${base}/vendor-bills/:billId/payments`, ...auth, create, financeController.addVendorPayment);
 
   app.get(`${base}/expenses/reference`, ...auth, view, financeController.expenseReference);
+  app.post(`${base}/expense-categories`, ...auth, create, financeController.createExpenseCategory);
+  app.post(`${base}/expense-categories/:categoryId/sub-categories`, ...auth, create, financeController.createExpenseSubCategory);
   app.get(`${base}/expenses`, ...auth, view, financeController.listExpenses);
+  app.get(`${base}/expenses/:id`, ...auth, view, financeController.getExpense);
   app.post(`${base}/expenses`, ...auth, create, financeController.createExpense);
   app.put(`${base}/expenses/:id`, ...auth, edit, financeController.updateExpense);
   app.delete(`${base}/expenses/:id`, ...auth, del, financeController.deleteExpense);
 
   app.get(`${base}/recurring-expenses`, ...auth, view, financeController.listRecurringExpenses);
+  app.get(`${base}/recurring-expenses/:id`, ...auth, view, financeController.getRecurringExpense);
   app.post(`${base}/recurring-expenses`, ...auth, create, financeController.createRecurringExpense);
   app.put(`${base}/recurring-expenses/:id`, ...auth, edit, financeController.updateRecurringExpense);
   app.delete(`${base}/recurring-expenses/:id`, ...auth, del, financeController.deleteRecurringExpense);
 
   app.get(`${base}/bank-accounts`, ...auth, view, financeController.listBankAccounts);
+  app.get(`${base}/bank-accounts/:id`, ...auth, view, financeController.getBankAccount);
   app.post(`${base}/bank-accounts`, ...auth, create, financeController.createBankAccount);
   app.put(`${base}/bank-accounts/:id`, ...auth, edit, financeController.updateBankAccount);
   app.delete(`${base}/bank-accounts/:id`, ...auth, del, financeController.deleteBankAccount);

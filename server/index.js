@@ -69,20 +69,29 @@ const startServer = async () => {
 
   const runPurge = async () => {
     try {
-      const results = await purgeSoftDeleted();
-      const total = Object.values(results).reduce((a, b) => a + b, 0);
-      if (total > 0) console.log(`Purged ${total} soft-deleted row(s)`);
+      const { total, tables, errors } = await purgeSoftDeleted();
+      if (total > 0) {
+        console.log(`Purged ${total} soft-deleted row(s) older than 7 days`, tables);
+      }
+      const errKeys = Object.keys(errors || {});
+      if (errKeys.length) {
+        console.warn("Purge completed with errors on some tables:", errors);
+      }
     } catch (err) {
-      console.error("Purge job failed:", err.message);
+      console.error("Purge job failed:", err?.message || err);
+      if (err?.stack) console.error(err.stack);
     }
   };
-
-  runPurge();
-  setInterval(runPurge, PURGE_INTERVAL_MS);
 
   const PORT = process.env.PORT || 5000;
   const server = app.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT}`);
+  });
+
+  // Run after server is listening so DB is fully ready
+  server.on("listening", () => {
+    setTimeout(runPurge, 5000);
+    setInterval(runPurge, PURGE_INTERVAL_MS);
   });
 
   const shutdown = async (signal) => {

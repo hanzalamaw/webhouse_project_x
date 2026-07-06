@@ -167,6 +167,10 @@ export const financeService = {
     return financeRepository.listVendorBills(tenantId);
   },
 
+  getVendorBill(tenantId, id) {
+    return financeRepository.getVendorBill(tenantId, Number(id));
+  },
+
   async createVendorBill(tenantId, body) {
     const id = await financeRepository.createVendorBill(tenantId, body);
     return financeRepository.getVendorBill(tenantId, id);
@@ -191,11 +195,23 @@ export const financeService = {
     const bill = await financeRepository.getVendorBill(tenantId, billId);
     if (!bill) return null;
     const amount = Number(body.amount_paid) || 0;
+    const payment_method = body.payment_method || "bank_transfer";
+    let bank_account_id = null;
+    if (payment_method === "bank_transfer") {
+      bank_account_id = Number(body.bank_account_id);
+      if (!bank_account_id) throw new Error("Select the bank account for this payment.");
+      const account = await financeRepository.getBankAccount(tenantId, bank_account_id);
+      if (!account) throw new Error("Bank account not found");
+    }
     const paymentId = await financeRepository.createVendorPayment(tenantId, {
       ...body,
       amount_paid: amount,
       vendor_bill_id: billId,
+      bank_account_id,
     });
+    if (bank_account_id) {
+      await financeRepository.adjustBankBalance(tenantId, bank_account_id, -amount);
+    }
     const summary = await financeRepository.updateVendorBillDue(tenantId, billId);
     await financeRepository.createTransaction(tenantId, {
       transaction_type: TRANSACTION_TYPES.VENDOR_PAYMENT,
@@ -210,6 +226,10 @@ export const financeService = {
   async listExpenses(tenantId) {
     await financeRepository.ensureDefaultSubCategories(tenantId);
     return financeRepository.listExpenses(tenantId);
+  },
+
+  getExpense(tenantId, id) {
+    return financeRepository.getExpense(tenantId, Number(id));
   },
 
   expenseReference(tenantId) {
@@ -248,6 +268,10 @@ export const financeService = {
     return financeRepository.listRecurringExpenses(tenantId);
   },
 
+  getRecurringExpense(tenantId, id) {
+    return financeRepository.getRecurringExpense(tenantId, Number(id));
+  },
+
   async createRecurringExpense(tenantId, body) {
     await financeRepository.ensureDefaultSubCategories(tenantId);
     const id = await financeRepository.createRecurringExpense(tenantId, body);
@@ -265,6 +289,10 @@ export const financeService = {
 
   listBankAccounts(tenantId) {
     return financeRepository.listBankAccounts(tenantId);
+  },
+
+  getBankAccount(tenantId, id) {
+    return financeRepository.getBankAccount(tenantId, Number(id));
   },
 
   async createBankAccount(tenantId, body) {
@@ -302,5 +330,13 @@ export const financeService = {
     if (!Number.isInteger(financeId) || financeId <= 0) return null;
     const row = await financeRepository.getTransaction(tenantId, financeId);
     return row ? mapFinanceTransaction(row) : null;
+  },
+
+  createExpenseCategory(tenantId, body) {
+    return financeRepository.createExpenseCategory(tenantId, body.category_name);
+  },
+
+  createExpenseSubCategory(tenantId, categoryId, body) {
+    return financeRepository.createExpenseSubCategory(tenantId, categoryId, body.sub_category_name);
   },
 };

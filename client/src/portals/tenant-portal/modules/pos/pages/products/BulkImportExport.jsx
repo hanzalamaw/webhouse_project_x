@@ -4,6 +4,8 @@ import { apiFetch } from "../../../../../../api/client";
 import { PageHeader } from "../../../../../../components/PageHeader";
 import { Card } from "../../../../../../components/Card";
 import { Button } from "../../../../../../components/Button";
+import { CsvImportPreviewModal } from "../../../../../../components/CsvImportPreviewModal";
+import { useCsvImportPreview } from "../../../../../../hooks/useCsvImportPreview";
 
 const CSV_HEADERS = [
   "product_name",
@@ -51,6 +53,7 @@ export default function BulkImportExport() {
   const [exporting, setExporting] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
+  const csvPreview = useCsvImportPreview();
 
   const handleExport = async () => {
     setExporting(true);
@@ -72,22 +75,32 @@ export default function BulkImportExport() {
     }
   };
 
-  const handleFile = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const runImport = async (rows) => {
     setImporting(true);
     setError("");
     setResult(null);
     try {
-      const text = await file.text();
-      const rows = parseCsv(text);
       const res = await apiFetch("/pos/inventory/products/import", { method: "POST", body: JSON.stringify({ rows }) }, authFetch);
       setResult(res);
     } catch (err) {
       setError(err.message);
     } finally {
       setImporting(false);
-      e.target.value = "";
+    }
+  };
+
+  const handleFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+    setError("");
+    setResult(null);
+    try {
+      const text = await file.text();
+      const rows = parseCsv(text);
+      csvPreview.stage(rows, runImport);
+    } catch (err) {
+      setError(err.message);
     }
   };
 
@@ -143,12 +156,21 @@ export default function BulkImportExport() {
           <div className="wh-card__actions">
             <Button variant="secondary" onClick={downloadTemplate}>Download template</Button>
             <label className="wh-btn wh-btn--primary" style={{ cursor: "pointer" }}>
-              {importing ? "Importing…" : "Choose CSV file"}
-              <input type="file" accept=".csv,text/csv" onChange={handleFile} disabled={importing} style={{ display: "none" }} />
+              {importing || csvPreview.importing ? "Importing…" : "Choose CSV file"}
+              <input type="file" accept=".csv,text/csv" onChange={handleFile} disabled={importing || csvPreview.importing} style={{ display: "none" }} />
             </label>
           </div>
         </Card>
       </div>
+
+      <CsvImportPreviewModal
+        open={csvPreview.open}
+        onClose={csvPreview.cancel}
+        onConfirm={csvPreview.confirm}
+        rows={csvPreview.rows}
+        loading={csvPreview.importing}
+        title="POS product import preview"
+      />
 
       {error && <p className="wh-field__error wh-inv-import-export__error">{error}</p>}
       {result && (

@@ -27,6 +27,7 @@ import { useAfterSalesOrders } from "../../hooks/useAfterSalesOrders";
 import { useOrderReference } from "../../hooks/useOrderReference";
 
 import { MODULE_BASE, EXCHANGE_STATUSES, EXCHANGE_STATUS_LABELS } from "../../constants";
+import { afterSalesIneligibilityMessage, isOrderEligibleForExchange } from "../../utils/afterSalesRules";
 
 
 
@@ -72,7 +73,14 @@ export default function CreateExchange() {
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
-
+  const selectedOrder = useMemo(
+    () => orders.find((o) => String(o.id) === String(form.order_id)) || null,
+    [orders, form.order_id]
+  );
+  const orderEligible = selectedOrder ? isOrderEligibleForExchange(selectedOrder) : false;
+  const ineligibleMessage = selectedOrder && !orderEligible
+    ? afterSalesIneligibilityMessage(selectedOrder, "exchange")
+    : null;
 
   const newProductOptions = useMemo(
 
@@ -161,6 +169,10 @@ export default function CreateExchange() {
     if (disabled) return;
 
     if (!form.order_id) { setError("Select an order for this exchange."); return; }
+    if (!orderEligible) {
+      setError(ineligibleMessage || "This order cannot be exchanged.");
+      return;
+    }
 
     if (!form.old_product_id || !form.new_product_id) {
 
@@ -267,6 +279,10 @@ export default function CreateExchange() {
               disabled={disabled}
 
               prefillLocked={Boolean(prefillOrderId)}
+
+              filterOrders={(rows) => rows.filter(isOrderEligibleForExchange)}
+
+              ineligibleMessage={ineligibleMessage}
 
             />
 
@@ -396,7 +412,7 @@ export default function CreateExchange() {
 
             <Button type="button" variant="secondary" onClick={() => navigate(managePath)}>Cancel</Button>
 
-            <Button type="submit" disabled={saving || disabled || !form.order_id}>
+            <Button type="submit" disabled={saving || disabled || !form.order_id || !orderEligible}>
 
               {saving ? "Saving…" : "Save exchange"}
 

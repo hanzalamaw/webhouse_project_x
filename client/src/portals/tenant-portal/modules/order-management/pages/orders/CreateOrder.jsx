@@ -8,6 +8,7 @@ import { apiFetch } from "../../../../../../api/client";
 import { PageHeader } from "../../../../../../components/PageHeader";
 import { FormField } from "../../../../../../components/FormField";
 import { Button } from "../../../../../../components/Button";
+import { Card } from "../../../../../../components/Card";
 import { OrderFieldSelect } from "../../../../../../components/OrderFieldSelect";
 import { Modal } from "../../../../../../components/Modal";
 import { FormBlock } from "../../../../../../components/FormBlock";
@@ -22,12 +23,14 @@ import {
 } from "../../../crm/constants";
 import { PAKISTAN_CITY_OPTIONS } from "../../../../../../utils/pakistanCities";
 import { formatPKR } from "../../../../../../utils/currency";
+import { OrderItemsCardHead } from "../../components/OrderItemsCardHead";
+import { OrderTotalsSummary } from "../../components/OrderTotalsSummary";
 import {
   buildLineItemFromProduct,
   calcLineTotal,
+  computeOrderTotals,
   mapOrderItemFromApi,
   productDeliveryTotal,
-  productTaxTotal,
   lineDiscountForQty,
 } from "../../utils/orderLinePricing";
 
@@ -73,46 +76,6 @@ function normalizeCustomerSnapshot(customerForm, customerPhone, form) {
     city: (form.city || "").trim(),
     delivery_address: (form.delivery_address || "").trim(),
   };
-}
-
-function OrderTotalsSummary({ subtotal, lineDiscountTotal, taxTotal, orderDiscount, delivery, payable }) {
-  const totalDiscount = lineDiscountTotal + orderDiscount;
-  return (
-    <div className="wh-tx-summary-grid wh-order-totals">
-      <div className="wh-tx-summary-item">
-        <span className="wh-tx-summary-item__label">Items subtotal</span>
-        <span className="wh-tx-summary-item__value">{formatPKR(subtotal)}</span>
-      </div>
-      {lineDiscountTotal > 0 && (
-        <div className="wh-tx-summary-item">
-          <span className="wh-tx-summary-item__label">Product discounts</span>
-          <span className="wh-tx-summary-item__value">− {formatPKR(lineDiscountTotal)}</span>
-        </div>
-      )}
-      <div className="wh-tx-summary-item">
-        <span className="wh-tx-summary-item__label">Order discount</span>
-        <span className="wh-tx-summary-item__value">− {formatPKR(orderDiscount)}</span>
-      </div>
-      <div className="wh-tx-summary-item">
-        <span className="wh-tx-summary-item__label">Product tax</span>
-        <span className="wh-tx-summary-item__value">+ {formatPKR(taxTotal)}</span>
-      </div>
-      <div className="wh-tx-summary-item">
-        <span className="wh-tx-summary-item__label">Delivery</span>
-        <span className="wh-tx-summary-item__value">+ {formatPKR(delivery)}</span>
-      </div>
-      {totalDiscount > 0 && (
-        <div className="wh-tx-summary-item">
-          <span className="wh-tx-summary-item__label">Total savings</span>
-          <span className="wh-tx-summary-item__value">− {formatPKR(totalDiscount)}</span>
-        </div>
-      )}
-      <div className="wh-tx-summary-item">
-        <span className="wh-tx-summary-item__label">Payable</span>
-        <span className="wh-tx-summary-item__value wh-tx-summary-item__value--accent">{formatPKR(payable)}</span>
-      </div>
-    </div>
-  );
 }
 
 function TrashIcon() {
@@ -417,23 +380,8 @@ export default function CreateOrder() {
     });
   };
 
-  const subtotal = items.reduce((sum, row) => {
-    const qty = Number(row.quantity) || 0;
-    const price = Number(row.unit_price) || 0;
-    return sum + qty * price;
-  }, 0);
-  const lineDiscountTotal = items.reduce((sum, row) => {
-    const qty = Number(row.quantity) || 0;
-    const price = Number(row.unit_price) || 0;
-    // Never let a line discount exceed that line's value.
-    return sum + Math.min(Number(row.discount) || 0, qty * price);
-  }, 0);
-  const lineNet = Math.max(0, subtotal - lineDiscountTotal);
-  const taxTotal = productTaxTotal(items);
-  const itemsGross = lineNet + taxTotal;
-  const orderDiscount = Number(form.discount_amount) || 0;
-  const deliveryCharges = Number(form.delivery_charges) || 0;
-  const payable = Math.max(0, itemsGross - orderDiscount + deliveryCharges);
+  const totals = computeOrderTotals(items, form.discount_amount, form.delivery_charges);
+  const unitCount = items.reduce((sum, row) => sum + (Number(row.quantity) || 0), 0);
 
   const validate = () => {
     if (!warehouseId && !isEdit) return "Select a warehouse for line items";
@@ -515,8 +463,8 @@ export default function CreateOrder() {
       const payload = {
         ...form,
         customer_id: resolvedCustomerId ? Number(resolvedCustomerId) : null,
-        discount_amount: orderDiscount,
-        delivery_charges: deliveryCharges,
+        discount_amount: totals.orderDiscount,
+        delivery_charges: totals.delivery,
         items: items.map((row) => ({
           product_id: row.product_id ? Number(row.product_id) : null,
           product_name: row.product_name,
@@ -700,16 +648,15 @@ export default function CreateOrder() {
               </div>
             )}
 
-            {(isEdit || items.length > 0) && (
-              <div className="wh-order-lines">
-                <div className="wh-order-lines__head">
-                  <h4 className="wh-order-lines__title">
-                    {isEdit ? `Line items (${items.length})` : `Selected products (${items.length})`}
-                  </h4>
-                </div>
-                {items.length === 0 ? (
-                  <p className="wh-muted">No products selected yet.</p>
-                ) : (
+          </FormBlock>
+
+          {(isEdit || items.length > 0) && (
+            <Card className="wh-card--table wh-order-items-card">
+              <OrderItemsCardHead itemCount={items.length} unitCount={unitCount} />
+              {items.length === 0 ? (
+                <p className="wh-muted wh-order-items-card__empty">No products selected yet.</p>
+              ) : (
+                <>
                   <ul className="wh-order-line-cards">
                     {items.map((row) => (
                       <li key={row._key} className="wh-order-line-card">
@@ -805,10 +752,43 @@ export default function CreateOrder() {
                       </li>
                     ))}
                   </ul>
-                )}
-              </div>
-            )}
-          </FormBlock>
+
+                  <div className="wh-order-summary-adjustments">
+                    <div className="wh-form-grid wh-order-totals-inputs">
+                      <FormField
+                        id="order-discount"
+                        label="Order discount"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={form.discount_amount}
+                        onChange={(e) => set("discount_amount", e.target.value)}
+                        disabled={disabled}
+                      />
+                      <FormField
+                        id="order-delivery"
+                        label="Delivery charges"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={form.delivery_charges}
+                        onChange={(e) => set("delivery_charges", e.target.value)}
+                        disabled={disabled}
+                      />
+                    </div>
+                    <OrderTotalsSummary
+                      subtotal={totals.subtotal}
+                      lineDiscountTotal={totals.lineDiscountTotal}
+                      taxTotal={totals.taxTotal}
+                      orderDiscount={totals.orderDiscount}
+                      delivery={totals.delivery}
+                      payable={totals.payable}
+                    />
+                  </div>
+                </>
+              )}
+            </Card>
+          )}
 
           <FormBlock title="Customer & delivery" description="Enter the customer's phone to match an existing record, or fill in the details to create a new customer.">
             <div className="wh-form-grid">
@@ -987,39 +967,6 @@ export default function CreateOrder() {
                 disabled={disabled}
               />
             </div>
-          </FormBlock>
-
-          <FormBlock title="Order total" description="Product delivery, tax, and discounts roll up automatically. Adjust order-level discount or delivery if needed.">
-            <div className="wh-form-grid wh-order-totals-inputs">
-              <FormField
-                id="order-discount"
-                label="Order discount"
-                type="number"
-                min="0"
-                step="0.01"
-                value={form.discount_amount}
-                onChange={(e) => set("discount_amount", e.target.value)}
-                disabled={disabled}
-              />
-              <FormField
-                id="order-delivery"
-                label="Delivery charges"
-                type="number"
-                min="0"
-                step="0.01"
-                value={form.delivery_charges}
-                onChange={(e) => set("delivery_charges", e.target.value)}
-                disabled={disabled}
-              />
-            </div>
-            <OrderTotalsSummary
-              subtotal={subtotal}
-              lineDiscountTotal={lineDiscountTotal}
-              taxTotal={taxTotal}
-              orderDiscount={orderDiscount}
-              delivery={deliveryCharges}
-              payable={payable}
-            />
           </FormBlock>
 
           <FormActions>

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../../../../../context/AuthContext";
 import { useModulePermission } from "../../../../../../hooks/useModulePermission";
@@ -11,6 +11,12 @@ import { FormPageLayout, FormPageAlerts, FormActions } from "../../../../../../c
 import { AfterSalesOrderSection } from "../../components/AfterSalesOrderSection";
 import { useAfterSalesOrders } from "../../hooks/useAfterSalesOrders";
 import { MODULE_BASE } from "../../constants";
+import {
+  afterSalesIneligibilityMessage,
+  isOrderEligibleForCancellation,
+  isOrderEligibleForRefund,
+  isOrderPaid,
+} from "../../utils/afterSalesRules";
 
 export default function CreateCancellation() {
   const { authFetch } = useAuth();
@@ -24,6 +30,19 @@ export default function CreateCancellation() {
   const disabled = readOnly || !canCreate;
   const managePath = `${MODULE_BASE}/cancellations/manage`;
 
+  const selectedOrder = useMemo(
+    () => orders.find((o) => String(o.id) === String(form.order_id)) || null,
+    [orders, form.order_id]
+  );
+  const orderEligible = selectedOrder ? isOrderEligibleForCancellation(selectedOrder) : false;
+  const ineligibleMessage = selectedOrder && !orderEligible
+    ? afterSalesIneligibilityMessage(selectedOrder, "cancellation")
+    : null;
+  const canRecordRefund = selectedOrder
+    && !isOrderEligibleForCancellation(selectedOrder)
+    && isOrderEligibleForRefund(selectedOrder)
+    && isOrderPaid(selectedOrder);
+
   useEffect(() => {
     if (prefillOrderId) {
       setForm((f) => ({ ...f, order_id: String(prefillOrderId) }));
@@ -34,6 +53,10 @@ export default function CreateCancellation() {
     e.preventDefault();
     if (disabled) return;
     if (!form.order_id) { setError("Select an order to cancel."); return; }
+    if (!orderEligible) {
+      setError(ineligibleMessage || "This order cannot be cancelled.");
+      return;
+    }
     setSaving(true);
     setError("");
     try {
@@ -70,14 +93,27 @@ export default function CreateCancellation() {
         <FormPageAlerts error={error || loadError} />
 
         <form className="wh-form-stack wh-aftersales-form" onSubmit={submit}>
-          <FormBlock title="Order" description="Choose the order you want to cancel. Already-cancelled orders are hidden.">
+          <FormBlock title="Order" description="Choose the order you want to cancel. Orders that are already cancelled or have another after-sales action are hidden.">
             <AfterSalesOrderSection
               orders={orders}
               value={form.order_id}
               onChange={(v) => setForm((f) => ({ ...f, order_id: v }))}
               disabled={disabled}
               prefillLocked={Boolean(prefillOrderId)}
-              filterOrders={(rows) => rows.filter((o) => o.order_status !== "cancelled")}
+              filterOrders={(rows) => rows.filter(isOrderEligibleForCancellation)}
+              ineligibleMessage={ineligibleMessage}
+              footer={
+                canRecordRefund ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="wh-btn--sm"
+                    onClick={() => navigate(`${MODULE_BASE}/refunds/create?orderId=${selectedOrder.id}`)}
+                  >
+                    Record refund
+                  </Button>
+                ) : null
+              }
             />
           </FormBlock>
 
@@ -89,14 +125,14 @@ export default function CreateCancellation() {
               rows={4}
               value={form.reason}
               onChange={(e) => setForm((f) => ({ ...f, reason: e.target.value }))}
-              disabled={disabled}
+              disabled={disabled || !orderEligible}
               placeholder="e.g. Customer requested cancellation before dispatch…"
             />
           </FormBlock>
 
           <FormActions>
             <Button type="button" variant="secondary" onClick={() => navigate(managePath)}>Cancel</Button>
-            <Button type="submit" variant="danger" disabled={saving || disabled || !form.order_id}>
+            <Button type="submit" variant="danger" disabled={saving || disabled || !form.order_id || !orderEligible}>
               {saving ? "Saving…" : "Cancel order"}
             </Button>
           </FormActions>

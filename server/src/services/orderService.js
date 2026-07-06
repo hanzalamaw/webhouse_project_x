@@ -1,4 +1,5 @@
 import { orderRepository } from "../repositories/orderRepository.js";
+import { financeRepository } from "../repositories/financeRepository.js";
 import { crmService } from "./crmService.js";
 import { crmRepository } from "../repositories/crmRepository.js";
 import { cascadeSoftDeleteOrder } from "../utils/orderSoftDelete.js";
@@ -61,6 +62,87 @@ async function assertOrderExists(tenantId, orderId) {
   const order = await orderRepository.getOrder(tenantId, orderId);
   if (!order) throw new Error("Order not found");
   return order;
+}
+
+function truthyFlag(value) {
+  return value === true || value === 1 || value === "1";
+}
+
+function orderAfterSalesFlags(order) {
+  return {
+    cancelled: String(order.order_status || "").toLowerCase() === "cancelled",
+    returned: String(order.order_status || "").toLowerCase() === "returned",
+    refunded: String(order.payment_status || "").toLowerCase() === "refunded",
+    hasCancellation: truthyFlag(order.has_cancellation),
+    hasReturn: truthyFlag(order.has_return),
+    hasExchange: truthyFlag(order.has_exchange),
+    hasRefund: truthyFlag(order.has_refund),
+  };
+}
+
+function assertCanCancel(order) {
+  const flags = orderAfterSalesFlags(order);
+  if (flags.cancelled || flags.hasCancellation) {
+    throw new Error("This order is already cancelled.");
+  }
+  if (flags.hasReturn || flags.returned) {
+    throw new Error("This order already has a return recorded.");
+  }
+  if (flags.hasExchange) {
+    throw new Error("This order already has an exchange recorded.");
+  }
+  if (flags.hasRefund || flags.refunded) {
+    throw new Error("This order already has a refund recorded.");
+  }
+}
+
+function assertCanReturn(order) {
+  const flags = orderAfterSalesFlags(order);
+  if (flags.cancelled || flags.hasCancellation) {
+    throw new Error("Cancelled orders cannot be returned.");
+  }
+  if (flags.hasReturn || flags.returned) {
+    throw new Error("This order already has a return recorded.");
+  }
+  if (flags.hasExchange) {
+    throw new Error("This order already has an exchange recorded.");
+  }
+  if (flags.hasRefund || flags.refunded) {
+    throw new Error("This order already has a refund recorded.");
+  }
+}
+
+function assertCanExchange(order) {
+  const flags = orderAfterSalesFlags(order);
+  if (flags.cancelled || flags.hasCancellation) {
+    throw new Error("Cancelled orders cannot be exchanged.");
+  }
+  if (flags.hasReturn || flags.returned) {
+    throw new Error("This order already has a return recorded.");
+  }
+  if (flags.hasExchange) {
+    throw new Error("This order already has an exchange recorded.");
+  }
+  if (flags.hasRefund || flags.refunded) {
+    throw new Error("This order already has a refund recorded.");
+  }
+}
+
+function assertCanRefund(order) {
+  const flags = orderAfterSalesFlags(order);
+  if (flags.hasRefund || flags.refunded) {
+    throw new Error("This order already has a refund recorded.");
+  }
+  if (flags.hasExchange) {
+    throw new Error("This order already has an exchange recorded.");
+  }
+  if (flags.hasReturn || flags.returned) {
+    throw new Error("This order already has a return recorded.");
+  }
+  const paid = ["paid", "partially_paid"].includes(String(order.payment_status || "").toLowerCase());
+  if (!paid) {
+    throw new Error("Only paid or partially paid orders can be refunded.");
+  }
 }
 
 async function assertOrderUser(tenantId, userId) {
@@ -499,6 +581,13 @@ export const orderService = {
     const amount = Number(body.amount) || 0;
     if (amount <= 0) throw new Error("Enter an amount to add.");
     const payment_method = body.payment_method || "cash";
+    let bank_account_id = null;
+    if (payment_method === "bank_transfer") {
+      bank_account_id = Number(body.bank_account_id);
+      if (!bank_account_id) throw new Error("Select the bank account that received this payment.");
+      const account = await financeRepository.getBankAccount(tenantId, bank_account_id);
+      if (!account) throw new Error("Bank account not found");
+    }
     const order = await orderRepository.getOrder(tenantId, body.order_id);
     const paid = await orderRepository.sumPaymentsForOrder(tenantId, body.order_id);
     const payable = Number(order?.payable_amount) || 0;
@@ -510,10 +599,14 @@ export const orderService = {
     const id = await orderRepository.createPayment(tenantId, {
       order_id: Number(body.order_id),
       payment_method,
+      bank_account_id,
       amount,
       payment_status,
       paid_at,
     });
+    if (bank_account_id) {
+      await financeRepository.adjustBankBalance(tenantId, bank_account_id, amount);
+    }
     await syncOrderPaymentStatus(tenantId, body.order_id);
     const rows = await orderRepository.listPayments(tenantId);
     return rows.find((r) => r.id === id);
@@ -525,6 +618,13 @@ export const orderService = {
     if (!existing) return null;
     const amount = Number(body.amount ?? existing.amount) || 0;
     const payment_method = body.payment_method ?? existing.payment_method ?? "cash";
+    let bank_account_id = null;
+    if (payment_method === "bank_transfer") {
+      bank_account_id = Number(body.bank_account_id ?? existing.bank_account_id);
+      if (!bank_account_id) throw new Error("Select the bank account that received this payment.");
+      const account = await financeRepository.getBankAccount(tenantId, bank_account_id);
+      if (!account) throw new Error("Bank account not found");
+    }
     const order = await orderRepository.getOrder(tenantId, existing.order_id);
     const otherPaid = await orderRepository.sumPaymentsForOrder(tenantId, existing.order_id);
     const existingAmount = Number(existing.amount) || 0;
@@ -535,13 +635,22 @@ export const orderService = {
     }
     const payment_status = body.payment_status || existing.payment_status || "paid";
     const paid_at = body.paid_at ?? existing.paid_at ?? new Date();
+    const oldBankId = existing.bank_account_id ? Number(existing.bank_account_id) : null;
+    const oldAmount = Number(existing.amount) || 0;
     const ok = await orderRepository.updatePayment(tenantId, id, {
       payment_method,
+      bank_account_id,
       amount,
       payment_status,
       paid_at,
     });
     if (!ok) return null;
+    if (oldBankId) {
+      await financeRepository.adjustBankBalance(tenantId, oldBankId, -oldAmount);
+    }
+    if (bank_account_id) {
+      await financeRepository.adjustBankBalance(tenantId, bank_account_id, amount);
+    }
     await syncOrderPaymentStatus(tenantId, existing.order_id);
     const updated = await orderRepository.listPayments(tenantId);
     return updated.find((r) => r.id === id) || null;
@@ -552,7 +661,16 @@ export const orderService = {
     const existing = rows.find((r) => r.id === id);
     if (!existing) return false;
     const ok = await orderRepository.deletePayment(tenantId, id);
-    if (ok) await syncOrderPaymentStatus(tenantId, existing.order_id);
+    if (ok) {
+      if (existing.bank_account_id) {
+        await financeRepository.adjustBankBalance(
+          tenantId,
+          Number(existing.bank_account_id),
+          -(Number(existing.amount) || 0)
+        );
+      }
+      await syncOrderPaymentStatus(tenantId, existing.order_id);
+    }
     return ok;
   },
 
@@ -562,7 +680,8 @@ export const orderService = {
   },
 
   async createCancellation(tenantId, userId, body) {
-    await assertOrderExists(tenantId, body.order_id);
+    const order = await assertOrderExists(tenantId, body.order_id);
+    assertCanCancel(order);
     const reason = body.reason ? String(body.reason).trim() : null;
     const id = await orderRepository.createCancellation(tenantId, userId, {
       order_id: Number(body.order_id),
@@ -578,7 +697,8 @@ export const orderService = {
   },
 
   async createReturn(tenantId, userId, body) {
-    await assertOrderExists(tenantId, body.order_id);
+    const order = await assertOrderExists(tenantId, body.order_id);
+    assertCanReturn(order);
     const return_status = body.return_status || "requested";
     assertOneOf(return_status, RETURN_STATUSES, "return status");
     const reason = body.reason ? String(body.reason).trim() : null;
@@ -609,7 +729,8 @@ export const orderService = {
   },
 
   async createExchange(tenantId, userId, body) {
-    await assertOrderExists(tenantId, body.order_id);
+    const order = await assertOrderExists(tenantId, body.order_id);
+    assertCanExchange(order);
     const exchange_status = body.exchange_status || "requested";
     assertOneOf(exchange_status, EXCHANGE_STATUSES, "exchange status");
     const old_product_id = toNumber(body.old_product_id, "old product", { min: 1 });
@@ -645,7 +766,8 @@ export const orderService = {
   },
 
   async createRefund(tenantId, userId, body) {
-    await assertOrderExists(tenantId, body.order_id);
+    const order = await assertOrderExists(tenantId, body.order_id);
+    assertCanRefund(order);
     const refund_status = body.refund_status || "pending";
     const refund_method = body.refund_method || "original_payment";
     assertOneOf(refund_status, REFUND_STATUSES, "refund status");

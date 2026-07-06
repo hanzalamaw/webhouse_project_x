@@ -515,10 +515,11 @@ export const orderRepository = {
   async createPayment(tenantId, data) {
     const amount = Number(data.amount) || 0;
     const [result] = await writeDb.query(
-      `INSERT INTO order_payments (payment_method, amount, payment_status, paid_at, order_id, tenant_id)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO order_payments (payment_method, bank_account_id, amount, payment_status, paid_at, order_id, tenant_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [
         data.payment_method || "cash",
+        data.bank_account_id || null,
         amount,
         data.payment_status,
         data.paid_at,
@@ -533,10 +534,11 @@ export const orderRepository = {
     const amount = Number(data.amount) || 0;
     const [result] = await writeDb.query(
       `UPDATE order_payments
-       SET payment_method = ?, amount = ?, payment_status = ?, paid_at = ?
+       SET payment_method = ?, bank_account_id = ?, amount = ?, payment_status = ?, paid_at = ?
        WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL`,
       [
         data.payment_method || "cash",
+        data.bank_account_id || null,
         amount,
         data.payment_status,
         data.paid_at,
@@ -570,7 +572,10 @@ export const orderRepository = {
   // Cancellations
   async listCancellations(tenantId) {
     const [rows] = await readDb.query(
-      `SELECT oc.*, o.order_no, u.name AS cancelled_by_name, c.customer_name
+      `SELECT oc.*, o.order_no, o.payment_status, o.payable_amount,
+              EXISTS (SELECT 1 FROM order_refunds orf
+                WHERE orf.order_id = o.id AND orf.deleted_at IS NULL) AS has_refund,
+              u.name AS cancelled_by_name, c.customer_name
        FROM order_cancellations oc
        INNER JOIN orders o ON o.id = oc.order_id AND o.deleted_at IS NULL
        LEFT JOIN users u ON u.id = oc.cancelled_by AND u.deleted_at IS NULL

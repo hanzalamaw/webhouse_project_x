@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../../../../../../context/AuthContext";
 import { useModulePermission } from "../../../../../../hooks/useModulePermission";
 import { apiFetch, fetchAllTableRows, TABLE_PAGE_SIZE } from "../../../../../../api/client";
@@ -11,11 +12,15 @@ import { FormField } from "../../../../../../components/FormField";
 import { Button } from "../../../../../../components/Button";
 import { Modal } from "../../../../../../components/Modal";
 import { ConfirmDeleteModal } from "../../../../../../components/ConfirmDeleteModal";
+import { PaymentAmountField } from "../../../../../../components/PaymentAmountField";
+import { PaymentAmountFeedback } from "../../../../../../components/PaymentAmountFeedback";
+import { PaymentViaSelect } from "../../../../../../components/PaymentViaSelect";
 import { StatusBadge } from "../../../../../../components/Badge";
 import { formatPKR } from "../../../../../../utils/currency";
 import { formatDate, formatDateTime } from "../../../../../../utils/dateTime";
 import { applyToolbarFilters, EMPTY_TOOLBAR } from "../../../../../../utils/tableFilters";
-import { ORDER_PAYMENT_CHANNELS, PAYMENT_METHOD_LABELS } from "../../constants";
+import { encodePaymentVia, parsePaymentVia } from "../../../../../../utils/paymentVia";
+import { PAYMENT_METHOD_LABELS } from "../../constants";
 
 function SummaryGrid({ items }) {
   return (
@@ -40,10 +45,28 @@ function paymentMethodLabel(method) {
   return PAYMENT_METHOD_LABELS[method] || method || "—";
 }
 
-const EMPTY_PAYMENT_FORM = { amount: "", payment_method: "cash" };
+const EMPTY_PAYMENT_FORM = { amount: "", payment_via: "cash" };
+
+function paymentPayload(form, amount) {
+  const { payment_method, bank_account_id } = parsePaymentVia(form.payment_via);
+  return {
+    amount,
+    payment_method,
+    payment_status: "paid",
+    bank_account_id,
+  };
+}
+
+function canSubmitAmount(amount, maxAllowed) {
+  const amt = Number(amount) || 0;
+  return amt > 0 && amt <= maxAllowed + 0.001;
+}
 
 export default function ManagePayments() {
   const { authFetch } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const pendingOrderIdRef = useRef(location.state?.openOrderId);
   const { canCreate, canEdit, canDelete } = useModulePermission("order-management");
   const [summary, setSummary] = useState(null);
   const [rows, setRows] = useState([]);
@@ -89,6 +112,8 @@ export default function ManagePayments() {
 
   const fixAmount = Number(fixForm.amount) || 0;
   const fixMaxAllowed = Math.max(0, Number((orderTotal - fixOtherPaid).toFixed(2)));
+  const fixNewPaid = fixOtherPaid + fixAmount;
+  const fixNewPending = Math.max(0, Number((orderTotal - fixNewPaid).toFixed(2)));
 
   useEffect(() => {
     setPage(1);
@@ -142,6 +167,16 @@ export default function ManagePayments() {
     await loadOrderPayments(row.order_id);
   };
 
+  useEffect(() => {
+    const orderId = pendingOrderIdRef.current;
+    if (!orderId || loading || !rows.length) return;
+    const row = rows.find((r) => Number(r.order_id) === Number(orderId));
+    if (!row) return;
+    pendingOrderIdRef.current = null;
+    navigate(location.pathname, { replace: true, state: {} });
+    openAddModal(row).catch(() => {});
+  }, [loading, rows, location.pathname, navigate]);
+
   const closeAddModal = () => {
     setAddModalOpen(false);
     setContextRow(null);
@@ -154,9 +189,10 @@ export default function ManagePayments() {
     setFixPayment(payment);
     setFixForm({
       amount: String(payment.amount ?? 0),
-      payment_method: ORDER_PAYMENT_CHANNELS.includes(payment.payment_method)
-        ? payment.payment_method
-        : "cash",
+      payment_via: encodePaymentVia({
+        payment_method: payment.payment_method,
+        bank_account_id: payment.bank_account_id,
+      }),
     });
     setFixError("");
   };
@@ -167,33 +203,8 @@ export default function ManagePayments() {
     setFixError("");
   };
 
-  const validateAdd = () => {
-    if (Number.isNaN(addAmount) || addAmount < 0) return "Amount cannot be negative.";
-    if (addAmount === 0) return "Enter an amount to add.";
-    if (!ORDER_PAYMENT_CHANNELS.includes(addForm.payment_method)) return "Select bank or cash.";
-    if (addAmount > maxAddAllowed + 0.001) {
-      return `Amount cannot exceed ${formatPKR(maxAddAllowed)} remaining for this order.`;
-    }
-    return "";
-  };
-
-  const validateFix = () => {
-    if (Number.isNaN(fixAmount) || fixAmount < 0) return "Amount cannot be negative.";
-    if (fixAmount === 0) return "Enter an amount.";
-    if (!ORDER_PAYMENT_CHANNELS.includes(fixForm.payment_method)) return "Select bank or cash.";
-    if (fixAmount > fixMaxAllowed + 0.001) {
-      return `Amount cannot exceed ${formatPKR(fixMaxAllowed)} for this order.`;
-    }
-    return "";
-  };
-
   const submitAdd = async () => {
-    const err = validateAdd();
-    if (err) {
-      setAddError(err);
-      return;
-    }
-    if (!canCreate) return;
+    if (!canSubmitAmount(addAmount, maxAddAllowed) || !canCreate) return;
     setAdding(true);
     setAddError("");
     try {
@@ -203,9 +214,7 @@ export default function ManagePayments() {
           method: "POST",
           body: JSON.stringify({
             order_id: contextRow.order_id,
-            amount: addAmount,
-            payment_method: addForm.payment_method,
-            payment_status: "paid",
+            ...paymentPayload(addForm, addAmount),
           }),
         },
         authFetch
@@ -221,12 +230,7 @@ export default function ManagePayments() {
   };
 
   const submitFix = async () => {
-    const err = validateFix();
-    if (err) {
-      setFixError(err);
-      return;
-    }
-    if (!canEdit) return;
+    if (!canSubmitAmount(fixAmount, fixMaxAllowed) || !canEdit) return;
     setFixing(true);
     setFixError("");
     try {
@@ -234,11 +238,7 @@ export default function ManagePayments() {
         `/orders/payments/${fixPayment.id}`,
         {
           method: "PUT",
-          body: JSON.stringify({
-            amount: fixAmount,
-            payment_method: fixForm.payment_method,
-            payment_status: "paid",
-          }),
+          body: JSON.stringify(paymentPayload(fixForm, fixAmount)),
         },
         authFetch
       );
@@ -343,7 +343,7 @@ export default function ManagePayments() {
           <>
             {addError && <p className="wh-field__error">{addError}</p>}
             <Button variant="secondary" onClick={closeAddModal}>Close</Button>
-            <Button onClick={submitAdd} disabled={adding || !canCreate}>
+            <Button onClick={submitAdd} disabled={adding || !canCreate || !canSubmitAmount(addAmount, maxAddAllowed)}>
               {adding ? "Saving…" : "Submit"}
             </Button>
           </>
@@ -365,36 +365,34 @@ export default function ManagePayments() {
         </div>
 
         <div className="wh-tx-inputs">
-          <div className="wh-form-grid">
-            <FormField
+          <div className="wh-form-grid wh-form-grid--2">
+            <PaymentAmountField
               id="om_tx_add_amount"
               label="Amount (Rs.)"
-              type="number"
-              step="0.01"
-              min="0"
               value={addForm.amount}
-              onChange={(e) => {
-                setAddError("");
-                setAddForm((f) => ({ ...f, amount: e.target.value }));
-              }}
+              onChange={(e) => setAddForm((f) => ({ ...f, amount: e.target.value }))}
+              amount={addAmount}
+              maxAllowed={maxAddAllowed}
+              totalAfter={newOrderPaid}
+              totalTarget={orderTotal}
+              showZeroHint
+              inlineFeedback={false}
             />
-            <FormField
+            <PaymentViaSelect
+              authFetch={authFetch}
               id="om_tx_add_method"
-              label="Payment via"
-              as="select"
-              value={addForm.payment_method}
-              onChange={(e) => {
-                setAddError("");
-                setAddForm((f) => ({ ...f, payment_method: e.target.value }));
-              }}
-            >
-              {ORDER_PAYMENT_CHANNELS.map((method) => (
-                <option key={method} value={method}>
-                  {paymentMethodLabel(method)}
-                </option>
-              ))}
-            </FormField>
+              value={addForm.payment_via}
+              onChange={(e) => setAddForm((f) => ({ ...f, payment_via: e.target.value }))}
+            />
           </div>
+          <PaymentAmountFeedback
+            amount={addAmount}
+            maxAllowed={maxAddAllowed}
+            totalAfter={newOrderPaid}
+            totalTarget={orderTotal}
+            showZeroHint
+            value={addForm.amount}
+          />
         </div>
 
         <div className="wh-tx-panel wh-tx-panel--summary">
@@ -465,7 +463,7 @@ export default function ManagePayments() {
           <>
             {fixError && <p className="wh-field__error">{fixError}</p>}
             <Button variant="secondary" onClick={closeFixModal}>Cancel</Button>
-            <Button onClick={submitFix} disabled={fixing || !canEdit}>
+            <Button onClick={submitFix} disabled={fixing || !canEdit || !canSubmitAmount(fixAmount, fixMaxAllowed)}>
               {fixing ? "Saving…" : "Save"}
             </Button>
           </>
@@ -477,35 +475,35 @@ export default function ManagePayments() {
             <> Recorded on {formatDateTime(fixPayment.paid_at)}.</>
           )}
         </p>
-        <div className="wh-form-grid">
-          <FormField
-            id="om_tx_fix_amount"
-            label="Amount (Rs.)"
-            type="number"
-            step="0.01"
-            min="0"
+        <div className="wh-tx-inputs">
+          <div className="wh-form-grid wh-form-grid--2">
+            <PaymentAmountField
+              id="om_tx_fix_amount"
+              label="Amount (Rs.)"
+              value={fixForm.amount}
+              onChange={(e) => setFixForm((f) => ({ ...f, amount: e.target.value }))}
+              amount={fixAmount}
+              maxAllowed={fixMaxAllowed}
+              totalAfter={fixNewPaid}
+              totalTarget={orderTotal}
+              showZeroHint
+              inlineFeedback={false}
+            />
+            <PaymentViaSelect
+              authFetch={authFetch}
+              id="om_tx_fix_method"
+              value={fixForm.payment_via}
+              onChange={(e) => setFixForm((f) => ({ ...f, payment_via: e.target.value }))}
+            />
+          </div>
+          <PaymentAmountFeedback
+            amount={fixAmount}
+            maxAllowed={fixMaxAllowed}
+            totalAfter={fixNewPaid}
+            totalTarget={orderTotal}
+            showZeroHint
             value={fixForm.amount}
-            onChange={(e) => {
-              setFixError("");
-              setFixForm((f) => ({ ...f, amount: e.target.value }));
-            }}
           />
-          <FormField
-            id="om_tx_fix_method"
-            label="Payment via"
-            as="select"
-            value={fixForm.payment_method}
-            onChange={(e) => {
-              setFixError("");
-              setFixForm((f) => ({ ...f, payment_method: e.target.value }));
-            }}
-          >
-            {ORDER_PAYMENT_CHANNELS.map((method) => (
-              <option key={method} value={method}>
-                {paymentMethodLabel(method)}
-              </option>
-            ))}
-          </FormField>
         </div>
       </Modal>
 
