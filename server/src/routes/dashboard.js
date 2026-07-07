@@ -1,12 +1,16 @@
-export function registerDashboardRoutes(app, db, verifyToken) {
-  app.get("/api/dashboard/stats", verifyToken, async (req, res) => {
-    if (req.userRole !== "wh_admin") return res.status(403).json({ message: "Forbidden" });
+import { readDb } from "../database/db.js";
+import { establishWhAdminContext } from "../middleware/tenantContext.js";
 
+const SKIP = { skipTenantGuard: true, skipWriteAudit: true };
+
+export function registerDashboardRoutes(app, _db, verifyToken) {
+  app.get("/api/dashboard/stats", verifyToken, establishWhAdminContext, async (req, res) => {
     const q = async (sql, params = []) => {
-      const [rows] = await db.execute(sql, params);
+      const [rows] = await readDb.query(sql, params, SKIP);
       return rows[0] || {};
     };
 
+    // Platform-wide aggregates for WH admin — intentionally cross-tenant.
     const totals = await q(
       `SELECT
          COUNT(*) AS total_clients,

@@ -13,13 +13,14 @@ export const tenantPermissionRepository = {
     return rows[0] || null;
   },
 
-  async findPermissionsByRole(roleId) {
+  async findPermissionsByRole(tenantId, roleId) {
     const [rows] = await readDb.query(
       `SELECT p.module_id, m.module_name, p.action
        FROM permissions p
+       INNER JOIN roles r ON r.id = p.role_id AND r.tenant_id = ? AND r.deleted_at IS NULL
        INNER JOIN modules m ON m.id = p.module_id AND m.deleted_at IS NULL
        WHERE p.role_id = ? AND p.deleted_at IS NULL`,
-      [roleId]
+      [tenantId, roleId]
     );
     return rows;
   },

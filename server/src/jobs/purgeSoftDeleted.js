@@ -1,4 +1,4 @@
-import { readDb, writeDb } from "../database/db.js";
+import { readDb, writeDb, withoutTenantGuard } from "../database/db.js";
 import { PURGE_AFTER_DAYS } from "../utils/softDeletePolicy.js";
 
 /**
@@ -110,36 +110,40 @@ export async function purgeSoftDeleted() {
   const discovered = await discoverSoftDeleteTables();
   const tables = orderTablesForPurge(discovered);
   const results = {};
-  const errors = {};
-  const maxPasses = 25;
-  const batchSize = 2000;
 
-  for (let pass = 1; pass <= maxPasses; pass += 1) {
-    let passTotal = 0;
+  return withoutTenantGuard(async () => {
+    const errors = {};
+    const maxPasses = 25;
+    const batchSize = 2000;
 
-    for (const table of tables) {
-      try {
-        const [result] = await writeDb.query(
-          `DELETE FROM \`${table}\`
-           WHERE deleted_at IS NOT NULL
-             AND deleted_at < DATE_SUB(NOW(), INTERVAL ? DAY)
-           LIMIT ?`,
-          [PURGE_AFTER_DAYS, batchSize]
-        );
-        const n = result.affectedRows ?? 0;
-        if (n > 0) {
-          results[table] = (results[table] || 0) + n;
-          passTotal += n;
+    for (let pass = 1; pass <= maxPasses; pass += 1) {
+      let passTotal = 0;
+
+      for (const table of tables) {
+        try {
+          const [result] = await writeDb.query(
+            `DELETE FROM \`${table}\`
+             WHERE deleted_at IS NOT NULL
+               AND deleted_at < DATE_SUB(NOW(), INTERVAL ? DAY)
+             LIMIT ?`,
+            [PURGE_AFTER_DAYS, batchSize],
+            { skipTenantGuard: true, skipWriteAudit: true }
+          );
+          const n = result.affectedRows ?? 0;
+          if (n > 0) {
+            results[table] = (results[table] || 0) + n;
+            passTotal += n;
+          }
+        } catch (err) {
+          const msg = err?.message || String(err);
+          if (!errors[table]) errors[table] = msg;
         }
-      } catch (err) {
-        const msg = err?.message || String(err);
-        if (!errors[table]) errors[table] = msg;
       }
+
+      if (passTotal === 0) break;
     }
 
-    if (passTotal === 0) break;
-  }
-
-  const total = Object.values(results).reduce((a, b) => a + b, 0);
-  return { total, tables: results, errors, purgeAfterDays: PURGE_AFTER_DAYS };
+    const total = Object.values(results).reduce((a, b) => a + b, 0);
+    return { total, tables: results, errors, purgeAfterDays: PURGE_AFTER_DAYS };
+  });
 }

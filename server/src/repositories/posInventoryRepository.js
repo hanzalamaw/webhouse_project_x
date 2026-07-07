@@ -1,4 +1,5 @@
 import { readDb, writeDb } from "../database/db.js";
+import { assertAllowedMovementType, joinOnTenant } from "../utils/tenantScope.js";
 
 const PRODUCT_SELECT = `
   p.id, p.product_name, p.unit, p.delivery_charges, p.discount, p.tax,
@@ -18,10 +19,10 @@ const PRODUCT_SELECT = `
 
 const PRODUCT_FROM = `
   FROM pos_products p
-  LEFT JOIN pos_categories c ON c.id = p.category_id AND c.deleted_at IS NULL
-  INNER JOIN pos_outlets o ON o.id = p.outlet_id AND o.deleted_at IS NULL
-  LEFT JOIN pos_product_variants v ON v.product_id = p.id AND v.deleted_at IS NULL
-  LEFT JOIN pos_stock_levels sl ON sl.variant_id = v.id AND sl.outlet_id = p.outlet_id AND sl.deleted_at IS NULL
+  LEFT JOIN pos_categories c ON c.id = p.category_id AND ${joinOnTenant("p", "c")}
+  INNER JOIN pos_outlets o ON o.id = p.outlet_id AND ${joinOnTenant("p", "o")}
+  LEFT JOIN pos_product_variants v ON v.product_id = p.id AND ${joinOnTenant("p", "v")}
+  LEFT JOIN pos_stock_levels sl ON sl.variant_id = v.id AND sl.outlet_id = p.outlet_id AND ${joinOnTenant("v", "sl")}
 `;
 
 const VARIANT_SELECT = `
@@ -54,7 +55,7 @@ export const posInventoryRepository = {
     const [categories] = await readDb.query(
       `SELECT c.id, c.category_name, c.status, c.outlet_id, o.outlet_name
        FROM pos_categories c
-       INNER JOIN pos_outlets o ON o.id = c.outlet_id AND o.deleted_at IS NULL
+       INNER JOIN pos_outlets o ON o.id = c.outlet_id AND ${joinOnTenant("c", "o")}
        WHERE ${tw("c", tenantId)}${outletFilter}
        ORDER BY o.outlet_name, c.category_name`,
       params
@@ -72,9 +73,9 @@ export const posInventoryRepository = {
               p.category_id, c.category_name, p.status,
               COUNT(v.id) AS variant_count
        FROM pos_products p
-       INNER JOIN pos_outlets o ON o.id = p.outlet_id AND o.deleted_at IS NULL
-       LEFT JOIN pos_categories c ON c.id = p.category_id AND c.deleted_at IS NULL
-       LEFT JOIN pos_product_variants v ON v.product_id = p.id AND v.deleted_at IS NULL
+       INNER JOIN pos_outlets o ON o.id = p.outlet_id AND ${joinOnTenant("p", "o")}
+       LEFT JOIN pos_categories c ON c.id = p.category_id AND ${joinOnTenant("p", "c")}
+       LEFT JOIN pos_product_variants v ON v.product_id = p.id AND ${joinOnTenant("p", "v")}
        WHERE ${tw("p", tenantId)}${productFilter}
        GROUP BY p.id
        ORDER BY p.product_name ASC`,
@@ -87,9 +88,9 @@ export const posInventoryRepository = {
               v.status, v.outlet_id, o.outlet_name,
               p.product_name, p.category_id, c.category_name
        FROM pos_product_variants v
-       JOIN pos_products p ON p.id = v.product_id AND p.deleted_at IS NULL
-       INNER JOIN pos_outlets o ON o.id = v.outlet_id AND o.deleted_at IS NULL
-       LEFT JOIN pos_categories c ON c.id = p.category_id AND c.deleted_at IS NULL
+       JOIN pos_products p ON p.id = v.product_id AND ${joinOnTenant("v", "p")}
+       INNER JOIN pos_outlets o ON o.id = v.outlet_id AND ${joinOnTenant("v", "o")}
+       LEFT JOIN pos_categories c ON c.id = p.category_id AND ${joinOnTenant("p", "c")}
        WHERE ${tw("v", tenantId)}${variantFilter}
        ORDER BY p.product_name ASC, v.variant_name ASC`,
       variantParams
@@ -110,8 +111,8 @@ export const posInventoryRepository = {
       `SELECT c.id, c.category_name, c.status, c.outlet_id, c.created_at, c.tenant_id,
               o.outlet_name, COUNT(p.id) AS product_count
        FROM pos_categories c
-       INNER JOIN pos_outlets o ON o.id = c.outlet_id AND o.deleted_at IS NULL
-       LEFT JOIN pos_products p ON p.category_id = c.id AND p.deleted_at IS NULL
+       INNER JOIN pos_outlets o ON o.id = c.outlet_id AND ${joinOnTenant("c", "o")}
+       LEFT JOIN pos_products p ON p.category_id = c.id AND ${joinOnTenant("c", "p")}
        WHERE ${tw("c", tenantId)}${outletFilter}
        GROUP BY c.id
        ORDER BY o.outlet_name, c.category_name ASC
@@ -130,7 +131,7 @@ export const posInventoryRepository = {
   async getCategoryById(tenantId, id) {
     const [rows] = await readDb.query(
       `SELECT c.*, o.outlet_name FROM pos_categories c
-       INNER JOIN pos_outlets o ON o.id = c.outlet_id AND o.deleted_at IS NULL
+       INNER JOIN pos_outlets o ON o.id = c.outlet_id AND ${joinOnTenant("c", "o")}
        WHERE c.id = ? AND ${tw("c", tenantId)} LIMIT 1`,
       [id, tenantId]
     );
@@ -158,7 +159,7 @@ export const posInventoryRepository = {
               COUNT(v.id) AS variant_count,
               GROUP_CONCAT(v.sku ORDER BY v.sku SEPARATOR ', ') AS skus
        FROM pos_products p
-       LEFT JOIN pos_product_variants v ON v.product_id = p.id AND v.deleted_at IS NULL
+       LEFT JOIN pos_product_variants v ON v.product_id = p.id AND ${joinOnTenant("p", "v")}
        WHERE p.tenant_id = ? AND p.category_id = ? AND p.deleted_at IS NULL
        GROUP BY p.id
        ORDER BY p.product_name ASC`,
@@ -300,9 +301,9 @@ export const posInventoryRepository = {
               c.category_name, o.outlet_name,
               COUNT(v.id) AS variant_count
        FROM pos_products p
-       LEFT JOIN pos_categories c ON c.id = p.category_id AND c.deleted_at IS NULL
-       LEFT JOIN pos_outlets o ON o.id = p.outlet_id AND o.deleted_at IS NULL
-       LEFT JOIN pos_product_variants v ON v.product_id = p.id AND v.deleted_at IS NULL
+       LEFT JOIN pos_categories c ON c.id = p.category_id AND ${joinOnTenant("p", "c")}
+       LEFT JOIN pos_outlets o ON o.id = p.outlet_id AND ${joinOnTenant("p", "o")}
+       LEFT JOIN pos_product_variants v ON v.product_id = p.id AND ${joinOnTenant("p", "v")}
        WHERE ${tw("p", tenantId)}
        GROUP BY p.id
        ORDER BY p.product_name ASC`,
@@ -318,16 +319,16 @@ export const posInventoryRepository = {
               COALESCE(sl.available_qty, 0) AS total_available,
               COALESCE(sl.total_qty, 0) AS total_qty
        FROM pos_product_variants v
-       JOIN pos_products p ON p.id = v.product_id AND p.deleted_at IS NULL
-       LEFT JOIN pos_categories c ON c.id = p.category_id AND c.deleted_at IS NULL
-       INNER JOIN pos_outlets o ON o.id = v.outlet_id AND o.deleted_at IS NULL
-       LEFT JOIN pos_stock_levels sl ON sl.variant_id = v.id AND sl.outlet_id = v.outlet_id AND sl.deleted_at IS NULL
+       JOIN pos_products p ON p.id = v.product_id AND ${joinOnTenant("v", "p")}
+       LEFT JOIN pos_categories c ON c.id = p.category_id AND ${joinOnTenant("p", "c")}
+       INNER JOIN pos_outlets o ON o.id = v.outlet_id AND ${joinOnTenant("v", "o")}
+       LEFT JOIN pos_stock_levels sl ON sl.variant_id = v.id AND sl.outlet_id = v.outlet_id AND ${joinOnTenant("v", "sl")}
        WHERE v.product_id = ? AND ${tw("v", tenantId)}
        ORDER BY v.variant_name ASC`,
       [productId, tenantId]
     );
     for (const row of rows) {
-      row.attributes = await this.getVariantAttributes(row.id);
+      row.attributes = await this.getVariantAttributes(tenantId, row.id);
     }
     return rows;
   },
@@ -336,15 +337,15 @@ export const posInventoryRepository = {
     const [rows] = await readDb.query(
       `SELECT ${VARIANT_SELECT}
        FROM pos_product_variants v
-       JOIN pos_products p ON p.id = v.product_id AND p.deleted_at IS NULL
-       LEFT JOIN pos_categories c ON c.id = p.category_id AND c.deleted_at IS NULL
-       INNER JOIN pos_outlets o ON o.id = v.outlet_id AND o.deleted_at IS NULL
+       JOIN pos_products p ON p.id = v.product_id AND ${joinOnTenant("v", "p")}
+       LEFT JOIN pos_categories c ON c.id = p.category_id AND ${joinOnTenant("p", "c")}
+       INNER JOIN pos_outlets o ON o.id = v.outlet_id AND ${joinOnTenant("v", "o")}
        WHERE v.id = ? AND ${tw("v", tenantId)}
        LIMIT 1`,
       [id, tenantId]
     );
     if (!rows[0]) return null;
-    rows[0].attributes = await this.getVariantAttributes(id);
+    rows[0].attributes = await this.getVariantAttributes(tenantId, id);
     return rows[0];
   },
 
@@ -414,14 +415,14 @@ export const posInventoryRepository = {
     return result.affectedRows > 0;
   },
 
-  async getVariantAttributes(variantId) {
+  async getVariantAttributes(tenantId, variantId) {
     const [rows] = await readDb.query(
       `SELECT a.attribute_name, av.value
        FROM pos_variant_attribute_values av
-       JOIN pos_variant_attributes a ON a.id = av.attribute_id
-       WHERE av.variant_id = ?
-       ORDER BY a.attribute_name ASC`,
-      [variantId]
+       JOIN pos_variant_attributes a ON a.id = av.attribute_id AND ${tw("a", tenantId)}
+       INNER JOIN pos_product_variants v ON v.id = av.variant_id AND ${tw("v", tenantId)}
+       WHERE av.variant_id = ?`,
+      [tenantId, tenantId, variantId]
     );
     return rows;
   },
@@ -445,8 +446,10 @@ export const posInventoryRepository = {
 
   async setVariantAttributes(tenantId, variantId, attributes) {
     await writeDb.query(
-      `DELETE av FROM pos_variant_attribute_values av WHERE av.variant_id = ?`,
-      [variantId]
+      `DELETE av FROM pos_variant_attribute_values av
+       INNER JOIN pos_product_variants v ON v.id = av.variant_id AND ${tw("v", tenantId)}
+       WHERE av.variant_id = ?`,
+      [tenantId, variantId]
     );
     if (!Array.isArray(attributes) || !attributes.length) return;
     for (const attr of attributes) {
@@ -469,10 +472,10 @@ export const posInventoryRepository = {
               p.category_id, c.category_name,
               COALESCE(sl.available_qty, 0) AS total_available
        FROM pos_product_variants v
-       JOIN pos_products p ON p.id = v.product_id AND p.deleted_at IS NULL
-       INNER JOIN pos_outlets o ON o.id = v.outlet_id AND o.deleted_at IS NULL
-       LEFT JOIN pos_categories c ON c.id = p.category_id AND c.deleted_at IS NULL
-       LEFT JOIN pos_stock_levels sl ON sl.variant_id = v.id AND sl.outlet_id = v.outlet_id AND sl.deleted_at IS NULL
+       JOIN pos_products p ON p.id = v.product_id AND ${joinOnTenant("v", "p")}
+       INNER JOIN pos_outlets o ON o.id = v.outlet_id AND ${joinOnTenant("v", "o")}
+       LEFT JOIN pos_categories c ON c.id = p.category_id AND ${joinOnTenant("p", "c")}
+       LEFT JOIN pos_stock_levels sl ON sl.variant_id = v.id AND sl.outlet_id = v.outlet_id AND ${joinOnTenant("v", "sl")}
        WHERE ${tw("v", tenantId)} AND LOWER(TRIM(v.status)) = 'active'
        ORDER BY p.product_name ASC, v.variant_name ASC`,
       [tenantId]
@@ -486,7 +489,7 @@ export const posInventoryRepository = {
               sl.updated_at, sl.variant_id, sl.outlet_id, sl.tenant_id,
               o.outlet_name, o.city, o.status AS outlet_status
        FROM pos_stock_levels sl
-       JOIN pos_outlets o ON o.id = sl.outlet_id AND o.deleted_at IS NULL
+       JOIN pos_outlets o ON o.id = sl.outlet_id AND ${joinOnTenant("sl", "o")}
        WHERE sl.variant_id = ? AND ${tw("sl", tenantId)}
        ORDER BY o.outlet_name ASC`,
       [variantId, tenantId]
@@ -513,8 +516,8 @@ export const posInventoryRepository = {
       const damaged = Math.max(0, existing.damaged_qty + deltaDamaged);
       const total = available + existing.reserved_qty + damaged;
       await writeDb.query(
-        `UPDATE pos_stock_levels SET available_qty = ?, damaged_qty = ?, total_qty = ? WHERE id = ?`,
-        [available, damaged, total, existing.id]
+        `UPDATE pos_stock_levels SET available_qty = ?, damaged_qty = ?, total_qty = ? WHERE id = ? AND ${tw("pos_stock_levels", tenantId)}`,
+        [available, damaged, total, existing.id, tenantId]
       );
       return existing.id;
     }
@@ -538,8 +541,8 @@ export const posInventoryRepository = {
     const existing = await this.getStockLevel(tenantId, variantId, outletId);
     if (existing) {
       await writeDb.query(
-        `UPDATE pos_stock_levels SET available_qty = ?, reserved_qty = ?, damaged_qty = ?, total_qty = ? WHERE id = ?`,
-        [available, reserved, damaged, total, existing.id]
+        `UPDATE pos_stock_levels SET available_qty = ?, reserved_qty = ?, damaged_qty = ?, total_qty = ? WHERE id = ? AND ${tw("pos_stock_levels", tenantId)}`,
+        [available, reserved, damaged, total, existing.id, tenantId]
       );
       return existing.id;
     }
@@ -572,6 +575,7 @@ export const posInventoryRepository = {
   },
 
   async listMovements(tenantId, { limit, offset, movement_type, outletId = null }) {
+    assertAllowedMovementType(movement_type);
     const params = [tenantId];
     let filters = "";
     if (movement_type) {
@@ -588,10 +592,10 @@ export const posInventoryRepository = {
               m.variant_id, m.outlet_id, m.created_by, m.tenant_id,
               p.product_name, v.sku, v.variant_name, o.outlet_name, u.name AS created_by_name
        FROM pos_stock_movements m
-       JOIN pos_product_variants v ON v.id = m.variant_id AND v.deleted_at IS NULL
-       JOIN pos_products p ON p.id = v.product_id AND p.deleted_at IS NULL
-       JOIN pos_outlets o ON o.id = m.outlet_id AND o.deleted_at IS NULL
-       LEFT JOIN users u ON u.id = m.created_by
+       JOIN pos_product_variants v ON v.id = m.variant_id AND ${joinOnTenant("m", "v")}
+       JOIN pos_products p ON p.id = v.product_id AND ${joinOnTenant("v", "p")}
+       JOIN pos_outlets o ON o.id = m.outlet_id AND ${joinOnTenant("m", "o")}
+       LEFT JOIN users u ON u.id = m.created_by AND ${joinOnTenant("m", "u")}
        WHERE m.tenant_id = ? AND m.deleted_at IS NULL${filters}
        ORDER BY m.created_at DESC
        LIMIT ? OFFSET ?`,
@@ -635,10 +639,10 @@ export const posInventoryRepository = {
               p.product_name, v.sku, v.variant_name,
               fo.outlet_name AS from_outlet_name, to_o.outlet_name AS to_outlet_name
        FROM pos_stock_transfers t
-       JOIN pos_product_variants v ON v.id = t.variant_id AND v.deleted_at IS NULL
-       JOIN pos_products p ON p.id = v.product_id AND p.deleted_at IS NULL
-       JOIN pos_outlets fo ON fo.id = t.from_outlet_id AND fo.deleted_at IS NULL
-       JOIN pos_outlets to_o ON to_o.id = t.to_outlet_id AND to_o.deleted_at IS NULL
+       JOIN pos_product_variants v ON v.id = t.variant_id AND ${joinOnTenant("t", "v")}
+       JOIN pos_products p ON p.id = v.product_id AND ${joinOnTenant("v", "p")}
+       JOIN pos_outlets fo ON fo.id = t.from_outlet_id AND ${joinOnTenant("t", "fo")}
+       JOIN pos_outlets to_o ON to_o.id = t.to_outlet_id AND ${joinOnTenant("t", "to_o")}
        WHERE ${tw("t", tenantId)}${filter}
        ORDER BY t.created_at DESC
        LIMIT ? OFFSET ?`,
@@ -652,10 +656,10 @@ export const posInventoryRepository = {
       `SELECT t.*, p.product_name, v.sku, v.variant_name,
               fo.outlet_name AS from_outlet_name, to_o.outlet_name AS to_outlet_name
        FROM pos_stock_transfers t
-       JOIN pos_product_variants v ON v.id = t.variant_id AND v.deleted_at IS NULL
-       JOIN pos_products p ON p.id = v.product_id AND p.deleted_at IS NULL
-       JOIN pos_outlets fo ON fo.id = t.from_outlet_id AND fo.deleted_at IS NULL
-       JOIN pos_outlets to_o ON to_o.id = t.to_outlet_id AND to_o.deleted_at IS NULL
+       JOIN pos_product_variants v ON v.id = t.variant_id AND ${joinOnTenant("t", "v")}
+       JOIN pos_products p ON p.id = v.product_id AND ${joinOnTenant("v", "p")}
+       JOIN pos_outlets fo ON fo.id = t.from_outlet_id AND ${joinOnTenant("t", "fo")}
+       JOIN pos_outlets to_o ON to_o.id = t.to_outlet_id AND ${joinOnTenant("t", "to_o")}
        WHERE t.id = ? AND ${tw("t", tenantId)}
        LIMIT 1`,
       [id, tenantId]
@@ -700,9 +704,9 @@ export const posInventoryRepository = {
               COALESCE(sl.available_qty, 0) AS available_qty,
               v.outlet_id
        FROM pos_product_variants v
-       JOIN pos_products p ON p.id = v.product_id AND p.deleted_at IS NULL
-       LEFT JOIN pos_categories c ON c.id = p.category_id AND c.deleted_at IS NULL
-       LEFT JOIN pos_stock_levels sl ON sl.variant_id = v.id AND sl.outlet_id = v.outlet_id AND sl.deleted_at IS NULL
+       JOIN pos_products p ON p.id = v.product_id AND ${joinOnTenant("v", "p")}
+       LEFT JOIN pos_categories c ON c.id = p.category_id AND ${joinOnTenant("p", "c")}
+       LEFT JOIN pos_stock_levels sl ON sl.variant_id = v.id AND sl.outlet_id = v.outlet_id AND ${joinOnTenant("v", "sl")}
        WHERE v.tenant_id = ? AND v.deleted_at IS NULL
          AND LOWER(TRIM(v.status)) = 'active'
          AND LOWER(TRIM(p.status)) = 'active'

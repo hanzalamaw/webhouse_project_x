@@ -1,10 +1,13 @@
 import { requireTenant } from "../middleware/tenantAuth.js";
+import { establishTenantContext } from "../middleware/tenantContext.js";
+import { impersonationAudit } from "../middleware/impersonationAudit.js";
+import { stripTenantIdFromRequest } from "../middleware/stripTenantInput.js";
 import { shopifyRouter, createShopifyInstallHandler } from "./shopify.js";
 import { darazRouter, createDarazInstallHandler } from "./daraz.js";
 import { ecommerceController } from "../controllers/ecommerceController.js";
 
 export function registerEcommerceRoutes(app, verifyToken) {
-  const auth = [verifyToken, requireTenant];
+  const auth = [verifyToken, establishTenantContext, requireTenant, stripTenantIdFromRequest, impersonationAudit];
 
   app.get("/api/ecommerce/dashboard", auth, ecommerceController.dashboard);
 

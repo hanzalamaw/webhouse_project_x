@@ -1,6 +1,8 @@
 import { supportTicketRepository } from "../repositories/supportTicketRepository.js";
+import { tenantRepository } from "../repositories/tenantRepository.js";
 import { logWhAudit } from "../utils/whAudit.js";
 import { paginatedResponse, parsePagination } from "../utils/pagination.js";
+import { tryParseEntityId } from "../utils/ids.js";
 
 export const supportTicketService = {
   async list(query) {
@@ -21,12 +23,15 @@ export const supportTicketService = {
   async create(payload, audit) {
     if (!payload.subject?.trim()) throw new Error("Subject is required");
     if (!payload.description?.trim()) throw new Error("Description is required");
-    if (!payload.tenant_id) throw new Error("Tenant is required");
+    const tenantId = tryParseEntityId(payload.tenant_id);
+    if (!tenantId) throw new Error("Valid tenant is required");
+    const tenant = await tenantRepository.findById(tenantId);
+    if (!tenant) throw new Error("Tenant not found");
     const id = await supportTicketRepository.create({
       subject: payload.subject.trim(),
       description: payload.description.trim(),
       status: payload.status || "open",
-      tenantId: Number(payload.tenant_id),
+      tenantId,
     });
     const created = await supportTicketRepository.findById(id);
     await logWhAudit({

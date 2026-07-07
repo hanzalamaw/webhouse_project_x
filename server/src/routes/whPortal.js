@@ -7,6 +7,7 @@ import { transactionController } from "../controllers/transactionController.js";
 import { supportTicketController } from "../controllers/supportTicketController.js";
 import { createImpersonationService } from "../services/impersonationService.js";
 import { createImpersonationController } from "../controllers/impersonationController.js";
+import { establishWhAdminContext } from "../middleware/tenantContext.js";
 
 export function requireWhAdmin(req, res, next) {
   if (req.userRole !== "wh_admin") {
@@ -16,7 +17,7 @@ export function requireWhAdmin(req, res, next) {
 }
 
 export function registerWhPortalRoutes(app, verifyToken, jwtConfig = {}) {
-  const auth = [verifyToken, requireWhAdmin];
+  const auth = [verifyToken, requireWhAdmin, establishWhAdminContext];
   const impersonationService = createImpersonationService({
     jwtSecret: jwtConfig.jwtSecret,
     jwtExpiresIn: jwtConfig.jwtExpiresIn,

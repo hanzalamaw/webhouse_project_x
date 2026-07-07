@@ -18,7 +18,7 @@ export function createTenantPortalMiddleware({ assertTenantSessionActive }) {
   const requireSession = async (req, res, next) => {
     if (req.userRole !== "tenant") return next();
     if (req.impersonatedBy) return next();
-    const active = await assertTenantSessionActive(req.sessionId);
+    const active = await assertTenantSessionActive(req.sessionId, req.tenantId);
     if (!active) return res.status(401).json({ message: "Session terminated" });
     next();
   };

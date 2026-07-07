@@ -1,5 +1,6 @@
 import { readDb, writeDb, getPool } from "../database/db.js";
 import { DELAYED_ORDER_DAYS } from "../utils/orderConstants.js";
+import { joinOnTenant } from "../utils/tenantScope.js";
 
 function tw(alias, tenantId) {
   return `${alias}.tenant_id = ? AND ${alias}.deleted_at IS NULL`;
@@ -10,26 +11,26 @@ const ORDER_LIST_SELECT = `
          c.customer_name,
          u.name AS created_by_name,
          (SELECT op.payment_method FROM order_payments op
-            WHERE op.order_id = o.id AND op.deleted_at IS NULL
+            WHERE op.order_id = o.id AND op.tenant_id = o.tenant_id AND op.deleted_at IS NULL
             ORDER BY op.id DESC LIMIT 1) AS payment_method,
          (SELECT oa.assignment_type FROM order_assignments oa
-            WHERE oa.order_id = o.id AND oa.deleted_at IS NULL AND oa.assignment_type = 'warehouse'
+            WHERE oa.order_id = o.id AND oa.tenant_id = o.tenant_id AND oa.deleted_at IS NULL AND oa.assignment_type = 'warehouse'
             ORDER BY oa.id DESC LIMIT 1) AS warehouse_assignment_type,
          (SELECT usr.name FROM order_assignments oa
-            INNER JOIN users usr ON usr.id = oa.assigned_to AND usr.deleted_at IS NULL
-            WHERE oa.order_id = o.id AND oa.deleted_at IS NULL AND oa.assignment_type = 'warehouse'
+            INNER JOIN users usr ON usr.id = oa.assigned_to AND ${joinOnTenant("oa", "usr")}
+            WHERE oa.order_id = o.id AND oa.tenant_id = o.tenant_id AND oa.deleted_at IS NULL AND oa.assignment_type = 'warehouse'
             ORDER BY oa.id DESC LIMIT 1) AS warehouse_assignee,
          EXISTS (SELECT 1 FROM order_cancellations oc
-            WHERE oc.order_id = o.id AND oc.deleted_at IS NULL) AS has_cancellation,
+            WHERE oc.order_id = o.id AND oc.tenant_id = o.tenant_id AND oc.deleted_at IS NULL) AS has_cancellation,
          EXISTS (SELECT 1 FROM order_returns ort
-            WHERE ort.order_id = o.id AND ort.deleted_at IS NULL) AS has_return,
+            WHERE ort.order_id = o.id AND ort.tenant_id = o.tenant_id AND ort.deleted_at IS NULL) AS has_return,
          EXISTS (SELECT 1 FROM order_exchanges oe
-            WHERE oe.order_id = o.id AND oe.deleted_at IS NULL) AS has_exchange,
+            WHERE oe.order_id = o.id AND oe.tenant_id = o.tenant_id AND oe.deleted_at IS NULL) AS has_exchange,
          EXISTS (SELECT 1 FROM order_refunds orf
-            WHERE orf.order_id = o.id AND orf.deleted_at IS NULL) AS has_refund
+            WHERE orf.order_id = o.id AND orf.tenant_id = o.tenant_id AND orf.deleted_at IS NULL) AS has_refund
   FROM orders o
-  LEFT JOIN crm_customers c ON c.id = o.customer_id AND c.deleted_at IS NULL
-  LEFT JOIN users u ON u.id = o.created_by AND u.deleted_at IS NULL
+  LEFT JOIN crm_customers c ON c.id = o.customer_id AND ${joinOnTenant("o", "c")}
+  LEFT JOIN users u ON u.id = o.created_by AND ${joinOnTenant("o", "u")}
 `;
 
 export const orderRepository = {
@@ -37,7 +38,7 @@ export const orderRepository = {
     const [rows] = await readDb.query(
       `SELECT DISTINCT u.id, u.name, u.email
        FROM users u
-       INNER JOIN roles r ON r.id = u.role_id AND r.deleted_at IS NULL
+       INNER JOIN roles r ON r.id = u.role_id AND ${joinOnTenant("u", "r")}
        WHERE u.tenant_id = ? AND u.deleted_at IS NULL AND u.status = 'active'
          AND (
            r.role_name = 'Super Admin'
@@ -77,7 +78,7 @@ export const orderRepository = {
               MIN(v.selling_price) AS selling_price,
               p.status
        FROM inventory_products p
-       JOIN inventory_product_variants v ON v.product_id = p.id AND v.deleted_at IS NULL
+       JOIN inventory_product_variants v ON v.product_id = p.id AND ${joinOnTenant("p", "v")}
        WHERE p.tenant_id = ? AND p.deleted_at IS NULL AND p.status = 'active'
        GROUP BY p.id
        ORDER BY p.product_name ASC`,
@@ -106,9 +107,9 @@ export const orderRepository = {
               v.selling_price, v.cost_price,
               COALESCE(sl.available_qty, 0) AS available_qty
        FROM inventory_products p
-       JOIN inventory_product_variants v ON v.product_id = p.id AND v.deleted_at IS NULL
+       JOIN inventory_product_variants v ON v.product_id = p.id AND ${joinOnTenant("p", "v")}
        LEFT JOIN inventory_stock_levels sl
-         ON sl.variant_id = v.id AND sl.warehouse_id = ? AND sl.deleted_at IS NULL
+         ON sl.variant_id = v.id AND sl.warehouse_id = ? AND ${joinOnTenant("v", "sl")}
        WHERE p.tenant_id = ? AND p.deleted_at IS NULL AND p.status = 'active'
          AND LOWER(TRIM(v.status)) = 'active'
        ORDER BY p.product_name ASC, v.variant_name ASC`,
@@ -251,7 +252,7 @@ export const orderRepository = {
               ip.discount AS product_discount_unit,
               ip.tax AS product_tax_unit
        FROM order_items oi
-       LEFT JOIN inventory_products ip ON ip.id = oi.product_id AND ip.deleted_at IS NULL
+       LEFT JOIN inventory_products ip ON ip.id = oi.product_id AND ${joinOnTenant("oi", "ip")}
        WHERE oi.order_id = ? AND ${tw("oi", tenantId)}
        ORDER BY oi.id ASC`,
       [id, tenantId]
@@ -399,9 +400,9 @@ export const orderRepository = {
     const [rows] = await readDb.query(
       `SELECT oa.*, o.order_no, u.name AS assigned_to_name, cb.customer_name AS order_customer_name
        FROM order_assignments oa
-       INNER JOIN orders o ON o.id = oa.order_id AND o.deleted_at IS NULL
-       LEFT JOIN users u ON u.id = oa.assigned_to AND u.deleted_at IS NULL
-       LEFT JOIN crm_customers cb ON cb.id = o.customer_id AND cb.deleted_at IS NULL
+       INNER JOIN orders o ON o.id = oa.order_id AND ${joinOnTenant("oa", "o")}
+       LEFT JOIN users u ON u.id = oa.assigned_to AND ${joinOnTenant("oa", "u")}
+       LEFT JOIN crm_customers cb ON cb.id = o.customer_id AND ${joinOnTenant("o", "cb")}
        WHERE ${tw("oa", tenantId)}
        ORDER BY oa.assigned_at DESC`,
       [tenantId]
@@ -442,8 +443,8 @@ export const orderRepository = {
       `SELECT op.*, o.order_no, o.payment_status AS order_payment_status, o.payable_amount,
               c.customer_name
        FROM order_payments op
-       INNER JOIN orders o ON o.id = op.order_id AND o.deleted_at IS NULL
-       LEFT JOIN crm_customers c ON c.id = o.customer_id AND c.deleted_at IS NULL
+       INNER JOIN orders o ON o.id = op.order_id AND ${joinOnTenant("op", "o")}
+       LEFT JOIN crm_customers c ON c.id = o.customer_id AND ${joinOnTenant("o", "c")}
        WHERE ${tw("op", tenantId)}
        ORDER BY op.id DESC`,
       [tenantId]
@@ -469,7 +470,7 @@ export const orderRepository = {
               COALESCE(pay.total_received, 0) AS total_received,
               GREATEST(0, o.payable_amount - COALESCE(pay.total_received, 0)) AS amount_due
        FROM orders o
-       LEFT JOIN crm_customers c ON c.id = o.customer_id AND c.deleted_at IS NULL
+       LEFT JOIN crm_customers c ON c.id = o.customer_id AND ${joinOnTenant("o", "c")}
        LEFT JOIN (
          SELECT order_id, SUM(amount) AS total_received
          FROM order_payments
@@ -577,9 +578,9 @@ export const orderRepository = {
                 WHERE orf.order_id = o.id AND orf.deleted_at IS NULL) AS has_refund,
               u.name AS cancelled_by_name, c.customer_name
        FROM order_cancellations oc
-       INNER JOIN orders o ON o.id = oc.order_id AND o.deleted_at IS NULL
-       LEFT JOIN users u ON u.id = oc.cancelled_by AND u.deleted_at IS NULL
-       LEFT JOIN crm_customers c ON c.id = o.customer_id AND c.deleted_at IS NULL
+       INNER JOIN orders o ON o.id = oc.order_id AND ${joinOnTenant("oc", "o")}
+       LEFT JOIN users u ON u.id = oc.cancelled_by AND ${joinOnTenant("oc", "u")}
+       LEFT JOIN crm_customers c ON c.id = o.customer_id AND ${joinOnTenant("o", "c")}
        WHERE ${tw("oc", tenantId)}
        ORDER BY oc.cancelled_at DESC`,
       [tenantId]
@@ -617,9 +618,9 @@ export const orderRepository = {
     const [rows] = await readDb.query(
       `SELECT ort.*, o.order_no, u.name AS created_by_name, c.customer_name
        FROM order_returns ort
-       INNER JOIN orders o ON o.id = ort.order_id AND o.deleted_at IS NULL
-       LEFT JOIN users u ON u.id = ort.created_by AND u.deleted_at IS NULL
-       LEFT JOIN crm_customers c ON c.id = o.customer_id AND c.deleted_at IS NULL
+       INNER JOIN orders o ON o.id = ort.order_id AND ${joinOnTenant("ort", "o")}
+       LEFT JOIN users u ON u.id = ort.created_by AND ${joinOnTenant("ort", "u")}
+       LEFT JOIN crm_customers c ON c.id = o.customer_id AND ${joinOnTenant("o", "c")}
        WHERE ${tw("ort", tenantId)}
        ORDER BY ort.created_at DESC`,
       [tenantId]
@@ -667,11 +668,11 @@ export const orderRepository = {
       `SELECT oe.*, o.order_no, u.name AS created_by_name, c.customer_name,
               op.product_name AS old_product_name, np.product_name AS new_product_name
        FROM order_exchanges oe
-       INNER JOIN orders o ON o.id = oe.order_id AND o.deleted_at IS NULL
-       LEFT JOIN users u ON u.id = oe.created_by AND u.deleted_at IS NULL
-       LEFT JOIN crm_customers c ON c.id = o.customer_id AND c.deleted_at IS NULL
-       LEFT JOIN inventory_products op ON op.id = oe.old_product_id AND op.deleted_at IS NULL
-       LEFT JOIN inventory_products np ON np.id = oe.new_product_id AND np.deleted_at IS NULL
+       INNER JOIN orders o ON o.id = oe.order_id AND ${joinOnTenant("oe", "o")}
+       LEFT JOIN users u ON u.id = oe.created_by AND ${joinOnTenant("oe", "u")}
+       LEFT JOIN crm_customers c ON c.id = o.customer_id AND ${joinOnTenant("o", "c")}
+       LEFT JOIN inventory_products op ON op.id = oe.old_product_id AND ${joinOnTenant("oe", "op")}
+       LEFT JOIN inventory_products np ON np.id = oe.new_product_id AND ${joinOnTenant("oe", "np")}
        WHERE ${tw("oe", tenantId)}
        ORDER BY oe.created_at DESC`,
       [tenantId]
@@ -712,9 +713,9 @@ export const orderRepository = {
     const [rows] = await readDb.query(
       `SELECT orf.*, o.order_no, u.name AS created_by_name, c.customer_name
        FROM order_refunds orf
-       INNER JOIN orders o ON o.id = orf.order_id AND o.deleted_at IS NULL
-       LEFT JOIN users u ON u.id = orf.created_by AND u.deleted_at IS NULL
-       LEFT JOIN crm_customers c ON c.id = o.customer_id AND c.deleted_at IS NULL
+       INNER JOIN orders o ON o.id = orf.order_id AND ${joinOnTenant("orf", "o")}
+       LEFT JOIN users u ON u.id = orf.created_by AND ${joinOnTenant("orf", "u")}
+       LEFT JOIN crm_customers c ON c.id = o.customer_id AND ${joinOnTenant("o", "c")}
        WHERE ${tw("orf", tenantId)}
        ORDER BY orf.id DESC`,
       [tenantId]

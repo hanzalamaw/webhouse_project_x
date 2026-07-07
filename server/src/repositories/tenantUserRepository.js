@@ -1,4 +1,5 @@
 import { readDb, writeDb } from "../database/db.js";
+import { joinOnTenant } from "../utils/tenantScope.js";
 import { encrypt } from "../utils/cipher.js";
 export const tenantUserRepository = {
   async countActive(tenantId) {
@@ -24,7 +25,7 @@ export const tenantUserRepository = {
       `SELECT u.id, u.name, u.email, u.username, u.phone, u.status, u.last_login_at, u.created_at, u.role_id,
               r.role_name
        FROM users u
-       LEFT JOIN roles r ON r.id = u.role_id AND r.deleted_at IS NULL
+       LEFT JOIN roles r ON r.id = u.role_id AND ${joinOnTenant("u", "r")}
        WHERE u.tenant_id = ? AND u.deleted_at IS NULL
        ORDER BY u.name ASC`,
       [tenantId]
@@ -37,7 +38,7 @@ export const tenantUserRepository = {
       `SELECT u.id, u.name, u.email, u.username, u.phone, u.status, u.last_login_at, u.created_at, u.role_id,
               r.role_name
        FROM users u
-       LEFT JOIN roles r ON r.id = u.role_id AND r.deleted_at IS NULL
+       LEFT JOIN roles r ON r.id = u.role_id AND ${joinOnTenant("u", "r")}
        WHERE u.tenant_id = ? AND u.id = ? AND u.deleted_at IS NULL LIMIT 1`,
       [tenantId, userId]
     );
@@ -48,7 +49,7 @@ export const tenantUserRepository = {
     const [rows] = await readDb.query(
       `SELECT u.id, u.name, u.email, u.username, u.password, r.role_name
        FROM users u
-       LEFT JOIN roles r ON r.id = u.role_id AND r.deleted_at IS NULL
+       LEFT JOIN roles r ON r.id = u.role_id AND ${joinOnTenant("u", "r")}
        WHERE u.tenant_id = ? AND u.id = ? AND u.deleted_at IS NULL LIMIT 1`,
       [tenantId, userId]
     );

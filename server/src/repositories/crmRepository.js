@@ -1,4 +1,5 @@
 import { readDb, writeDb } from "../database/db.js";
+import { joinOnTenant } from "../utils/tenantScope.js";
 import { ACTIVE_CUSTOMER_DAYS } from "../utils/crmConstants.js";
 import { logCrmActivity, mapAuditRow } from "../utils/crmAudit.js";
 import { parseTags, serializeTags, tagsToObjects } from "../utils/crmTags.js";
@@ -15,7 +16,7 @@ export const crmRepository = {
     const [rows] = await readDb.query(
       `SELECT DISTINCT u.id, u.name, u.email
        FROM users u
-       INNER JOIN roles r ON r.id = u.role_id AND r.deleted_at IS NULL
+       INNER JOIN roles r ON r.id = u.role_id AND ${joinOnTenant("u", "r")}
        WHERE u.tenant_id = ? AND u.deleted_at IS NULL AND u.status = 'active'
          AND (
            r.role_name = 'Super Admin'
@@ -120,7 +121,7 @@ export const crmRepository = {
       `SELECT al.id, al.action, al.new_value, al.created_at, u.name AS user_name
        FROM audit_logs al
        INNER JOIN modules m ON m.id = al.module_id AND m.module_name = 'CRM' AND m.deleted_at IS NULL
-       LEFT JOIN users u ON u.id = al.user_id AND u.deleted_at IS NULL
+       LEFT JOIN users u ON u.id = al.user_id AND ${joinOnTenant("al", "u")}
        WHERE al.tenant_id = ? AND al.deleted_at IS NULL
        ORDER BY al.created_at DESC
        LIMIT ?`,
@@ -162,8 +163,8 @@ export const crmRepository = {
       `SELECT l.*, u.name AS assigned_to_name,
               c.customer_name AS converted_customer_name
        FROM crm_leads l
-       LEFT JOIN users u ON u.id = l.assigned_to AND u.deleted_at IS NULL
-       LEFT JOIN crm_customers c ON c.id = l.converted_customer_id AND c.deleted_at IS NULL
+       LEFT JOIN users u ON u.id = l.assigned_to AND ${joinOnTenant("l", "u")}
+       LEFT JOIN crm_customers c ON c.id = l.converted_customer_id AND ${joinOnTenant("l", "c")}
        WHERE ${tw("l", tenantId)}
        ORDER BY l.created_at DESC`,
       [tenantId]
@@ -175,7 +176,7 @@ export const crmRepository = {
     const [rows] = await readDb.query(
       `SELECT l.*, u.name AS assigned_to_name
        FROM crm_leads l
-       LEFT JOIN users u ON u.id = l.assigned_to AND u.deleted_at IS NULL
+       LEFT JOIN users u ON u.id = l.assigned_to AND ${joinOnTenant("l", "u")}
        WHERE l.id = ? AND ${tw("l", tenantId)} LIMIT 1`,
       [id, tenantId]
     );
@@ -330,7 +331,7 @@ export const crmRepository = {
       `SELECT al.id, al.action, al.new_value, al.created_at, u.name AS user_name
        FROM audit_logs al
        INNER JOIN modules m ON m.id = al.module_id AND m.module_name = 'CRM' AND m.deleted_at IS NULL
-       LEFT JOIN users u ON u.id = al.user_id AND u.deleted_at IS NULL
+       LEFT JOIN users u ON u.id = al.user_id AND ${joinOnTenant("al", "u")}
        WHERE al.tenant_id = ? AND al.deleted_at IS NULL
          AND JSON_UNQUOTE(JSON_EXTRACT(al.new_value, '$.entity_type')) = 'customer'
          AND CAST(JSON_UNQUOTE(JSON_EXTRACT(al.new_value, '$.entity_id')) AS UNSIGNED) = ?
@@ -689,7 +690,10 @@ export const crmRepository = {
       entity_type: "customer",
       entity_id: customerId,
     });
-    const [users] = await readDb.query(`SELECT name FROM users WHERE id = ? LIMIT 1`, [userId]);
+    const [users] = await readDb.query(
+      `SELECT name FROM users WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL LIMIT 1`,
+      [userId, tenantId]
+    );
     return {
       id: customerId,
       note_type: label,
@@ -704,9 +708,9 @@ export const crmRepository = {
     const [rows] = await readDb.query(
       `SELECT cmp.*, c.customer_name, u.name AS created_by_name, au.name AS assigned_to_name
        FROM crm_customer_complaints cmp
-       INNER JOIN crm_customers c ON c.id = cmp.customer_id AND c.deleted_at IS NULL
-       LEFT JOIN users u ON u.id = cmp.user_id AND u.deleted_at IS NULL
-       LEFT JOIN users au ON au.id = cmp.assigned_to AND au.deleted_at IS NULL
+       INNER JOIN crm_customers c ON c.id = cmp.customer_id AND ${joinOnTenant("cmp", "c")}
+       LEFT JOIN users u ON u.id = cmp.user_id AND ${joinOnTenant("cmp", "u")}
+       LEFT JOIN users au ON au.id = cmp.assigned_to AND ${joinOnTenant("cmp", "au")}
        WHERE ${tw("cmp", tenantId)}
        ORDER BY cmp.created_at DESC`,
       [tenantId]
@@ -718,9 +722,9 @@ export const crmRepository = {
     const [rows] = await readDb.query(
       `SELECT cmp.*, c.customer_name, u.name AS created_by_name, au.name AS assigned_to_name
        FROM crm_customer_complaints cmp
-       INNER JOIN crm_customers c ON c.id = cmp.customer_id AND c.deleted_at IS NULL
-       LEFT JOIN users u ON u.id = cmp.user_id AND u.deleted_at IS NULL
-       LEFT JOIN users au ON au.id = cmp.assigned_to AND au.deleted_at IS NULL
+       INNER JOIN crm_customers c ON c.id = cmp.customer_id AND ${joinOnTenant("cmp", "c")}
+       LEFT JOIN users u ON u.id = cmp.user_id AND ${joinOnTenant("cmp", "u")}
+       LEFT JOIN users au ON au.id = cmp.assigned_to AND ${joinOnTenant("cmp", "au")}
        WHERE cmp.id = ? AND ${tw("cmp", tenantId)} LIMIT 1`,
       [id, tenantId]
     );

@@ -1,6 +1,7 @@
 import { readDb, writeDb } from "../database/db.js";
 import { encrypt } from "../utils/cipher.js";
 import { cascadeSoftDeleteTenant } from "../utils/softDeleteCascade.js";
+import { joinOnTenant } from "../utils/tenantScope.js";
 import { subscriptionRepository } from "./subscriptionRepository.js";
 
 const PERMISSION_ACTIONS = ["view", "create", "edit", "delete", "manage"];
@@ -12,7 +13,7 @@ export const tenantRepository = {
       `SELECT t.id, t.id AS tenant_id, t.company_name, t.owner_name, t.owner_email, t.owner_phone,
               t.industry, t.status, t.login_portal, t.created_at, t.updated_at,
               (SELECT u.username FROM users u
-               INNER JOIN roles r ON r.id = u.role_id AND r.deleted_at IS NULL
+               INNER JOIN roles r ON r.id = u.role_id AND ${joinOnTenant("u", "r")}
                WHERE u.tenant_id = t.id AND u.deleted_at IS NULL AND r.role_name = 'Super Admin'
                ORDER BY u.id ASC LIMIT 1) AS super_admin_username,
               tl.max_users, tl.max_warehouses, tl.max_stores, tl.max_orders_per_month,
@@ -181,7 +182,7 @@ export const tenantRepository = {
     const [rows] = await readDb.query(
       `SELECT u.id, u.name, u.email, u.username, u.password
        FROM users u
-       INNER JOIN roles r ON r.id = u.role_id AND r.deleted_at IS NULL
+       INNER JOIN roles r ON r.id = u.role_id AND ${joinOnTenant("u", "r")}
        WHERE u.tenant_id = ? AND u.deleted_at IS NULL AND r.role_name = 'Super Admin'
        ORDER BY u.id ASC LIMIT 1`,
       [tenantId]

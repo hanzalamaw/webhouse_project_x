@@ -51,7 +51,7 @@ export async function persistEntity(storeId, tenantId, entityType, raw, source) 
   if (entityType === "product") {
     await maybeUpdateLinkedProduct(tenantId, storeId, normalized);
   }
-  await touchLastSynced(storeId);
+  await touchLastSynced(storeId, tenantId);
 }
 
 async function fetchAllPages(client, path, resourceKey, params = {}) {
@@ -154,7 +154,7 @@ export async function registerWebhooks(store, grantedScopes = []) {
   }).length;
 
   if (dataTopicsRegistered > 0) {
-    await markWebhooksRegistered(store.id);
+    await markWebhooksRegistered(store.id, store.tenant_id);
   }
 
   if (registered > 0) {
@@ -171,17 +171,17 @@ export async function registerWebhooks(store, grantedScopes = []) {
   return { registered, skipped: false, skippedNoScope };
 }
 
-export async function runInitialFullSync(storeId) {
+export async function runInitialFullSync(storeId, tenantId) {
   if (runningSyncs.has(storeId)) return;
   runningSyncs.add(storeId);
 
-  const store = await getStoreById(storeId);
+  const store = await getStoreById(storeId, tenantId);
   if (!store) {
     runningSyncs.delete(storeId);
     return;
   }
 
-  await updateInitialSyncStatus(storeId, "running");
+  await updateInitialSyncStatus(storeId, tenantId, "running");
   await addSyncLog(storeId, store.tenant_id, {
     syncType: "initial_sync",
     status: "started",
@@ -231,14 +231,14 @@ export async function runInitialFullSync(storeId) {
       });
     }
 
-    await updateInitialSyncStatus(storeId, "completed");
+    await updateInitialSyncStatus(storeId, tenantId, "completed");
     await addSyncLog(storeId, store.tenant_id, {
       syncType: "initial_sync",
       status: "completed",
       message: "Store data fetched — review and import into your ERP when ready",
     });
   } catch (error) {
-    await updateInitialSyncStatus(storeId, "failed");
+    await updateInitialSyncStatus(storeId, tenantId, "failed");
     await addSyncLog(storeId, store.tenant_id, {
       syncType: "initial_sync",
       status: "failed",
@@ -249,13 +249,13 @@ export async function runInitialFullSync(storeId) {
   }
 }
 
-export async function onAppInstalled(storeId) {
-  const store = await getStoreById(storeId);
+export async function onAppInstalled(storeId, tenantId) {
+  const store = await getStoreById(storeId, tenantId);
   if (!store) return;
 
   const access = await verifyStoreApiAccess(store);
   if (!access.ok) {
-    await updateInitialSyncStatus(storeId, "failed");
+    await updateInitialSyncStatus(storeId, tenantId, "failed");
     await addSyncLog(storeId, store.tenant_id, {
       syncType: "scope_check",
       status: "failed",
@@ -269,15 +269,15 @@ export async function onAppInstalled(storeId) {
   }
 
   await registerWebhooks(store, access.granted);
-  await runInitialFullSync(storeId);
+  await runInitialFullSync(storeId, tenantId);
 }
 
-export async function retryPostInstall(storeId) {
-  const store = await getStoreById(storeId);
+export async function retryPostInstall(storeId, tenantId) {
+  const store = await getStoreById(storeId, tenantId);
   if (!store) return { ok: false, error: "Store not found" };
 
-  await updateInitialSyncStatus(storeId, "pending");
-  await onAppInstalled(storeId);
+  await updateInitialSyncStatus(storeId, tenantId, "pending");
+  await onAppInstalled(storeId, tenantId);
   return { ok: true };
 }
 

@@ -1,4 +1,5 @@
 import { readDb, writeDb } from "../database/db.js";
+import { joinOnTenant } from "../utils/tenantScope.js";
 
 function tw(alias, tenantId) {
   return `${alias}.tenant_id = ? AND ${alias}.deleted_at IS NULL`;
@@ -117,8 +118,8 @@ export const financeRepository = {
               o.order_no, o.payable_amount, o.payment_status AS order_payment_status,
               c.customer_name
        FROM order_payments op
-       INNER JOIN orders o ON o.id = op.order_id AND o.tenant_id = op.tenant_id AND o.deleted_at IS NULL
-       LEFT JOIN crm_customers c ON c.id = o.customer_id AND c.deleted_at IS NULL
+       INNER JOIN orders o ON o.id = op.order_id AND ${joinOnTenant("op", "o")}
+       LEFT JOIN crm_customers c ON c.id = o.customer_id AND ${joinOnTenant("o", "c")}
        WHERE ${tw("op", tenantId)}
        ORDER BY COALESCE(op.paid_at, op.id) DESC`,
       [tenantId]
@@ -131,8 +132,8 @@ export const financeRepository = {
       `SELECT ps.id, ps.sale_no, ps.payable_amount, ps.payment_status, ps.created_at,
               ps.crm_customers_id, c.customer_name, po.outlet_name
        FROM pos_sales ps
-       LEFT JOIN crm_customers c ON c.id = ps.crm_customers_id AND c.deleted_at IS NULL
-       LEFT JOIN pos_outlets po ON po.id = ps.outlet_id AND po.tenant_id = ps.tenant_id AND po.deleted_at IS NULL
+       LEFT JOIN crm_customers c ON c.id = ps.crm_customers_id AND ${joinOnTenant("ps", "c")}
+       LEFT JOIN pos_outlets po ON po.id = ps.outlet_id AND ${joinOnTenant("ps", "po")}
        WHERE ${tw("ps", tenantId)}
        ORDER BY ps.created_at DESC`,
       [tenantId]
@@ -149,8 +150,8 @@ export const financeRepository = {
       `SELECT op.*, o.order_no, o.payable_amount, o.order_status, o.payment_status AS order_payment_status,
               c.customer_name, c.phone AS customer_phone
        FROM order_payments op
-       INNER JOIN orders o ON o.id = op.order_id AND o.tenant_id = op.tenant_id AND o.deleted_at IS NULL
-       LEFT JOIN crm_customers c ON c.id = o.customer_id AND c.deleted_at IS NULL
+       INNER JOIN orders o ON o.id = op.order_id AND ${joinOnTenant("op", "o")}
+       LEFT JOIN crm_customers c ON c.id = o.customer_id AND ${joinOnTenant("o", "c")}
        WHERE op.id = ? AND ${tw("op", tenantId)} LIMIT 1`,
       [id, tenantId]
     );
@@ -163,8 +164,8 @@ export const financeRepository = {
               ps.payment_status, ps.created_at, ps.crm_customers_id,
               c.customer_name, c.phone AS customer_phone, po.outlet_name
        FROM pos_sales ps
-       LEFT JOIN crm_customers c ON c.id = ps.crm_customers_id AND c.deleted_at IS NULL
-       LEFT JOIN pos_outlets po ON po.id = ps.outlet_id AND po.tenant_id = ps.tenant_id AND po.deleted_at IS NULL
+       LEFT JOIN crm_customers c ON c.id = ps.crm_customers_id AND ${joinOnTenant("ps", "c")}
+       LEFT JOIN pos_outlets po ON po.id = ps.outlet_id AND ${joinOnTenant("ps", "po")}
        WHERE ps.id = ? AND ${tw("ps", tenantId)} LIMIT 1`,
       [id, tenantId]
     );
@@ -391,8 +392,8 @@ export const financeRepository = {
     const [rows] = await readDb.query(
       `SELECT e.*, c.category_name, sc.sub_category_name
        FROM finance_expenses e
-       INNER JOIN finance_expense_categories c ON c.id = e.category_id AND c.deleted_at IS NULL
-       LEFT JOIN finance_expense_sub_categories sc ON sc.id = e.sub_category_id AND sc.deleted_at IS NULL
+       INNER JOIN finance_expense_categories c ON c.id = e.category_id AND ${joinOnTenant("e", "c")}
+       LEFT JOIN finance_expense_sub_categories sc ON sc.id = e.sub_category_id AND ${joinOnTenant("e", "sc")}
        WHERE ${tw("e", tenantId)}
        ORDER BY e.expense_date DESC, e.id DESC`,
       [tenantId]
@@ -404,8 +405,8 @@ export const financeRepository = {
     const [rows] = await readDb.query(
       `SELECT e.*, c.category_name, sc.sub_category_name
        FROM finance_expenses e
-       INNER JOIN finance_expense_categories c ON c.id = e.category_id AND c.deleted_at IS NULL
-       LEFT JOIN finance_expense_sub_categories sc ON sc.id = e.sub_category_id AND sc.deleted_at IS NULL
+       INNER JOIN finance_expense_categories c ON c.id = e.category_id AND ${joinOnTenant("e", "c")}
+       LEFT JOIN finance_expense_sub_categories sc ON sc.id = e.sub_category_id AND ${joinOnTenant("e", "sc")}
        WHERE e.id = ? AND ${tw("e", tenantId)} LIMIT 1`,
       [id, tenantId]
     );
@@ -466,9 +467,9 @@ export const financeRepository = {
       `SELECT r.*, c.category_name, sc.sub_category_name,
               ba.bank_name, ba.account_title, ba.account_number
        FROM finance_recurring_expenses r
-       INNER JOIN finance_expense_categories c ON c.id = r.category_id AND c.deleted_at IS NULL
-       LEFT JOIN finance_expense_sub_categories sc ON sc.id = r.sub_category_id AND sc.deleted_at IS NULL
-       LEFT JOIN finance_bank_accounts ba ON ba.id = r.bank_account_id AND ba.deleted_at IS NULL
+       INNER JOIN finance_expense_categories c ON c.id = r.category_id AND ${joinOnTenant("r", "c")}
+       LEFT JOIN finance_expense_sub_categories sc ON sc.id = r.sub_category_id AND ${joinOnTenant("r", "sc")}
+       LEFT JOIN finance_bank_accounts ba ON ba.id = r.bank_account_id AND ${joinOnTenant("r", "ba")}
        WHERE ${tw("r", tenantId)}
        ORDER BY r.next_due_date ASC`,
       [tenantId]
@@ -481,9 +482,9 @@ export const financeRepository = {
       `SELECT r.*, c.category_name, sc.sub_category_name,
               ba.bank_name, ba.account_title, ba.account_number
        FROM finance_recurring_expenses r
-       INNER JOIN finance_expense_categories c ON c.id = r.category_id AND c.deleted_at IS NULL
-       LEFT JOIN finance_expense_sub_categories sc ON sc.id = r.sub_category_id AND sc.deleted_at IS NULL
-       LEFT JOIN finance_bank_accounts ba ON ba.id = r.bank_account_id AND ba.deleted_at IS NULL
+       INNER JOIN finance_expense_categories c ON c.id = r.category_id AND ${joinOnTenant("r", "c")}
+       LEFT JOIN finance_expense_sub_categories sc ON sc.id = r.sub_category_id AND ${joinOnTenant("r", "sc")}
+       LEFT JOIN finance_bank_accounts ba ON ba.id = r.bank_account_id AND ${joinOnTenant("r", "ba")}
        WHERE r.id = ? AND ${tw("r", tenantId)} LIMIT 1`,
       [id, tenantId]
     );

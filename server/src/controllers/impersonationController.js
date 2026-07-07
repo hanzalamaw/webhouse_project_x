@@ -5,8 +5,13 @@ export function createImpersonationController(impersonationService) {
   return {
     async start(req, res) {
       try {
+        if (req.userRole !== "wh_admin") {
+          return res.status(403).json({ message: "Forbidden" });
+        }
+
         const tenantId = tryParseEntityId(req.body.tenant_id);
         if (!tenantId) return res.status(400).json({ message: "Valid tenant_id is required" });
+
         const ip = getClientIp(req);
         const deviceInfo = req.headers["user-agent"] || null;
         const result = await impersonationService.start(tenantId, req.userId, ip, deviceInfo);
