@@ -63,6 +63,31 @@ export async function darazApiGet(
   return data;
 }
 
+/**
+ * Daraz write APIs (create/update/price_quantity) — signed query params, optional payload body param.
+ * Most product write endpoints expect `payload` as an XML (or JSON) string in businessParams.
+ */
+export async function darazApiPost(
+  apiBase,
+  apiPath,
+  credentials,
+  businessParams = {},
+  { withToken = true } = {},
+) {
+  const baseUrl = resolveDarazBaseUrl(apiBase);
+  const creds = withToken
+    ? credentials
+    : { apiKey: credentials.apiKey, apiSecret: credentials.apiSecret, accessToken: undefined };
+
+  const params = { ...businessParams };
+  const url = buildDarazUrl(baseUrl, apiPath, creds, params);
+  const { data } = await axios.post(url, null, {
+    timeout: 60000,
+    headers: { "Content-Type": "application/json;charset=utf-8" },
+  });
+  return data;
+}
+
 export function extractList(result, ...keys) {
   for (const key of keys) {
     if (Array.isArray(result?.[key])) return result[key];

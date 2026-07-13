@@ -31,6 +31,12 @@
   padding: 16px 20px;
   box-sizing: border-box;
   min-height: 0;
+  animation: wh-route-fade-in 0.18s ease;
+}
+
+@keyframes wh-route-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 @media (max-width: 768px) {

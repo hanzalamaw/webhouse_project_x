@@ -27,9 +27,22 @@ function getLoginPath(user) {
   return "/webhouse-portal";
 }
 
+function readInitialAuthState() {
+  const session = readStoredSession();
+  if (!session?.user || isStoredAuthExpired(session)) {
+    return { user: null, loading: false };
+  }
+  const { sessionStartedAt, lastActivityAt } = readSessionTimestamps();
+  if (isLocalSessionExpired(sessionStartedAt, lastActivityAt, session.user)) {
+    return { user: null, loading: true };
+  }
+  return { user: session.user, loading: true };
+}
+
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const initialAuth = readInitialAuthState();
+  const [user, setUser] = useState(initialAuth.user);
+  const [loading, setLoading] = useState(initialAuth.loading);
   const sessionEpochRef = useRef(0);
 
   const bumpSessionEpoch = () => {

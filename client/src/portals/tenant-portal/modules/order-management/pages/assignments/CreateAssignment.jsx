@@ -25,6 +25,7 @@ export default function CreateAssignment() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
 
   const disabled = readOnly || (isEdit ? !canEdit : !canCreate);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
@@ -68,10 +69,11 @@ export default function CreateAssignment() {
       };
       if (isEdit) {
         await apiFetch(`/orders/assignments/${assignmentId}`, { method: "PUT", body: JSON.stringify(body) }, authFetch);
+        setMessage("Assignment updated successfully.");
       } else {
         await apiFetch("/orders/assignments", { method: "POST", body: JSON.stringify(body) }, authFetch);
+        navigate(`${MODULE_BASE}/assignments/manage`);
       }
-      navigate(`${MODULE_BASE}/assignments/manage`);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -141,6 +143,7 @@ export default function CreateAssignment() {
             </div>
           </FormBlock>
           {error && <p className="wh-field__error">{error}</p>}
+          {message && <p className="wh-form-message">{message}</p>}
           <FormActions>
             <Button type="submit" disabled={saving || disabled}>{saving ? "Saving…" : "Save"}</Button>
             <Button type="button" variant="secondary" onClick={() => navigate(`${MODULE_BASE}/assignments/manage`)}>Cancel</Button>

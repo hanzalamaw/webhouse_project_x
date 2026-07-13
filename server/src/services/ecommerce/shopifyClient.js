@@ -28,6 +28,18 @@ export function shopifyClient(credentials) {
   });
 }
 
+export function shopifyGraphqlClient(credentials) {
+  const baseURL = `${normalizeStoreUrl(credentials.storeUrl)}/admin/api/${API_VERSION}/graphql.json`;
+  return axios.create({
+    baseURL,
+    headers: {
+      "X-Shopify-Access-Token": credentials.accessToken,
+      "Content-Type": "application/json",
+    },
+    timeout: 45000,
+  });
+}
+
 export function handleShopifyError(res, error, label) {
   const status = error.response?.status || 500;
   const message =

@@ -17,7 +17,7 @@ function matchesSearch(row, query) {
 }
 
 export function getYearsFromRows(rows, dateField) {
-  const years = new Set();
+  const years = new Set([new Date().getFullYear()]);
   for (const row of rows) {
     const d = rowDate(row, dateField);
     if (d) years.add(d.getFullYear());
@@ -44,7 +44,8 @@ export function applyToolbarFilters(rows, toolbar, { dateField = "created_at", f
 
   let fiscalFrom = null;
   let fiscalTo = null;
-  if (year && fiscalYearStart) {
+  const yearOnly = year && !dateFrom && !dateTo;
+  if (yearOnly && fiscalYearStart) {
     const range = getFiscalYearFilterRange(Number(year), fiscalYearStart);
     fiscalFrom = range.start;
     fiscalTo = range.end;
@@ -59,15 +60,22 @@ export function applyToolbarFilters(rows, toolbar, { dateField = "created_at", f
     }
 
     const d = rowDate(row, dateField);
-    if (year && fiscalYearStart) {
+    if (yearOnly && fiscalYearStart) {
       if (!d) return false;
       if (d < fiscalFrom || d > fiscalTo) return false;
-    } else if (year && d && d.getFullYear() !== Number(year)) {
-      return false;
+    } else if (yearOnly) {
+      if (!d) return false;
+      if (d.getFullYear() !== Number(year)) return false;
+    } else if (year && fiscalYearStart) {
+      if (!d) return false;
+      const range = getFiscalYearFilterRange(Number(year), fiscalYearStart);
+      if (d < range.start || d > range.end) return false;
+    } else if (year) {
+      if (!d) return false;
+      if (d.getFullYear() !== Number(year)) return false;
     }
-    if (from && d && d < from) return false;
-    if (to && d && d > to) return false;
-    if ((from || to || year) && !d) return false;
+    if (from && (!d || d < from)) return false;
+    if (to && (!d || d > to)) return false;
 
     return true;
   });
@@ -79,6 +87,20 @@ export const EMPTY_TOOLBAR = {
   dateFrom: "",
   dateTo: "",
 };
+
+export function normalizeToolbarFilterState(prev, patch) {
+  const next = { ...prev, ...patch };
+  if (patch.year != null && patch.year !== "") {
+    next.dateFrom = "";
+    next.dateTo = "";
+  }
+  if ("dateFrom" in patch || "dateTo" in patch) {
+    const from = "dateFrom" in patch ? patch.dateFrom : next.dateFrom;
+    const to = "dateTo" in patch ? patch.dateTo : next.dateTo;
+    if (from || to) next.year = "";
+  }
+  return next;
+}
 
 export function inDateRange(value, { allTime, dateFrom, dateTo }) {
   if (allTime) return true;

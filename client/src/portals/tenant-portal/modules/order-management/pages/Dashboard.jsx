@@ -8,8 +8,7 @@ import { StatusBadge } from "../../../../../components/Badge";
 import { formatPKR } from "../../../../../utils/currency";
 import { formatDateTime } from "../../../../../utils/dateTime";
 import { DashboardFilter } from "../../../../../components/DashboardFilter";
-import { EMPTY_DASHBOARD_FILTER, filterRowsByDashboard } from "../../../../../utils/dashboardFilter";
-import { useFiscalYear } from "../../../../../context/FiscalYearContext";
+import { EMPTY_DASHBOARD_FILTER, dashboardFilterToQueryParams } from "../../../../../utils/dashboardFilter";
 import {
   ProductIcon,
   SubscriptionIcon,
@@ -51,22 +50,37 @@ export default function OrderManagementDashboard() {
   const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [dashFilter, setDashFilter] = useState({ ...EMPTY_DASHBOARD_FILTER });
-  const fiscalYearStart = useFiscalYear();
+  const [yearSeedRows, setYearSeedRows] = useState([]);
 
   useEffect(() => {
     let active = true;
-    apiFetch("/orders/dashboard", {}, authFetch)
-      .then((res) => { if (active) setData(res); })
-      .catch(() => { if (active) setData(null); })
-      .finally(() => { if (active) setLoading(false); });
+    apiFetch("/orders/dashboard?all_time=1", {}, authFetch)
+      .then((res) => { if (active) setYearSeedRows(res?.recent_orders || []); })
+      .catch(() => { if (active) setYearSeedRows([]); });
     return () => { active = false; };
   }, [authFetch]);
 
-  const recentOrders = useMemo(() => {
-    const rows = data?.recent_orders || [];
-    return filterRowsByDashboard(rows, "created_at", dashFilter, fiscalYearStart);
-  }, [data, dashFilter, fiscalYearStart]);
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setLoadError("");
+    const params = dashboardFilterToQueryParams(dashFilter);
+    const qs = params.toString();
+    apiFetch(`/orders/dashboard${qs ? `?${qs}` : ""}`, {}, authFetch)
+      .then((res) => { if (active) setData(res); })
+      .catch((err) => {
+        if (active) {
+          setData(null);
+          setLoadError(err?.message || "Failed to load dashboard");
+        }
+      })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [authFetch, dashFilter]);
+
+  const recentOrders = useMemo(() => data?.recent_orders || [], [data]);
 
   const orderSeries = useMemo(() => {
     const fromApi = data?.orders_by_month || [];
@@ -124,7 +138,11 @@ export default function OrderManagementDashboard() {
         description="Overview of orders, payments, fulfillment, returns, and exchanges."
       />
 
-      <DashboardFilter rows={data?.recent_orders || []} value={dashFilter} onChange={setDashFilter} />
+      <DashboardFilter rows={yearSeedRows.length ? yearSeedRows : data?.recent_orders || []} value={dashFilter} onChange={setDashFilter} />
+
+      {loadError && (
+        <p className="wh-alert wh-alert--error" role="alert">{loadError}</p>
+      )}
 
       <div className="wh-dash-grid">
         <div className="wh-dash-col-3">
@@ -149,7 +167,10 @@ export default function OrderManagementDashboard() {
           <KpiCard label="Exchanges" value={dash(stats.exchange_requests)} icon={<TransferIcon />} />
         </div>
         <div className="wh-dash-col-3">
-          <KpiCard label="COD Amount" value={money(stats.cod_amount)} icon={<SubscriptionIcon />} tone="accent" />
+          <KpiCard label="Revenue" value={money(stats.total_revenue)} icon={<SubscriptionIcon />} tone="accent" />
+        </div>
+        <div className="wh-dash-col-3">
+          <KpiCard label="COD Amount" value={money(stats.cod_amount)} icon={<SubscriptionIcon />} />
         </div>
         <div className="wh-dash-col-3">
           <KpiCard
@@ -164,7 +185,10 @@ export default function OrderManagementDashboard() {
 
       <div className="wh-dash-grid">
         <div className="wh-dash-col-8">
-          <Panel title="Orders over time" subtitle="Last 6 months">
+          <Panel
+            title="Orders over time"
+            subtitle={dashFilter.dateFrom || dashFilter.dateTo || dashFilter.year ? "Selected period" : "Last 6 months"}
+          >
             {orderSeries.length ? (
               <BarChart data={orderSeries} formatValue={(v) => String(v)} />
             ) : (

@@ -9,7 +9,7 @@ export function UnsavedChangesDialog({ open, onStay, onDiscard, reloadPending = 
       title="Unsaved changes"
       footer={
         <>
-          <Button type="button" variant="secondary" onClick={onStay}>
+          <Button type="button" variant="secondary" modalPrimary onClick={onStay}>
             Stay on page
           </Button>
           <Button type="button" variant="danger" onClick={onDiscard}>

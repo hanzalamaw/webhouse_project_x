@@ -6,6 +6,7 @@ import { apiFetch, fetchAllTableRows } from "../../../../../../api/client";
 import { PageHeader } from "../../../../../../components/PageHeader";
 import { FormField } from "../../../../../../components/FormField";
 import { Button } from "../../../../../../components/Button";
+import { ConfirmDeleteModal } from "../../../../../../components/ConfirmDeleteModal";
 import { FormBlock } from "../../../../../../components/FormBlock";
 import { FormPageLayout, FormActions } from "../../../../../../components/FormPageLayout";
 import { SearchableSelect } from "../../../../../../components/SearchableSelect";
@@ -35,7 +36,7 @@ export default function CreateComplaint() {
   const { complaintId } = useParams();
   const isEdit = Boolean(complaintId);
   const { authFetch } = useAuth();
-  const { canCreate, canEdit, readOnly } = useModulePermission("crm");
+  const { canCreate, canEdit, canDelete, readOnly } = useModulePermission("crm");
   const { crm_users } = useCrmReference();
   const navigate = useNavigate();
   const [form, setForm] = useState(EMPTY);
@@ -44,6 +45,9 @@ export default function CreateComplaint() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const disabled = readOnly || (isEdit ? !canEdit : !canCreate);
 
@@ -94,6 +98,7 @@ export default function CreateComplaint() {
     if (disabled) return;
     setSaving(true);
     setError("");
+    setMessage("");
     try {
       const body = {
         ...form,
@@ -103,7 +108,7 @@ export default function CreateComplaint() {
       };
       if (isEdit) {
         await apiFetch(`/crm/complaints/${complaintId}`, { method: "PUT", body: JSON.stringify(body) }, authFetch);
-        navigate(`${MODULE_BASE}/complaints/manage`);
+        setMessage("Complaint updated successfully.");
       } else {
         await apiFetch("/crm/complaints", { method: "POST", body: JSON.stringify(body) }, authFetch);
         navigate(`${MODULE_BASE}/complaints/manage`);
@@ -112,6 +117,22 @@ export default function CreateComplaint() {
       setError(err.message);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!isEdit || !complaintId) return;
+    setDeleting(true);
+    setError("");
+    try {
+      await apiFetch(`/crm/complaints/${complaintId}`, { method: "DELETE" }, authFetch);
+      setDeleteOpen(false);
+      navigate(`${MODULE_BASE}/complaints/manage`);
+    } catch (e) {
+      setError(e.message);
+      setDeleteOpen(false);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -130,12 +151,20 @@ export default function CreateComplaint() {
           title={isEdit ? "Edit Complaint" : "Add Complaint"}
           description="Record a customer complaint, issue, or support request with full details."
           actions={
-            <Button variant="secondary" onClick={() => navigate(`${MODULE_BASE}/complaints/manage`)}>
-              Back to complaints
-            </Button>
+            <div className="wh-action-btns">
+              <Button variant="secondary" onClick={() => navigate(`${MODULE_BASE}/complaints/manage`)}>
+                Back to complaints
+              </Button>
+              {isEdit && canDelete && (
+                <Button type="button" variant="danger" onClick={() => setDeleteOpen(true)} disabled={deleting}>
+                  Delete
+                </Button>
+              )}
+            </div>
           }
         />
-        {error && <p className="wh-field__error">{error}</p>}
+        {error && <div className="wh-alert wh-alert--error">{error}</div>}
+        {message && <p className="wh-form-message">{message}</p>}
 
         {isEdit && meta && (
           <FormBlock title="Record summary" description="Read-only context for this complaint.">
@@ -217,6 +246,15 @@ export default function CreateComplaint() {
             )}
           </FormActions>
         </form>
+
+        <ConfirmDeleteModal
+          open={deleteOpen}
+          title="Delete complaint"
+          recordName={form.subject || meta?.subject || "this complaint"}
+          onConfirm={confirmDelete}
+          onClose={() => setDeleteOpen(false)}
+          loading={deleting}
+        />
       </FormPageLayout>
     </div>
   );

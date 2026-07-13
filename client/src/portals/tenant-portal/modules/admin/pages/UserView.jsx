@@ -66,6 +66,7 @@ export default function UserView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [dashFilter, setDashFilter] = useState(createThisMonthDashboardFilter);
+  const defaultDashFilter = useMemo(() => createThisMonthDashboardFilter(), []);
   const fiscalYearStart = useFiscalYear();
 
   const load = useCallback(async () => {
@@ -179,6 +180,7 @@ export default function UserView() {
         dateField="created_at"
         value={dashFilter}
         onChange={setDashFilter}
+        defaultFilter={defaultDashFilter}
       />
 
       <ProfileHero

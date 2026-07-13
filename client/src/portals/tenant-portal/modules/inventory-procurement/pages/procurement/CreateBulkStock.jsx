@@ -121,7 +121,10 @@ export default function CreateBulkStock() {
   });
 
   const warehouseOptions = useMemo(
-    () => warehouses.map((w) => ({ value: String(w.id), label: w.warehouse_name })),
+    () => warehouses.map((w) => ({
+      value: String(w.id),
+      label: w.shopify_mapped ? `${w.warehouse_name} (Shopify mapped)` : `${w.warehouse_name} (not mapped)`,
+    })),
     [warehouses]
   );
 
@@ -203,11 +206,40 @@ export default function CreateBulkStock() {
       setError("Enter a valid quantity");
       return;
     }
+    if (!sameQtyForAll) {
+      for (const id of selectedIds) {
+        const qty = Number(lineDetails[id]?.qty || 0);
+        if (!qty || qty <= 0) {
+          setError("Enter a valid quantity for each selected product");
+          return;
+        }
+      }
+    }
 
     setSubmitting(true);
     setError("");
     try {
-      await apiFetch(config.apiPath, { method: "POST", body: JSON.stringify(buildPayload()) }, authFetch);
+      const result = await apiFetch(config.apiPath, { method: "POST", body: JSON.stringify(buildPayload()) }, authFetch);
+      const syncs = result?.shopifySync
+        ? Array.isArray(result.shopifySync)
+          ? result.shopifySync
+          : [result.shopifySync]
+        : [];
+      const actionableReasons = new Set([
+        "no_mapped_warehouse_locations",
+        "shopify_variant_not_found",
+        "store_disconnected",
+        "no_stock",
+      ]);
+      const syncFailed = syncs.some(
+        (s) => s && (!s.ok && (!s.skipped || actionableReasons.has(s.reason))),
+      );
+      if (syncFailed) {
+        sessionStorage.setItem(
+          "inventoryStockWarning",
+          "Stock was recorded in the ERP, but Shopify inventory could not be updated. Check product linking and warehouse location mapping in Integrations.",
+        );
+      }
       navigateSafely(config.backPath);
     } catch (err) {
       setError(err.message);

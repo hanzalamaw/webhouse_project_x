@@ -410,7 +410,23 @@ export default function CreateTenant() {
   const update = (section, key) => (e) => {
     setStepError("");
     const val = e.target.value;
-    setDraft((d) => ({ ...d, [section]: { ...d[section], [key]: val } }));
+    setDraft((d) => {
+      const next = { ...d, [section]: { ...d[section], [key]: val } };
+      if (section === "company") {
+        if (key === "company_name") {
+          next.organization = { ...next.organization, company_name: val };
+        }
+        if (!isEdit) {
+          if (key === "owner_name") {
+            next.super_admin = { ...next.super_admin, name: val };
+          }
+          if (key === "owner_email") {
+            next.super_admin = { ...next.super_admin, email: val };
+          }
+        }
+      }
+      return next;
+    });
   };
 
   const updateBillingCycle = (e) => {
@@ -533,19 +549,19 @@ export default function CreateTenant() {
         break;
       case 5:
         break;
-      case 6: {
-        const orgName = (o.company_name || c.company_name).trim();
-        if (!orgName) return "Organization company name is required.";
+      case 6:
+        if (!c.company_name.trim()) return "Company name is required.";
         break;
-      }
       case 7:
-        if (!sa.name.trim()) return "Super admin display name is required.";
-        if (!sa.username.trim()) return "Super admin username is required.";
-        if (/\s/.test(sa.username)) return "Username cannot contain spaces.";
-        if (!sa.email.trim()) return "Super admin email is required.";
-        if (!EMAIL_RE.test(sa.email.trim())) return "Enter a valid super admin email.";
+        if (!isEdit && !c.owner_name.trim()) return "Owner name is required.";
+        if (!isEdit && !c.owner_email.trim()) return "Owner email is required.";
+        if (isEdit && !sa.name.trim()) return "Super admin display name is required.";
+        if (isEdit && !sa.email.trim()) return "Super admin email is required.";
+        if (isEdit && !EMAIL_RE.test(sa.email.trim())) return "Enter a valid super admin email.";
         if (!isEdit && (!sa.password || sa.password.length < 6)) return "Password is required (min 6 characters).";
         if (isEdit && sa.password && sa.password.length < 6) return "Password must be at least 6 characters if changing.";
+        if (!sa.username.trim()) return "Super admin username is required.";
+        if (/\s/.test(sa.username)) return "Username cannot contain spaces.";
         break;
       default:
         break;
@@ -596,12 +612,12 @@ export default function CreateTenant() {
         },
         organization: {
           ...draft.organization,
-          company_name: draft.organization.company_name || draft.company.company_name,
+          company_name: draft.company.company_name,
         },
         super_admin: {
-          name: draft.super_admin.name,
+          name: isEdit ? draft.super_admin.name : draft.company.owner_name,
           username: draft.super_admin.username.trim().toLowerCase(),
-          email: draft.super_admin.email.trim(),
+          email: isEdit ? draft.super_admin.email.trim() : draft.company.owner_email.trim(),
           ...(draft.super_admin.password ? { password: draft.super_admin.password } : {}),
         },
       };
@@ -685,7 +701,7 @@ export default function CreateTenant() {
         <ReviewRow label="Received at" value={draft.payment.received_at || "â€”"} />
       </ReviewBlock>
       <ReviewBlock step={7} title="Organization">
-        <ReviewRow label="Company" value={draft.organization.company_name || draft.company.company_name} />
+        <ReviewRow label="Company" value={draft.company.company_name} />
         <ReviewRow label="Logo URL" value={draft.organization.logo_url || "â€”"} />
         <ReviewRow label="Timezone" value={formatTimezoneDisplay(draft.organization.timezone)} />
         <ReviewRow label="Currency" value={formatCurrencyDisplay(draft.organization.currency, currencies)} />
@@ -694,9 +710,9 @@ export default function CreateTenant() {
         <ReviewRow label="Fiscal year end" value={formatFiscalDisplay(draft.organization.fiscal_year_end)} />
       </ReviewBlock>
       <ReviewBlock step={8} title="Super Admin">
-        <ReviewRow label="Name" value={draft.super_admin.name} />
+        <ReviewRow label="Name" value={isEdit ? draft.super_admin.name : draft.company.owner_name} />
         <ReviewRow label="Username" value={draft.super_admin.username} />
-        <ReviewRow label="Email" value={draft.super_admin.email} />
+        <ReviewRow label="Email" value={isEdit ? draft.super_admin.email : draft.company.owner_email} />
         <ReviewRow label="Password" value={draft.super_admin.password ? "â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢" : "â€”"} />
       </ReviewBlock>
     </div>
@@ -851,9 +867,8 @@ export default function CreateTenant() {
                   </div>
                 </FormBlock>
 
-                <FormBlock title="Organization" description="Tenant workspace settings shown inside the ERP.">
+                <FormBlock title="Organization" description="Workspace settings shown inside the ERP (company name comes from the Company section above).">
                   <div className="wh-form-grid">
-                    <FormField id="ocn" label="Company Name" value={draft.organization.company_name} onChange={update("organization", "company_name")} required />
                     <FormField id="logo" label="Logo URL" value={draft.organization.logo_url} onChange={update("organization", "logo_url")} />
                     <SearchableSelect
                       id="tz"
@@ -897,11 +912,22 @@ export default function CreateTenant() {
                   </div>
                 </FormBlock>
 
-                <FormBlock title="Super Admin" description="Primary login for the tenant workspace.">
+                <FormBlock
+                  title="Super Admin"
+                  description={
+                    isEdit
+                      ? "Primary login for the tenant workspace."
+                      : "Primary login for the tenant workspace. Uses the owner name and email from the Company section."
+                  }
+                >
                   <div className="wh-form-grid">
-                    <FormField id="sa_name" label="Display Name" value={draft.super_admin.name} onChange={update("super_admin", "name")} required />
+                    {isEdit && (
+                      <>
+                        <FormField id="sa_name" label="Display Name" value={draft.super_admin.name} onChange={update("super_admin", "name")} required />
+                        <FormField id="sa_email" label="Email" type="email" value={draft.super_admin.email} onChange={update("super_admin", "email")} required />
+                      </>
+                    )}
                     <FormField id="sa_user" label="Username" value={draft.super_admin.username} onChange={update("super_admin", "username")} required />
-                    <FormField id="sa_email" label="Email" type="email" value={draft.super_admin.email} onChange={update("super_admin", "email")} required />
                     <FormField
                       id="sa_pass"
                       label={isEdit ? "New Password (optional)" : "Password"}

@@ -2,6 +2,7 @@ import {
   normalizeShopifyOrder,
   normalizeShopifyProduct,
   normalizeShopifyCustomer,
+  normalizeShopifyLocation,
 } from "../../normalizers/shopify.js";
 import axios from "axios";
 import { shopifyClient } from "./shopifyClient.js";
@@ -17,8 +18,13 @@ import {
   markWebhooksRegistered,
   touchLastSynced,
   getStoreById,
+  getEntityLink,
+  softDeleteEntityLinkByInternalId,
 } from "../../repositories/ecommerceRepository.js";
-import { maybeUpdateLinkedProduct } from "./ecomImport.js";
+import { autoSyncEntityToErp, autoImportAllStaged } from "./ecomAutoSync.js";
+import { syncInventoryLevelToErp } from "./ecomImport.js";
+import { importShopifyLocation, isMappableShopifyLocation } from "./locationSync.js";
+import { inventoryRepository } from "../../repositories/inventoryRepository.js";
 
 const runningSyncs = new Set();
 
@@ -37,6 +43,7 @@ function normalizeEntity(entityType, raw) {
       updatedAt: raw.updated_at || null,
     };
   }
+  if (entityType === "location") return normalizeShopifyLocation(raw);
   return raw;
 }
 
@@ -48,10 +55,27 @@ export async function persistEntity(storeId, tenantId, entityType, raw, source) 
       : String(raw.id);
   const normalized = normalizeEntity(entityType, raw);
   await upsertSyncedRecord(storeId, tenantId, entityType, externalId, raw, normalized, source, "shopify");
-  if (entityType === "product") {
-    await maybeUpdateLinkedProduct(tenantId, storeId, normalized);
+
+  if (entityType === "location") {
+    if (isMappableShopifyLocation(raw)) {
+      await importShopifyLocation(tenantId, storeId, raw);
+    }
+    await touchLastSynced(storeId, tenantId);
+    return normalized;
   }
+
+  if (entityType === "inventory") {
+    await syncInventoryLevelToErp(tenantId, storeId, normalized);
+    await touchLastSynced(storeId, tenantId);
+    return normalized;
+  }
+
+  if (["order", "customer", "product"].includes(entityType)) {
+    await autoSyncEntityToErp(tenantId, storeId, entityType, normalized);
+  }
+
   await touchLastSynced(storeId, tenantId);
+  return normalized;
 }
 
 async function fetchAllPages(client, path, resourceKey, params = {}) {
@@ -197,6 +221,40 @@ export async function runInitialFullSync(storeId, tenantId) {
   ];
 
   try {
+    // Locations + inventory first, so imported products land in the warehouse mapped to
+    // their Shopify location instead of an unrelated default warehouse.
+    const locations = (await fetchAllPages(client, "/locations.json", "locations", {})).filter(
+      isMappableShopifyLocation,
+    );
+    for (const loc of locations) {
+      await persistEntity(storeId, store.tenant_id, "location", loc, "initial_sync");
+    }
+    await addSyncLog(storeId, store.tenant_id, {
+      syncType: "initial_sync:location",
+      status: "success",
+      message: `Synced ${locations.length} location(s) to warehouses and POS outlets`,
+    });
+
+    let inventoryCount = 0;
+    for (const loc of locations) {
+      try {
+        const levels = await fetchAllPages(client, "/inventory_levels.json", "inventory_levels", {
+          location_ids: loc.id,
+        });
+        for (const lvl of levels) {
+          await persistEntity(storeId, store.tenant_id, "inventory", lvl, "initial_sync");
+          inventoryCount += 1;
+        }
+      } catch {
+        /* read_inventory may be missing — product stock falls back to the mapped warehouse */
+      }
+    }
+    await addSyncLog(storeId, store.tenant_id, {
+      syncType: "initial_sync:inventory",
+      status: "success",
+      message: `Synced ${inventoryCount} inventory level(s) across locations`,
+    });
+
     for (const resource of resources) {
       const items = await fetchAllPages(client, resource.path, resource.key, resource.params);
       for (const item of items) {
@@ -232,6 +290,7 @@ export async function runInitialFullSync(storeId, tenantId) {
     }
 
     await updateInitialSyncStatus(storeId, tenantId, "completed");
+    await autoImportAllStaged(storeId, tenantId, "shopify");
     await addSyncLog(storeId, store.tenant_id, {
       syncType: "initial_sync",
       status: "completed",
@@ -293,16 +352,50 @@ export async function handleWebhookPayload(store, topic, payload) {
     return { action: "uninstalled" };
   }
 
-  if (topic === "products/delete") {
+  if (topic === "products/delete" || topic === "customers/delete") {
     const id = payload.id;
-    await deleteSyncedRecord(store.id, "product", id);
+    const deletedType = topic.startsWith("products/") ? "product" : "customer";
+    await deleteSyncedRecord(store.id, store.tenant_id, deletedType, id);
+
+    // Also remove/inactivate the linked ERP record so Shopify deletes don't leave ghosts.
+    try {
+      const link = await getEntityLink(store.id, deletedType, id);
+      if (link?.internal_id) {
+        if (deletedType === "product") {
+          try {
+            await inventoryRepository.softDeleteProduct(store.tenant_id, link.internal_id);
+          } catch {
+            const current = await inventoryRepository.getProductById(store.tenant_id, link.internal_id);
+            if (current) {
+              await inventoryRepository.updateProduct(store.tenant_id, link.internal_id, {
+                product_name: current.product_name,
+                description: current.description,
+                unit: current.unit,
+                delivery_charges: current.delivery_charges ?? 0,
+                discount: current.discount ?? 0,
+                tax: current.tax ?? 0,
+                status: "inactive",
+                category_id: current.category_id,
+                source: current.source || "shopify",
+              });
+            }
+          }
+        } else if (deletedType === "customer") {
+          // Keep ERP customer history; just drop the Shopify link.
+        }
+        await softDeleteEntityLinkByInternalId(store.tenant_id, deletedType, link.internal_id, "shopify");
+      }
+    } catch (err) {
+      console.error(`[shopifyWebhook] ${deletedType} ERP cleanup failed:`, err.message);
+    }
+
     await addSyncLog(store.id, store.tenant_id, {
       syncType: `webhook:${topic}`,
       externalId: String(id),
       status: "success",
-      message: "Product deleted from DB",
+      message: `${deletedType} removed from Shopify — cleared staging and linked ERP record`,
     });
-    return { action: "deleted", entityType: "product", externalId: id };
+    return { action: "deleted", entityType: deletedType, externalId: id };
   }
 
   if (!entityType) {
@@ -314,7 +407,32 @@ export async function handleWebhookPayload(store, topic, payload) {
     return { action: "ignored" };
   }
 
-  await persistEntity(store.id, store.tenant_id, entityType, payload, `webhook:${topic}`);
+  if (topic.startsWith("locations/")) {
+    if (isMappableShopifyLocation(payload)) {
+      await persistEntity(store.id, store.tenant_id, "location", payload, `webhook:${topic}`);
+    }
+    await addSyncLog(store.id, store.tenant_id, {
+      syncType: `webhook:${topic}`,
+      externalId: String(payload.id),
+      status: "success",
+      message: "Location synced to warehouse and POS outlet",
+    });
+    return { action: "upserted", entityType: "location", externalId: payload.id };
+  }
+
+  // Re-fetch full order so current_quantity (removed lines) is present — webhook payloads can be stale/partial.
+  let entityPayload = payload;
+  if (entityType === "order" && payload?.id && store.store_url && store.access_token) {
+    try {
+      const client = shopifyClient({ storeUrl: store.store_url, accessToken: store.access_token });
+      const { data } = await client.get(`/orders/${payload.id}.json`, { params: { status: "any" } });
+      if (data?.order) entityPayload = data.order;
+    } catch {
+      entityPayload = payload;
+    }
+  }
+
+  await persistEntity(store.id, store.tenant_id, entityType, entityPayload, `webhook:${topic}`);
   await addSyncLog(store.id, store.tenant_id, {
     syncType: `webhook:${topic}`,
     externalId: String(payload.id || payload.inventory_item_id),
@@ -323,4 +441,40 @@ export async function handleWebhookPayload(store, topic, payload) {
   });
 
   return { action: "upserted", entityType, externalId: payload.id };
+}
+
+/**
+ * Poll Shopify for records changed since the last sync and push them into the ERP.
+ * Runs automatically in the background when auto-sync is enabled.
+ */
+export async function pollShopifyStoreChanges(store) {
+  if (!store?.auto_sync_enabled) return { products: 0, orders: 0, customers: 0 };
+
+  const client = shopifyClient({ storeUrl: store.store_url, accessToken: store.access_token });
+  const overlapMs = 3 * 60 * 1000;
+  const since = store.last_synced_at
+    ? new Date(new Date(store.last_synced_at).getTime() - overlapMs).toISOString()
+    : new Date(Date.now() - 15 * 60 * 1000).toISOString();
+
+  const counts = { products: 0, orders: 0, customers: 0 };
+  const resources = [
+    { path: "/products.json", key: "products", type: "product", countKey: "products", params: { updated_at_min: since } },
+    { path: "/customers.json", key: "customers", type: "customer", countKey: "customers", params: { updated_at_min: since } },
+    { path: "/orders.json", key: "orders", type: "order", countKey: "orders", params: { updated_at_min: since, status: "any" } },
+  ];
+
+  for (const resource of resources) {
+    try {
+      const items = await fetchAllPages(client, resource.path, resource.key, resource.params);
+      for (const item of items) {
+        await persistEntity(store.id, store.tenant_id, resource.type, item, "background_poll");
+      }
+      counts[resource.countKey] = items.length;
+    } catch (err) {
+      console.error(`[shopifyPoll] ${resource.type} store ${store.id}:`, err.message);
+    }
+  }
+
+  await touchLastSynced(store.id, store.tenant_id);
+  return counts;
 }

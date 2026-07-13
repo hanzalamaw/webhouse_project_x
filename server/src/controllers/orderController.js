@@ -4,7 +4,7 @@ import { tryParseEntityId } from "../utils/ids.js";
 export const orderController = {
   async dashboard(req, res) {
     try {
-      res.json(await orderService.dashboard(req.tenantId));
+      res.json(await orderService.dashboard(req.tenantId, req.query));
     } catch (e) {
       res.status(500).json({ message: e.message });
     }
@@ -22,7 +22,10 @@ export const orderController = {
     try {
       const warehouseId = Number(req.query.warehouse_id);
       if (!warehouseId) return res.status(400).json({ message: "warehouse_id is required" });
-      res.json({ data: await orderService.warehouseProducts(req.tenantId, warehouseId) });
+      const source = String(req.query.source || "").trim().toLowerCase() || undefined;
+      res.json({
+        data: await orderService.warehouseProducts(req.tenantId, warehouseId, { source }),
+      });
     } catch (e) {
       res.status(500).json({ message: e.message });
     }
@@ -139,11 +142,14 @@ export const orderController = {
     try {
       const id = tryParseEntityId(req.params.id);
       if (!id) return res.status(400).json({ message: "Invalid order id" });
-      const ok = await orderService.deleteOrder(req.tenantId, id);
-      if (!ok) return res.status(404).json({ message: "Order not found" });
-      res.json({ ok: true });
+      const result = await orderService.deleteOrder(req.tenantId, id);
+      if (!result?.deleted) return res.status(404).json({ message: "Order not found" });
+      res.json({
+        ok: true,
+        shopifySync: result.shopifySync || null,
+      });
     } catch (e) {
-      res.status(500).json({ message: e.message });
+      res.status(e.status || 500).json({ message: e.message });
     }
   },
 

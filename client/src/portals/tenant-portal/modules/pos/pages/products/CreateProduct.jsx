@@ -210,8 +210,8 @@ export default function CreateProduct() {
         );
         setMessage("Product created successfully.");
         await reload();
+        setTimeout(() => navigate(`${MODULE_BASE}/products/manage`), 700);
       }
-      setTimeout(() => navigate(`${MODULE_BASE}/products/manage`), 700);
     } catch (e) {
       setError(e.message);
     } finally {

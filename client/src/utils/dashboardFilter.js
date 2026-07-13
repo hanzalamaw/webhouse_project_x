@@ -8,6 +8,53 @@ export const EMPTY_DASHBOARD_FILTER = {
   dateTo: "",
 };
 
+export function dashboardFiltersEqual(a, b) {
+  if (!a || !b) return false;
+  return (
+    Boolean(a.allTime) === Boolean(b.allTime) &&
+    String(a.year || "") === String(b.year || "") &&
+    String(a.dateFrom || "") === String(b.dateFrom || "") &&
+    String(a.dateTo || "") === String(b.dateTo || "")
+  );
+}
+
+/** Keep year, custom dates, and all-time mutually consistent. */
+export function normalizeDashboardFilterState(prev, patch) {
+  const next = { ...prev, ...patch };
+  if (patch.allTime === true) {
+    next.year = "";
+    next.dateFrom = "";
+    next.dateTo = "";
+  }
+  if (patch.year != null && patch.year !== "") {
+    next.allTime = false;
+    next.dateFrom = "";
+    next.dateTo = "";
+  }
+  if ("dateFrom" in patch || "dateTo" in patch) {
+    const from = "dateFrom" in patch ? patch.dateFrom : next.dateFrom;
+    const to = "dateTo" in patch ? patch.dateTo : next.dateTo;
+    if (from || to) {
+      next.allTime = false;
+      next.year = "";
+    }
+  }
+  return next;
+}
+
+export function dashboardFilterToQueryParams(filter = {}) {
+  const params = new URLSearchParams();
+  const hasRange = Boolean(filter.dateFrom || filter.dateTo);
+  if (filter.allTime && !filter.year && !hasRange) {
+    params.set("all_time", "1");
+  } else {
+    if (filter.year && !hasRange) params.set("year", filter.year);
+    if (filter.dateFrom) params.set("date_from", filter.dateFrom);
+    if (filter.dateTo) params.set("date_to", filter.dateTo);
+  }
+  return params;
+}
+
 function padDatePart(n) {
   return String(n).padStart(2, "0");
 }
@@ -27,7 +74,7 @@ export function createThisMonthDashboardFilter() {
 }
 
 export function isAllTimeDashboardFilter(filter) {
-  return Boolean(filter.allTime) && !filter.year;
+  return Boolean(filter.allTime) && !filter.year && !filter.dateFrom && !filter.dateTo;
 }
 
 export function getEarliestDate(rows, dateField = "created_at") {
@@ -140,17 +187,21 @@ export function sumInDashboardFilter(rows, dateField, valueField, filter, fiscal
 }
 
 export function rowMatchesDashboardFilter(value, filter, fiscalYearStart = null) {
-  if (filter.allTime && !filter.year) return true;
+  if (filter.allTime && !filter.year && !filter.dateFrom && !filter.dateTo) return true;
 
   const d = value ? new Date(value) : null;
   if (!d || Number.isNaN(d.getTime())) return false;
 
-  if (filter.year) {
-    if (fiscalYearStart) {
-      const range = getFiscalYearFilterRange(Number(filter.year), fiscalYearStart);
-      if (d < range.start || d > range.end) return false;
-    } else if (d.getFullYear() !== Number(filter.year)) {
-      return false;
+  const hasCustomRange = Boolean(filter.dateFrom || filter.dateTo);
+
+  if (!hasCustomRange) {
+    const yearOnly = Boolean(filter.year) && !filter.dateFrom && !filter.dateTo;
+    if (yearOnly) {
+      if (fiscalYearStart) {
+        const range = getFiscalYearFilterRange(Number(filter.year), fiscalYearStart);
+        return d >= range.start && d <= range.end;
+      }
+      return d.getFullYear() === Number(filter.year);
     }
   }
 
@@ -162,6 +213,6 @@ export function rowMatchesDashboardFilter(value, filter, fiscalYearStart = null)
 }
 
 export function filterRowsByDashboard(rows, dateField, filter, fiscalYearStart = null) {
-  if (filter.allTime && !filter.year) return rows;
+  if (filter.allTime && !filter.year && !filter.dateFrom && !filter.dateTo) return rows;
   return rows.filter((row) => rowMatchesDashboardFilter(row[dateField], filter, fiscalYearStart));
 }

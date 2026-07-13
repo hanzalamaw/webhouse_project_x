@@ -54,6 +54,7 @@ export default function UserForm() {
   const [createBaseline, setCreateBaseline] = useState(null);
   const [loading, setLoading] = useState(isEdit);
   const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
   const [phase, setPhase] = useState("form");
   const [editingSuperAdmin, setEditingSuperAdmin] = useState(false);
@@ -82,7 +83,7 @@ export default function UserForm() {
   }, [baseline, createBaseline, form, isEdit]);
 
   const { dialogOpen, stayOnPage, leavePage, navigateSafely } = useUnsavedChangesGuard(isDirty, {
-    enabled: isEdit ? baseline !== null : createBaseline !== null,
+    enabled: isEdit ? baseline !== null && !loading : createBaseline !== null,
     mode: isEdit ? "edit" : "create",
   });
 
@@ -174,6 +175,7 @@ export default function UserForm() {
     }
     setSaving(true);
     setError("");
+    setMessage("");
     try {
       const payload = {
         name: form.name.trim(),
@@ -188,7 +190,7 @@ export default function UserForm() {
       if (isEdit) {
         await apiFetch(`/tenant/users/${userId}`, { method: "PUT", body: JSON.stringify(payload) }, authFetch);
         setBaseline(serializeForm({ ...form, password: "" }));
-        navigateSafely(`${MODULE_BASE}/user-management`);
+        setMessage("User updated successfully.");
         return;
       }
 
@@ -251,7 +253,7 @@ export default function UserForm() {
             else goToReview();
           }}
         >
-          <FormPageAlerts error={error} />
+          <FormPageAlerts error={error} message={message} />
 
           {(!isEdit && phase === "review") ? (
             <FormBlock title="Review" description="Confirm the details below before creating this user.">

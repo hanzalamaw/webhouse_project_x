@@ -5,7 +5,25 @@ import {
   resolveVariantsFromBody,
   reconstructOptionsFromVariants,
   variantComboKey,
+  resolveIncomingVariantKey,
 } from "../utils/productVariants.js";
+import {
+  syncEntityToShopify,
+  syncVariantInventoryToShopify,
+  syncEntityToDaraz,
+  syncVariantInventoryToDaraz,
+  deleteLinkedProductFromShopify,
+  deleteLinkedProductFromDaraz,
+  deleteLinkedWarehouseFromShopify,
+} from "./ecommerce/ecomPush.js";
+import { requireShopifySync, requireShopifySyncIfLinked } from "./ecommerce/shopifySyncGuard.js";
+import { requireDarazSync, requireDarazSyncIfLinked } from "./ecommerce/darazSyncGuard.js";
+import {
+  assertProductCanDelete,
+  assertLinkedStockWarehouseMapped,
+  assertRequireShopifySyncOnSave,
+} from "./ecommerce/shopifyPolicy.js";
+import { assertRequireDarazSyncOnSave } from "./ecommerce/darazPolicy.js";
 
 const STATUS_VALUES = ["active", "inactive"];
 const MOVEMENT_TYPES = ["initial_stock", "stock_in", "stock_out", "transfer_in", "transfer_out"];
@@ -98,6 +116,45 @@ function normalizeBulkQtyItems(body, label = "item") {
   }));
 }
 
+function productSnapshotToBody(snapshot) {
+  return {
+    options: snapshot.options || [],
+    variants: (snapshot.variants || []).map((v) => ({
+      id: v.id,
+      sku: v.sku,
+      variant_name: v.variant_name,
+      cost_price: v.cost_price,
+      selling_price: v.selling_price,
+      status: v.status,
+      attributes: v.attributes || [],
+      combo_key: variantComboKey(v.attributes || []),
+      stock_levels: (v.stock_levels || []).map((sl) => ({
+        warehouse_id: sl.warehouse_id,
+        available_qty: sl.available_qty ?? 0,
+        reserved_qty: sl.reserved_qty ?? 0,
+        damaged_qty: sl.damaged_qty ?? 0,
+      })),
+    })),
+  };
+}
+
+async function restoreProductSnapshot(tenantId, userId, productId, snapshot) {
+  if (!snapshot) return;
+  await inventoryRepository.updateProduct(tenantId, productId, {
+    product_name: snapshot.product_name,
+    description: snapshot.description,
+    unit: snapshot.unit,
+    default_cost_price: snapshot.default_cost_price,
+    default_selling_price: snapshot.default_selling_price,
+    delivery_charges: snapshot.delivery_charges,
+    discount: snapshot.discount,
+    tax: snapshot.tax,
+    status: snapshot.status,
+    category_id: snapshot.category_id,
+  });
+  await syncProductVariants(tenantId, userId, productId, productSnapshotToBody(snapshot), snapshot.product_name);
+}
+
 async function persistVariantRow(tenantId, userId, productId, v) {
   const sku = String(v.sku || "").trim();
   const variant_name = String(v.variant_name || "").trim();
@@ -155,28 +212,46 @@ async function persistVariantRow(tenantId, userId, productId, v) {
 
 async function syncProductVariants(tenantId, userId, productId, body, productName) {
   const { variants } = resolveVariantsFromBody(body, productName);
+  await inventoryRepository.releaseSoftDeletedVariantSkus(tenantId, productId);
   const existing = await inventoryRepository.getVariantsByProductId(tenantId, productId);
-  const existingByKey = new Map();
-  for (const v of existing) {
-    existingByKey.set(variantComboKey(v.attributes), v);
-  }
 
   const seenKeys = new Set();
+  const incomingIds = new Set();
   for (const v of variants) {
-    const key = v.combo_key || variantComboKey(v.attributes);
-    seenKeys.add(key);
-    const match = existingByKey.get(key);
-    await persistVariantRow(tenantId, userId, productId, {
-      ...v,
-      id: v.id || match?.id || null,
-    });
+    seenKeys.add(resolveIncomingVariantKey(v));
+    if (v.id) incomingIds.add(Number(v.id));
   }
 
   for (const v of existing) {
-    const key = variantComboKey(v.attributes);
-    if (!seenKeys.has(key)) {
-      await inventoryRepository.softDeleteVariant(tenantId, v.id);
-    }
+    const key = variantComboKey(v.attributes || []);
+    if (seenKeys.has(key) || incomingIds.has(v.id)) continue;
+    await inventoryRepository.softDeleteVariant(tenantId, v.id);
+  }
+
+  const remaining = await inventoryRepository.getVariantsByProductId(tenantId, productId);
+  const existingByKey = new Map();
+  const existingById = new Map();
+  const existingBySku = new Map();
+  for (const v of remaining) {
+    const key = variantComboKey(v.attributes || []);
+    existingByKey.set(key, v);
+    existingById.set(v.id, v);
+    const skuKey = String(v.sku || "").trim().toLowerCase();
+    if (skuKey) existingBySku.set(skuKey, v);
+  }
+
+  for (const v of variants) {
+    const key = resolveIncomingVariantKey(v);
+    const skuKey = String(v.sku || "").trim().toLowerCase();
+    const matchById = v.id ? existingById.get(Number(v.id)) : null;
+    const matchByKey = existingByKey.get(key);
+    const matchBySku = skuKey ? existingBySku.get(skuKey) : null;
+    const match = matchById || matchByKey || matchBySku;
+
+    await persistVariantRow(tenantId, userId, productId, {
+      ...v,
+      id: Number(v.id) || match?.id || null,
+    });
   }
 }
 
@@ -223,6 +298,74 @@ async function applyStockDelta(tenantId, variantId, warehouseId, deltaAvailable,
     throw new Error("Insufficient available stock");
   }
   return inventoryRepository.upsertStockLevel(tenantId, variantId, warehouseId, deltaAvailable, deltaDamaged);
+}
+
+async function requireLinkedShopifyStockSync(tenantId, variantId, options = {}) {
+  const result = await syncVariantInventoryToShopify(tenantId, variantId, options);
+  requireShopifySyncIfLinked(result, "Inventory");
+  return result;
+}
+
+async function requireLinkedDarazStockSync(tenantId, variantId) {
+  const result = await syncVariantInventoryToDaraz(tenantId, variantId);
+  requireDarazSyncIfLinked(result, "Inventory");
+  return result;
+}
+
+async function afterStockChangeWithShopify(tenantId, variantId, warehouseId, qtyDelta, result) {
+  try {
+    await requireLinkedShopifyStockSync(tenantId, variantId, { warehouseId, qtyDelta });
+    await requireLinkedDarazStockSync(tenantId, variantId);
+    return result;
+  } catch (err) {
+    if (qtyDelta) {
+      await applyStockDelta(tenantId, variantId, warehouseId, -qtyDelta);
+    }
+    throw err;
+  }
+}
+
+async function afterBulkStockChangeWithShopify(tenantId, warehouseId, lines, result) {
+  const variantIds = [...new Set(result.items.map((item) => item.variant_id))];
+  try {
+    for (const variantId of variantIds) {
+      await requireLinkedShopifyStockSync(tenantId, variantId);
+      await requireLinkedDarazStockSync(tenantId, variantId);
+    }
+    return result;
+  } catch (err) {
+    for (const line of lines) {
+      await applyStockDelta(tenantId, line.variant_id, warehouseId, -line.qty);
+    }
+    throw err;
+  }
+}
+
+async function afterTransferWithShopify(tenantId, variantId, fromWarehouseId, toWarehouseId, qty, result) {
+  try {
+    await requireLinkedShopifyStockSync(tenantId, variantId);
+    return result;
+  } catch (err) {
+    await applyStockDelta(tenantId, variantId, fromWarehouseId, qty);
+    await applyStockDelta(tenantId, variantId, toWarehouseId, -qty);
+    throw err;
+  }
+}
+
+async function afterBulkTransferWithShopify(tenantId, fromWarehouseId, toWarehouseId, lines, result) {
+  const variantIds = [...new Set(result.items.map((item) => item.variant_id))];
+  try {
+    for (const variantId of variantIds) {
+      await requireLinkedShopifyStockSync(tenantId, variantId);
+    }
+    return result;
+  } catch (err) {
+    for (const line of lines) {
+      await applyStockDelta(tenantId, line.variant_id, fromWarehouseId, line.qty);
+      await applyStockDelta(tenantId, line.variant_id, toWarehouseId, -line.qty);
+    }
+    throw err;
+  }
 }
 
 async function applyVariantWarehouseStocks(tenantId, userId, variantId, warehouseStocks) {
@@ -370,6 +513,21 @@ export const inventoryService = {
     const productPricing = parseProductPricing(body);
     const { variants } = resolveVariantsFromBody(body, product_name);
 
+    const defaultStock = body.default_warehouse_stock;
+    if (defaultStock?.enabled && defaultStock.warehouse_id) {
+      for (const v of variants) {
+        if (!Array.isArray(v.warehouse_stocks) || !v.warehouse_stocks.length) {
+          v.warehouse_stocks = [{
+            warehouse_id: Number(defaultStock.warehouse_id),
+            initial_qty: Number(defaultStock.initial_qty) || 0,
+            reserved_qty: 0,
+            damaged_qty: 0,
+            stock_notes: "Opening stock on product creation",
+          }];
+        }
+      }
+    }
+
     for (const v of variants) {
       const dup = await inventoryRepository.findVariantBySku(tenantId, v.sku);
       if (dup) throw new Error(`SKU already exists: ${v.sku}`);
@@ -378,10 +536,12 @@ export const inventoryService = {
     return withTransaction(async () => {
       const productId = await inventoryRepository.createProduct(tenantId, {
         product_name,
+        description: body.description ? String(body.description).trim() : null,
         unit,
         ...productPricing,
         status,
         category_id,
+        source: body.source || "manual",
       });
 
       for (const v of variants) {
@@ -389,12 +549,42 @@ export const inventoryService = {
       }
 
       return this.getProduct(tenantId, productId);
+    }).then(async (product) => {
+      if (body.syncToShopify) {
+        try {
+          const push = await syncEntityToShopify(tenantId, "product", product.id);
+          requireShopifySync(push, "Product");
+          return { ...product, shopifySync: push };
+        } catch (err) {
+          await inventoryRepository.softDeleteProduct(tenantId, product.id);
+          throw err;
+        }
+      }
+      if (body.syncToDaraz) {
+        try {
+          const push = await syncEntityToDaraz(tenantId, "product", product.id, {
+            primaryCategoryId: body.daraz_primary_category_id || null,
+            brand: body.daraz_brand || "",
+            shortDescription: body.daraz_short_description || "",
+            packageDims: body.daraz_package || {},
+          });
+          requireDarazSync(push, "Product");
+          return { ...product, darazSync: push };
+        } catch (err) {
+          await inventoryRepository.softDeleteProduct(tenantId, product.id);
+          throw err;
+        }
+      }
+      return product;
     });
   },
 
   async updateProduct(tenantId, userId, id, body) {
     const existing = await inventoryRepository.getProductById(tenantId, id);
     if (!existing) return null;
+    await assertRequireShopifySyncOnSave(tenantId, "product", id, body.syncToShopify);
+    await assertRequireDarazSyncOnSave(tenantId, "product", id, body.syncToDaraz);
+    const before = (body.syncToShopify || body.syncToDaraz) ? await this.getProduct(tenantId, id) : null;
 
     const product_name = String(body.product_name ?? existing.product_name).trim();
     if (!product_name) throw new Error("Product name is required");
@@ -408,20 +598,54 @@ export const inventoryService = {
 
     await inventoryRepository.updateProduct(tenantId, id, {
       product_name,
+      description: body.description != null ? String(body.description).trim() : existing.description,
       unit: String(body.unit ?? existing.unit).trim(),
       ...productPricing,
       status,
       category_id,
+      ...(body.source != null ? { source: body.source } : {}),
     });
 
     if (body.options != null || Array.isArray(body.variants)) {
       await syncProductVariants(tenantId, userId, id, body, product_name);
     }
 
-    return this.getProduct(tenantId, id);
+    const product = await this.getProduct(tenantId, id);
+    if (body.syncToShopify) {
+      try {
+        const push = await syncEntityToShopify(tenantId, "product", id, { beforeProduct: before });
+        requireShopifySync(push, "Product");
+        return { ...product, shopifySync: push };
+      } catch (err) {
+        await restoreProductSnapshot(tenantId, userId, id, before);
+        throw err;
+      }
+    }
+    if (body.syncToDaraz) {
+      try {
+        const push = await syncEntityToDaraz(tenantId, "product", id, {
+          beforeProduct: before,
+          primaryCategoryId: body.daraz_primary_category_id || null,
+          brand: body.daraz_brand || "",
+          shortDescription: body.daraz_short_description || "",
+          packageDims: body.daraz_package || {},
+        });
+        requireDarazSync(push, "Product");
+        return { ...product, darazSync: push };
+      } catch (err) {
+        await restoreProductSnapshot(tenantId, userId, id, before);
+        throw err;
+      }
+    }
+    return product;
   },
 
   async removeProduct(tenantId, id) {
+    await assertProductCanDelete(tenantId, id);
+    const shopifySync = await deleteLinkedProductFromShopify(tenantId, id);
+    requireShopifySyncIfLinked(shopifySync, "Product");
+    const darazSync = await deleteLinkedProductFromDaraz(tenantId, id);
+    requireDarazSyncIfLinked(darazSync, "Product");
     return inventoryRepository.softDeleteProduct(tenantId, id);
   },
 
@@ -525,12 +749,23 @@ export const inventoryService = {
       city: body.city || null,
       status,
     });
-    return inventoryRepository.getWarehouseById(tenantId, id);
+    const warehouse = await inventoryRepository.getWarehouseById(tenantId, id);
+    if (!body.syncToShopify) return warehouse;
+    try {
+      const push = await syncEntityToShopify(tenantId, "warehouse", id);
+      requireShopifySync(push, "Warehouse");
+      return { ...warehouse, shopifySync: push };
+    } catch (err) {
+      await inventoryRepository.softDeleteWarehouse(tenantId, id);
+      throw err;
+    }
   },
 
   async updateWarehouse(tenantId, id, body) {
     const existing = await inventoryRepository.getWarehouseById(tenantId, id);
     if (!existing) return null;
+    await assertRequireShopifySyncOnSave(tenantId, "warehouse", id, body.syncToShopify);
+    const before = body.syncToShopify ? { ...existing } : null;
 
     const warehouse_name = String(body.warehouse_name ?? existing.warehouse_name).trim();
     if (!warehouse_name) throw new Error("Warehouse name is required");
@@ -543,10 +778,28 @@ export const inventoryService = {
       city: body.city ?? existing.city,
       status,
     });
-    return inventoryRepository.getWarehouseById(tenantId, id);
+    const warehouse = await inventoryRepository.getWarehouseById(tenantId, id);
+    if (!body.syncToShopify) return warehouse;
+    try {
+      const push = await syncEntityToShopify(tenantId, "warehouse", id, { beforeWarehouse: before });
+      requireShopifySync(push, "Warehouse");
+      return { ...warehouse, shopifySync: push };
+    } catch (err) {
+      if (before) {
+        await inventoryRepository.updateWarehouse(tenantId, id, {
+          warehouse_name: before.warehouse_name,
+          location: before.location,
+          city: before.city,
+          status: before.status,
+        });
+      }
+      throw err;
+    }
   },
 
   async removeWarehouse(tenantId, id) {
+    const shopifySync = await deleteLinkedWarehouseFromShopify(tenantId, id);
+    requireShopifySyncIfLinked(shopifySync, "Warehouse");
     return inventoryRepository.softDeleteWarehouse(tenantId, id);
   },
 
@@ -566,6 +819,7 @@ export const inventoryService = {
     const qty = assertPositiveInt(body.qty, "Quantity");
     const variant = await resolveVariantId(tenantId, body);
     await ensureWarehouse(tenantId, warehouse_id);
+    await assertLinkedStockWarehouseMapped(tenantId, variant.id, warehouse_id);
 
     return withTransaction(async () => {
       await applyStockDelta(tenantId, variant.id, warehouse_id, qty);
@@ -578,7 +832,7 @@ export const inventoryService = {
       });
       const { rows } = await inventoryRepository.listMovements(tenantId, { limit: 1, offset: 0 });
       return rows[0] || { id: movementId };
-    });
+    }).then(async (result) => afterStockChangeWithShopify(tenantId, variant.id, warehouse_id, qty, result));
   },
 
   async stockOut(tenantId, userId, body) {
@@ -586,6 +840,7 @@ export const inventoryService = {
     const qty = assertPositiveInt(body.qty, "Quantity");
     const variant = await resolveVariantId(tenantId, body);
     await ensureWarehouse(tenantId, warehouse_id);
+    await assertLinkedStockWarehouseMapped(tenantId, variant.id, warehouse_id);
 
     return withTransaction(async () => {
       await applyStockDelta(tenantId, variant.id, warehouse_id, -qty);
@@ -597,7 +852,7 @@ export const inventoryService = {
         warehouse_id,
       });
       return { id: movementId };
-    });
+    }).then(async (result) => afterStockChangeWithShopify(tenantId, variant.id, warehouse_id, -qty, result));
   },
 
   async bulkStockIn(tenantId, userId, body) {
@@ -605,6 +860,9 @@ export const inventoryService = {
     if (!warehouse_id) throw new Error("Warehouse is required");
     await ensureWarehouse(tenantId, warehouse_id);
     const lines = normalizeBulkQtyItems(body, "variant");
+    for (const line of lines) {
+      await assertLinkedStockWarehouseMapped(tenantId, line.variant_id, warehouse_id);
+    }
 
     return withTransaction(async () => {
       const created = [];
@@ -621,7 +879,7 @@ export const inventoryService = {
         created.push({ id, variant_id: line.variant_id });
       }
       return { count: created.length, items: created };
-    });
+    }).then(async (result) => afterBulkStockChangeWithShopify(tenantId, warehouse_id, lines, result));
   },
 
   async bulkStockOut(tenantId, userId, body) {
@@ -629,6 +887,9 @@ export const inventoryService = {
     if (!warehouse_id) throw new Error("Warehouse is required");
     await ensureWarehouse(tenantId, warehouse_id);
     const lines = normalizeBulkQtyItems(body, "variant");
+    for (const line of lines) {
+      await assertLinkedStockWarehouseMapped(tenantId, line.variant_id, warehouse_id);
+    }
 
     return withTransaction(async () => {
       const created = [];
@@ -645,7 +906,7 @@ export const inventoryService = {
         created.push({ id, variant_id: line.variant_id });
       }
       return { count: created.length, items: created };
-    });
+    }).then(async (result) => afterBulkStockChangeWithShopify(tenantId, warehouse_id, lines.map((l) => ({ ...l, qty: -l.qty })), result));
   },
 
   async listTransfers(tenantId, query) {
@@ -666,6 +927,8 @@ export const inventoryService = {
 
     await ensureWarehouse(tenantId, from_warehouse_id);
     await ensureWarehouse(tenantId, to_warehouse_id);
+    await assertLinkedStockWarehouseMapped(tenantId, variant.id, from_warehouse_id);
+    await assertLinkedStockWarehouseMapped(tenantId, variant.id, to_warehouse_id);
 
     const completeNow = body.complete !== false;
 
@@ -698,6 +961,16 @@ export const inventoryService = {
       });
 
       return inventoryRepository.getTransferById(tenantId, transferId);
+    }).then(async (result) => {
+      if (!completeNow) return result;
+      return afterTransferWithShopify(
+        tenantId,
+        variant.id,
+        from_warehouse_id,
+        to_warehouse_id,
+        qty,
+        result,
+      );
     });
   },
 
@@ -711,6 +984,10 @@ export const inventoryService = {
     await ensureWarehouse(tenantId, from_warehouse_id);
     await ensureWarehouse(tenantId, to_warehouse_id);
     const lines = normalizeBulkQtyItems(body, "variant");
+    for (const line of lines) {
+      await assertLinkedStockWarehouseMapped(tenantId, line.variant_id, from_warehouse_id);
+      await assertLinkedStockWarehouseMapped(tenantId, line.variant_id, to_warehouse_id);
+    }
     const completeNow = body.complete !== false;
 
     return withTransaction(async () => {
@@ -745,6 +1022,9 @@ export const inventoryService = {
         created.push({ id: transferId, variant_id: line.variant_id });
       }
       return { count: created.length, items: created };
+    }).then(async (result) => {
+      if (!completeNow) return result;
+      return afterBulkTransferWithShopify(tenantId, from_warehouse_id, to_warehouse_id, lines, result);
     });
   },
 
@@ -753,6 +1033,8 @@ export const inventoryService = {
     if (!transfer) return null;
     if (transfer.transfer_status === "completed") throw new Error("Transfer already completed");
     if (transfer.transfer_status === "cancelled") throw new Error("Transfer is cancelled");
+    await assertLinkedStockWarehouseMapped(tenantId, transfer.variant_id, transfer.from_warehouse_id);
+    await assertLinkedStockWarehouseMapped(tenantId, transfer.variant_id, transfer.to_warehouse_id);
 
     return withTransaction(async () => {
       await applyStockDelta(tenantId, transfer.variant_id, transfer.from_warehouse_id, -transfer.qty);
@@ -773,7 +1055,14 @@ export const inventoryService = {
       });
       await inventoryRepository.updateTransferStatus(tenantId, id, "completed");
       return inventoryRepository.getTransferById(tenantId, id);
-    });
+    }).then(async (result) => afterTransferWithShopify(
+      tenantId,
+      transfer.variant_id,
+      transfer.from_warehouse_id,
+      transfer.to_warehouse_id,
+      transfer.qty,
+      result,
+    ));
   },
 
   async cancelTransfer(tenantId, id) {

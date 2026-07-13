@@ -11,10 +11,11 @@ import { Button } from "../../../../../../components/Button";
 import { Card } from "../../../../../../components/Card";
 import { OrderFieldSelect } from "../../../../../../components/OrderFieldSelect";
 import { Modal } from "../../../../../../components/Modal";
+import { ConfirmDeleteModal } from "../../../../../../components/ConfirmDeleteModal";
 import { FormBlock } from "../../../../../../components/FormBlock";
 import { FormPageLayout, FormPageAlerts, FormActions } from "../../../../../../components/FormPageLayout";
 import { useOrderReference } from "../../hooks/useOrderReference";
-import { MODULE_BASE, ORDER_SOURCE_LABELS } from "../../constants";
+import { MODULE_BASE, ORDER_SOURCE_LABELS, ORDER_STATUS_LABELS } from "../../constants";
 import {
   CUSTOMER_TYPES,
   CUSTOMER_STATUSES,
@@ -33,6 +34,26 @@ import {
   productDeliveryTotal,
   lineDiscountForQty,
 } from "../../utils/orderLinePricing";
+import { useEcomSyncLink } from "../../../ecommerce/hooks/useShopifySyncLink";
+import { useConnectedEcomStores } from "../../../ecommerce/hooks/useConnectedEcomStores";
+import { IntegrationDestinationField } from "../../../ecommerce/components/IntegrationDestinationField";
+import { INTEGRATION_DESTINATIONS } from "../../../ecommerce/constants";
+import { ecomApiGet } from "../../../ecommerce/api/ecommerceClient";
+import { resolveIntegrationSave, resolveLinkedEditSave } from "../../../ecommerce/utils/integrationDestination";
+import {
+  validateOrderForErp,
+  validateOrderForShopify,
+  syncValidationSummary,
+  scrollToFirstFieldError,
+} from "../../../ecommerce/utils/syncFieldValidation";
+
+/** Catalog filter for warehouse product search based on save destination only. */
+function productCatalogSource(saveDestination) {
+  const dest = String(saveDestination || "").toLowerCase();
+  if (dest === INTEGRATION_DESTINATIONS.SHOPIFY) return "shopify";
+  if (dest === INTEGRATION_DESTINATIONS.DARAZ) return "daraz";
+  return "manual";
+}
 
 const ORDER_INITIAL = {
   customer_id: "",
@@ -44,6 +65,10 @@ const ORDER_INITIAL = {
   delivery_charges: "0",
   city: "",
   delivery_address: "",
+  delivery_state: "",
+  delivery_postal_code: "",
+  delivery_country: "",
+  tags: "",
   notes: "",
 };
 
@@ -59,22 +84,65 @@ const CUSTOMER_INITIAL = {
 
 const digitsOf = (s) => String(s || "").replace(/\D/g, "");
 
-function serializeState(form, items, warehouseId, customerForm, customerPhone) {
-  return JSON.stringify({ form, items, warehouseId, customerForm, customerPhone });
+function normalizeOrderItems(items) {
+  return (items || []).map((item) => ({
+    product_id: String(item.product_id || ""),
+    variant_id: String(item.variant_id || ""),
+    product_name: item.product_name || "",
+    variant_name: item.variant_name || "",
+    sku: item.sku || "",
+    quantity: String(item.quantity ?? ""),
+    unit_price: String(item.unit_price ?? ""),
+    product_discount: String(item.product_discount ?? ""),
+    product_tax: String(item.product_tax ?? ""),
+    product_delivery: String(item.product_delivery ?? ""),
+    discount: String(item.discount ?? ""),
+  }));
 }
 
-function normalizeCustomerSnapshot(customerForm, customerPhone, form) {
+function serializeState(form, items, warehouseId, customerForm, customerPhone) {
+  return JSON.stringify({
+    form,
+    items: normalizeOrderItems(items),
+    warehouseId: String(warehouseId || ""),
+    customerForm,
+    customerPhone: String(customerPhone || ""),
+  });
+}
+
+function normalizeCustomerProfileSnapshot(customerForm, customerPhone) {
   return {
     customer_name: (customerForm.customer_name || "").trim(),
     company_name: (customerForm.company_name || "").trim(),
-    customer_type: customerForm.customer_type || "retailer",
-    status: customerForm.status || "active",
-    email: (customerForm.email || "").trim(),
+    customer_type: String(customerForm.customer_type || "retailer").trim().toLowerCase() || "retailer",
+    status: String(customerForm.status || "active").trim().toLowerCase() || "active",
+    email: (customerForm.email || "").trim().toLowerCase(),
     note: (customerForm.note || "").trim(),
     phone: digitsOf(customerPhone),
-    tags: String(customerForm.tags || "").split(",").map((t) => t.trim()).filter(Boolean).sort().join(","),
-    city: (form.city || "").trim(),
-    delivery_address: (form.delivery_address || "").trim(),
+    tags: String(customerForm.tags || "")
+      .split(",")
+      .map((t) => t.trim().toLowerCase())
+      .filter(Boolean)
+      .sort()
+      .join(","),
+  };
+}
+
+function customerFormFromDetail(d) {
+  const tags = Array.isArray(d?.tags)
+    ? d.tags.map((t) => (typeof t === "string" ? t : t?.tag_name)).filter(Boolean)
+    : String(d?.tags || "")
+        .split(",")
+        .map((t) => t.trim())
+        .filter(Boolean);
+  return {
+    customer_name: d?.customer_name || "",
+    company_name: d?.company_name || "",
+    customer_type: d?.customer_type || "retailer",
+    status: d?.status || "active",
+    email: d?.email || "",
+    tags: tags.join(", "),
+    note: d?.note || "",
   };
 }
 
@@ -95,7 +163,7 @@ export default function CreateOrder() {
   const { orderId } = useParams();
   const isEdit = Boolean(orderId);
   const { authFetch } = useAuth();
-  const { canCreate, canEdit, readOnly } = useModulePermission("order-management");
+  const { canCreate, canEdit, canDelete, readOnly } = useModulePermission("order-management");
   const { customers, warehouses, field_options, loading: refLoading, loadError, addFieldOption } = useOrderReference();
   const [form, setForm] = useState(ORDER_INITIAL);
   const [items, setItems] = useState([]);
@@ -106,10 +174,18 @@ export default function CreateOrder() {
   const [loadingProducts, setLoadingProducts] = useState(false);
   const [baseline, setBaseline] = useState(null);
   const [createBaseline, setCreateBaseline] = useState(null);
+  const [pendingBaselineCapture, setPendingBaselineCapture] = useState(false);
   const [loadingProduct, setLoadingProduct] = useState(isEdit);
-  const [error, setError] = useState("");
+  const [actionError, setActionError] = useState("");
+  const [fieldErrors, setFieldErrors] = useState({});
+  const [actionMessage, setActionMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [stockWarning, setStockWarning] = useState(null);
+  const [initialLineKeys, setInitialLineKeys] = useState(() => new Set());
+  const [orderNo, setOrderNo] = useState("");
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const formActionsRef = useRef(null);
 
   // Customer capture
   const [customerPhone, setCustomerPhone] = useState("");
@@ -118,11 +194,116 @@ export default function CreateOrder() {
   const [linkedOriginal, setLinkedOriginal] = useState(null);
   const [phonePrompt, setPhonePrompt] = useState(null);
   const [customerUpdatePrompt, setCustomerUpdatePrompt] = useState(false);
-  const promptedDigitsRef = useRef("");
+  const [saveDestination, setSaveDestination] = useState(INTEGRATION_DESTINATIONS.ERP);
 
-  const disabled = readOnly || (isEdit ? !canEdit : !canCreate);
-  const set = (key, value) => setForm((f) => ({ ...f, [key]: value }));
-  const setCust = (key, value) => setCustomerForm((c) => ({ ...c, [key]: value }));
+  const { link: ecomLink, loading: linkLoading, isLinked: isStoreLinked, isShopifyLinked } = useEcomSyncLink(
+    "order",
+    orderId,
+    { enabled: isEdit },
+  );
+  const {
+    shopifyConnected,
+    darazConnected,
+    shopifyStoreName,
+    darazStoreName,
+    loading: storesLoading,
+  } = useConnectedEcomStores();
+  const formBusy = submitting || linkLoading || storesLoading || (isEdit && loadingProduct);
+  const promptedDigitsRef = useRef("");
+  const formRef = useRef(form);
+  const itemsRef = useRef(items);
+  const warehouseIdRef = useRef(warehouseId);
+  const customerFormRef = useRef(customerForm);
+  const customerPhoneRef = useRef(customerPhone);
+  formRef.current = form;
+  itemsRef.current = items;
+  warehouseIdRef.current = warehouseId;
+  customerFormRef.current = customerForm;
+  customerPhoneRef.current = customerPhone;
+
+  const disabled =
+    readOnly ||
+    (isEdit ? !canEdit : !canCreate) ||
+    (isEdit && ["cancelled", "returned"].includes(String(form.order_status || "").toLowerCase()));
+  const shopifyLockedLines =
+    isEdit
+    && isShopifyLinked
+    && ["fulfilled", "partial"].includes(String(form.fulfillment_status || "").toLowerCase());
+  const isLockedLine = (rowKey) => shopifyLockedLines && initialLineKeys.has(rowKey);
+  const clearFieldError = (...keys) => {
+    setFieldErrors((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const key of keys) {
+        if (next[key]) {
+          delete next[key];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  };
+
+  const set = (key, value) => {
+    clearFieldError(key);
+    setForm((f) => ({ ...f, [key]: value }));
+  };
+  const setCust = (key, value) => {
+    const map = {
+      customer_name: "customer_name",
+      email: "customer_email",
+    };
+    clearFieldError(map[key] || key);
+    if (key === "email") clearFieldError("customer_phone", "customer_email");
+    setCustomerForm((c) => ({ ...c, [key]: value }));
+  };
+
+  const handleDestinationChange = (destination) => {
+    clearFieldError("saveDestination");
+    setSaveDestination(destination);
+    const resolved = resolveIntegrationSave(destination, { shopifyConnected, darazConnected: false });
+    if (!resolved.error && resolved.orderSource) {
+      set("order_source", resolved.orderSource);
+    }
+  };
+
+  const showActionError = (msg) => {
+    setActionError(msg);
+    setActionMessage("");
+    requestAnimationFrame(() => {
+      formActionsRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  };
+
+  const resolveSaveDestination = () => (
+    isEdit && isStoreLinked
+      ? resolveLinkedEditSave(ecomLink, form.order_source)
+      : resolveIntegrationSave(saveDestination, { shopifyConnected, darazConnected: false })
+  );
+
+  const setOrderStatus = (value) => {
+    setForm((f) => ({
+      ...f,
+      order_status: value,
+      ...(value === "delivered" ? { fulfillment_status: "fulfilled" } : {}),
+    }));
+  };
+
+  const setFulfillmentStatus = (value) => {
+    setForm((f) => ({
+      ...f,
+      fulfillment_status: value,
+      // Fulfilled means delivered in our ERP status model (same as Shopify import mapping).
+      ...(value === "fulfilled"
+        && !["cancelled", "returned"].includes(String(f.order_status || "").toLowerCase())
+        ? { order_status: "delivered" }
+        : {}),
+      ...(value === "partial"
+        && !["cancelled", "returned", "delivered"].includes(String(f.order_status || "").toLowerCase())
+        ? { order_status: "shipped" }
+        : {}),
+    }));
+  };
 
   const isDirty = useMemo(() => {
     const snap = serializeState(form, items, warehouseId, customerForm, customerPhone);
@@ -131,7 +312,9 @@ export default function CreateOrder() {
   }, [baseline, createBaseline, form, items, warehouseId, customerForm, customerPhone, isEdit]);
 
   const { dialogOpen, stayOnPage, leavePage, reloadPending, navigateSafely } = useUnsavedChangesGuard(isDirty, {
-    enabled: isEdit ? baseline !== null : createBaseline !== null,
+    enabled: isEdit
+      ? baseline !== null && !loadingProduct && !refLoading
+      : createBaseline !== null && !refLoading,
     mode: isEdit ? "edit" : "create",
   });
 
@@ -140,14 +323,16 @@ export default function CreateOrder() {
     setCreateBaseline(serializeState(form, items, warehouseId, customerForm, customerPhone));
   }, [isEdit, createBaseline, refLoading, loadingProduct, form, items, warehouseId, customerForm, customerPhone]);
 
-  const loadWarehouseProducts = useCallback(async (wid) => {
+  const loadWarehouseProducts = useCallback(async (wid, source) => {
     if (!wid) {
       setWarehouseProducts([]);
       return;
     }
     setLoadingProducts(true);
     try {
-      const res = await apiFetch(`/orders/warehouse-products?warehouse_id=${wid}`, {}, authFetch);
+      const qs = new URLSearchParams({ warehouse_id: String(wid) });
+      if (source) qs.set("source", source);
+      const res = await apiFetch(`/orders/warehouse-products?${qs}`, {}, authFetch);
       setWarehouseProducts(res.data || []);
     } catch {
       setWarehouseProducts([]);
@@ -156,47 +341,76 @@ export default function CreateOrder() {
     }
   }, [authFetch]);
 
+  const catalogSource = useMemo(
+    () => productCatalogSource(saveDestination),
+    [saveDestination],
+  );
+
   useEffect(() => {
     if (!warehouseId) return;
-    loadWarehouseProducts(warehouseId).catch(() => {});
-  }, [warehouseId, loadWarehouseProducts]);
+    loadWarehouseProducts(warehouseId, catalogSource).catch(() => {});
+  }, [warehouseId, catalogSource, loadWarehouseProducts]);
 
-  const applyCustomerDetail = useCallback((d) => {
-    setCustomerForm({
-      customer_name: d.customer_name || "",
-      company_name: d.company_name || "",
-      customer_type: d.customer_type || "retailer",
-      status: d.status || "active",
-      email: d.email || "",
-      tags: (d.tags || []).join(", "),
-      note: d.note || "",
-    });
+  // On edit (and create after warehouses load), preselect a warehouse so the product
+  // picker is usable immediately — prefer a location-mapped warehouse for Shopify/Daraz.
+  useEffect(() => {
+    if (warehouseId || !warehouses.length || refLoading || loadingProduct) return undefined;
+    let cancelled = false;
+    (async () => {
+      let preferred = String(warehouses[0].id);
+      const platform =
+        catalogSource === "shopify" || catalogSource === "daraz" ? catalogSource : null;
+      if (platform) {
+        try {
+          const data = await ecomApiGet(platform, "locations", authFetch);
+          const mapped = (data.locations || []).find((loc) => loc.warehouseId);
+          if (
+            mapped?.warehouseId &&
+            warehouses.some((w) => String(w.id) === String(mapped.warehouseId))
+          ) {
+            preferred = String(mapped.warehouseId);
+          }
+        } catch {
+          /* keep first-warehouse fallback */
+        }
+      }
+      if (!cancelled) setWarehouseId(preferred);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    warehouseId,
+    warehouses,
+    refLoading,
+    loadingProduct,
+    catalogSource,
+    authFetch,
+  ]);
+
+  const applyCustomerDetail = useCallback((d, phoneOverride) => {
+    const phone = phoneOverride != null && String(phoneOverride).trim() !== ""
+      ? String(phoneOverride)
+      : (d?.phone || "");
+    const nextForm = customerFormFromDetail(d);
+    setCustomerForm(nextForm);
+    setCustomerPhone(phone);
     setLinkedCustomerId(d.id);
-    setLinkedOriginal(
-      normalizeCustomerSnapshot(
-        {
-          customer_name: d.customer_name,
-          company_name: d.company_name,
-          customer_type: d.customer_type,
-          status: d.status,
-          email: d.email,
-          tags: (d.tags || []).join(", "),
-          note: d.note,
-        },
-        d.phone,
-        { city: d.city, delivery_address: d.delivery_address }
-      )
-    );
+    // Snapshot from the exact form + phone we just applied, so unchanged saves don't prompt.
+    setLinkedOriginal(normalizeCustomerProfileSnapshot(nextForm, phone));
   }, []);
 
   useEffect(() => {
     if (!isEdit) return;
     setLoadingProduct(true);
+    setBaseline(null);
+    setPendingBaselineCapture(false);
     apiFetch(`/orders/${orderId}`, {}, authFetch)
       .then(async (data) => {
+        const orderSource = data.order_source || "manual";
         const nextForm = {
           customer_id: data.customer_id ? String(data.customer_id) : "",
-          order_source: data.order_source || "manual",
+          order_source: orderSource,
           order_status: data.order_status || "pending",
           payment_status: data.payment_status || "unpaid",
           fulfillment_status: data.fulfillment_status || "unfulfilled",
@@ -204,42 +418,54 @@ export default function CreateOrder() {
           delivery_charges: String(data.delivery_charges ?? 0),
           city: data.city || "",
           delivery_address: data.delivery_address || "",
+          delivery_state: data.delivery_state || "",
+          delivery_postal_code: data.delivery_postal_code || "",
+          delivery_country: data.delivery_country || "",
+          tags: data.tags || "",
           notes: data.notes || "",
         };
         const nextItems = (data.items || []).map((item, i) => mapOrderItemFromApi({ ...item, id: item.id ?? i }));
         setForm(nextForm);
+        setOrderNo(data.order_no || "");
+        if (orderSource === "shopify") setSaveDestination(INTEGRATION_DESTINATIONS.SHOPIFY);
+        else if (orderSource === "daraz") setSaveDestination(INTEGRATION_DESTINATIONS.DARAZ);
         setItems(nextItems);
+        setInitialLineKeys(new Set(nextItems.map((item) => item._key)));
 
-        let nextCustomerForm = CUSTOMER_INITIAL;
-        let nextPhone = "";
         if (data.customer_id) {
           try {
             const res = await apiFetch(`/orders/customers/${data.customer_id}`, {}, authFetch);
             const d = res.data;
             if (d) {
-              nextPhone = d.phone || "";
-              nextCustomerForm = {
-                customer_name: d.customer_name || "",
-                company_name: d.company_name || "",
-                customer_type: d.customer_type || "retailer",
-                status: d.status || "active",
-                email: d.email || "",
-                tags: (d.tags || []).join(", "),
-                note: d.note || "",
-              };
-              setCustomerPhone(nextPhone);
-              applyCustomerDetail(d);
-              promptedDigitsRef.current = digitsOf(nextPhone);
+              applyCustomerDetail(d, d.phone || "");
+              promptedDigitsRef.current = digitsOf(d.phone || "");
             }
           } catch {
             /* customer detail is best-effort */
           }
         }
-        setBaseline(serializeState(nextForm, nextItems, "", nextCustomerForm, nextPhone));
+        setPendingBaselineCapture(true);
       })
-      .catch((e) => setError(e.message))
+      .catch((e) => showActionError(e.message))
       .finally(() => setLoadingProduct(false));
   }, [isEdit, orderId, authFetch, applyCustomerDetail]);
+
+  useEffect(() => {
+    if (!isEdit || loadingProduct || !pendingBaselineCapture) return undefined;
+    const timer = window.setTimeout(() => {
+      setBaseline(
+        serializeState(
+          formRef.current,
+          itemsRef.current,
+          warehouseIdRef.current,
+          customerFormRef.current,
+          customerPhoneRef.current,
+        ),
+      );
+      setPendingBaselineCapture(false);
+    }, 100);
+    return () => window.clearTimeout(timer);
+  }, [isEdit, loadingProduct, pendingBaselineCapture]);
 
   // Prompt to reuse an existing customer when a full phone number matches.
   useEffect(() => {
@@ -262,16 +488,18 @@ export default function CreateOrder() {
       const res = await apiFetch(`/orders/customers/${id}`, {}, authFetch);
       const d = res.data;
       if (!d) return;
-      setCustomerPhone(d.phone || customerPhone);
-      applyCustomerDetail(d);
+      applyCustomerDetail(d, d.phone || customerPhone);
       setForm((f) => ({
         ...f,
         customer_id: String(d.id),
         city: d.city || f.city,
         delivery_address: d.delivery_address || f.delivery_address,
+        delivery_state: d.delivery_state || f.delivery_state,
+        delivery_postal_code: d.delivery_postal_code || f.delivery_postal_code,
+        delivery_country: d.delivery_country || f.delivery_country,
       }));
     } catch (e) {
-      setError(e.message);
+      showActionError(e.message);
     }
   };
 
@@ -296,17 +524,21 @@ export default function CreateOrder() {
   const groupedProducts = useMemo(() => {
     const map = new Map();
     for (const p of warehouseProducts) {
+      if (!p?.product_id || !p?.variant_id) continue;
+      const name = String(p.product_name || "").trim();
+      if (!name) continue;
       if (!map.has(p.product_id)) {
-        map.set(p.product_id, { product_id: p.product_id, product_name: p.product_name, variants: [] });
+        map.set(p.product_id, { product_id: p.product_id, product_name: name, variants: [] });
       }
       map.get(p.product_id).variants.push(p);
     }
-    return [...map.values()];
+    return [...map.values()].filter((prod) => prod.variants.length > 0);
   }, [warehouseProducts]);
 
   const filteredProducts = useMemo(() => {
     const q = productSearch.trim().toLowerCase();
-    if (!q) return groupedProducts;
+    // Avoid rendering a wall of empty/partial rows before the user searches.
+    if (q.length < 1) return [];
     return groupedProducts
       .map((prod) => {
         const nameMatch = prod.product_name.toLowerCase().includes(q);
@@ -383,16 +615,18 @@ export default function CreateOrder() {
   const totals = computeOrderTotals(items, form.discount_amount, form.delivery_charges);
   const unitCount = items.reduce((sum, row) => sum + (Number(row.quantity) || 0), 0);
 
-  const validate = () => {
-    if (!warehouseId && !isEdit) return "Select a warehouse for line items";
-    if (!items.length) return "Add at least one product";
-    for (const row of items) {
-      if (!row.product_name.trim()) return "Each item needs a product name";
-      if (!row.sku.trim()) return "Each item needs a SKU";
-      if (!Number(row.quantity) || Number(row.quantity) < 1) return "Invalid item quantity";
-      if (Number(row.unit_price) < 0) return "Invalid item unit price";
+  const validate = (syncToShopify = false) => {
+    if (syncToShopify) {
+      return validateOrderForShopify({
+        form,
+        customerForm,
+        customerPhone,
+        items,
+        warehouseId,
+        isEdit,
+      });
     }
-    return "";
+    return validateOrderForErp({ items, warehouseId, isEdit });
   };
 
   const checkStock = () => items.filter((row) => {
@@ -403,25 +637,70 @@ export default function CreateOrder() {
   });
 
   const customerChanged = () => {
-    if (!linkedOriginal) return false;
-    return JSON.stringify(normalizeCustomerSnapshot(customerForm, customerPhone, form)) !== JSON.stringify(linkedOriginal);
+    if (!linkedCustomerId || !linkedOriginal) return false;
+    const current = normalizeCustomerProfileSnapshot(customerForm, customerPhone);
+    return JSON.stringify(current) !== JSON.stringify(linkedOriginal);
   };
 
   const submitOrder = (e) => {
     e?.preventDefault();
     if (disabled) return;
-    const err = validate();
-    if (err) { setError(err); return; }
+    const resolved = resolveSaveDestination();
+    if (!resolved || resolved.error) {
+      const msg = resolved?.error || "Could not resolve save destination.";
+      setFieldErrors({ saveDestination: msg });
+      showActionError(msg);
+      scrollToFirstFieldError();
+      return;
+    }
+    const errors = validate(Boolean(resolved.syncToShopify));
+    if (Object.keys(errors).length) {
+      setFieldErrors(errors);
+      showActionError(syncValidationSummary(errors));
+      scrollToFirstFieldError();
+      return;
+    }
+    setFieldErrors({});
     if (checkStock().length) { setStockWarning(checkStock()); return; }
     proceedToCustomer();
   };
 
-  const proceedToCustomer = () => {
+  const attemptFinalize = async (updateExisting) => {
+    const resolved = resolveSaveDestination();
+    if (!resolved || resolved.error) {
+      const msg = resolved?.error || "Could not resolve save destination.";
+      setFieldErrors({ saveDestination: msg });
+      showActionError(msg);
+      scrollToFirstFieldError();
+      return;
+    }
+    const errors = validate(Boolean(resolved.syncToShopify));
+    if (Object.keys(errors).length) {
+      setFieldErrors(errors);
+      showActionError(syncValidationSummary(errors));
+      scrollToFirstFieldError();
+      return;
+    }
+    setFieldErrors({});
+    finalizeSave({
+      updateExisting,
+      syncToShopify: resolved.syncToShopify,
+      orderSource: resolved.orderSource,
+      info: resolved.info,
+    });
+  };
+
+  const proceedToCustomer = async () => {
     if (linkedCustomerId && customerChanged()) {
       setCustomerUpdatePrompt(true);
       return;
     }
-    finalizeSave({ updateExisting: false });
+    attemptFinalize(false);
+  };
+
+  const confirmCustomerUpdate = async (updateExisting) => {
+    setCustomerUpdatePrompt(false);
+    attemptFinalize(updateExisting);
   };
 
   const confirmOversold = () => {
@@ -429,10 +708,11 @@ export default function CreateOrder() {
     proceedToCustomer();
   };
 
-  const finalizeSave = async ({ updateExisting }) => {
+  const finalizeSave = async ({ updateExisting, syncToShopify = false, orderSource, info = "" }) => {
     setCustomerUpdatePrompt(false);
     setSubmitting(true);
-    setError("");
+    setActionError("");
+    setActionMessage("");
     try {
       let resolvedCustomerId = linkedCustomerId;
       const custPayload = {
@@ -446,22 +726,28 @@ export default function CreateOrder() {
         phone: customerPhone.trim(),
         city: form.city,
         delivery_address: form.delivery_address,
+        delivery_state: form.delivery_state,
+        delivery_postal_code: form.delivery_postal_code,
+        delivery_country: form.delivery_country,
       };
       if (linkedCustomerId && updateExisting) {
         await apiFetch(`/orders/customers/${linkedCustomerId}`, {
           method: "PUT",
-          body: JSON.stringify(custPayload),
+          body: JSON.stringify({ ...custPayload, syncToShopify }),
         }, authFetch);
+        setLinkedOriginal(normalizeCustomerProfileSnapshot(customerForm, customerPhone));
       } else if (!linkedCustomerId && custPayload.customer_name) {
         const created = await apiFetch("/orders/customers", {
           method: "POST",
-          body: JSON.stringify(custPayload),
+          body: JSON.stringify({ ...custPayload, syncToShopify }),
         }, authFetch);
         resolvedCustomerId = created?.id ?? null;
       }
 
       const payload = {
         ...form,
+        order_source: orderSource ?? form.order_source,
+        syncToShopify,
         customer_id: resolvedCustomerId ? Number(resolvedCustomerId) : null,
         discount_amount: totals.orderDiscount,
         delivery_charges: totals.delivery,
@@ -483,9 +769,13 @@ export default function CreateOrder() {
       const savedSnapshot = serializeState(form, items, warehouseId, customerForm, customerPhone);
       setBaseline(savedSnapshot);
       setCreateBaseline(savedSnapshot);
-      navigateSafely(`${MODULE_BASE}/orders/manage`);
+      if (isEdit) {
+        setActionMessage(syncToShopify ? "Order updated and synced to Shopify." : (info || "Order updated successfully."));
+      } else {
+        navigateSafely(`${MODULE_BASE}/orders/manage`);
+      }
     } catch (err) {
-      setError(err.message);
+      showActionError(err.message);
     } finally {
       setSubmitting(false);
     }
@@ -496,6 +786,7 @@ export default function CreateOrder() {
   };
 
   const handleWarehouseChange = (nextId) => {
+    clearFieldError("warehouse_id");
     setWarehouseId(nextId);
     setProductSearch("");
     setProductPickerOpen(false);
@@ -505,7 +796,12 @@ export default function CreateOrder() {
   };
 
   const openProductPicker = () => {
-    if (!warehouseId || disabled || loadingProducts) return;
+    if (disabled) return;
+    if (!warehouseId) {
+      showActionError(isEdit ? "Select a warehouse above to add products." : "Select a warehouse first to add products.");
+      return;
+    }
+    setActionError("");
     setProductPickerOpen(true);
   };
 
@@ -514,15 +810,51 @@ export default function CreateOrder() {
     setProductSearch("");
   };
 
+  const confirmDeleteOrder = async () => {
+    if (!isEdit || !orderId) return;
+    setDeleting(true);
+    setActionError("");
+    try {
+      await apiFetch(`/orders/${orderId}`, { method: "DELETE" }, authFetch);
+      setDeleteOpen(false);
+      navigateSafely(`${MODULE_BASE}/orders/manage`);
+    } catch (e) {
+      setActionError(e.message);
+      setDeleteOpen(false);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const renderVariantPicker = () => {
     if (loadingProducts) {
-      return <p className="wh-muted">Loading products…</p>;
+      return <p className="wh-product-picker-empty">Loading products…</p>;
+    }
+    const q = productSearch.trim();
+    if (!q) {
+      const channelLabel =
+        catalogSource === "shopify"
+          ? "Shopify"
+          : catalogSource === "daraz"
+            ? "Daraz"
+            : "ERP";
+      const available = groupedProducts.length;
+      return (
+        <div className="wh-product-picker-empty">
+          <p className="wh-product-picker-empty__title">Type to search {channelLabel} products</p>
+          <p className="wh-muted">
+            {available > 0
+              ? `${available} product${available === 1 ? "" : "s"} available in this warehouse — search by name, variant, or SKU.`
+              : `No ${channelLabel} products found in this warehouse.`}
+          </p>
+        </div>
+      );
     }
     if (filteredProducts.length === 0) {
       return (
-        <p className="wh-muted">
-          {warehouseProducts.length === 0
-            ? "No products with stock in this warehouse."
+        <p className="wh-product-picker-empty">
+          {groupedProducts.length === 0
+            ? "No products found in this warehouse."
             : "No products match your search."}
         </p>
       );
@@ -584,62 +916,117 @@ export default function CreateOrder() {
           title={isEdit ? "Edit Order" : "Create Order"}
           description="Select a warehouse and products, then fill in customer, delivery, and status details."
           actions={
-            <Button variant="secondary" onClick={() => navigate(`${MODULE_BASE}/orders/manage`)}>
-              Back to orders
-            </Button>
+            <div className="wh-action-btns">
+              <Button variant="secondary" onClick={() => navigate(`${MODULE_BASE}/orders/manage`)}>
+                Back to orders
+              </Button>
+              {isEdit && canDelete && (
+                <Button type="button" variant="danger" onClick={() => setDeleteOpen(true)} disabled={deleting}>
+                  Delete
+                </Button>
+              )}
+            </div>
           }
         />
 
-        <FormPageAlerts error={error || loadError} />
+        <FormPageAlerts error={loadError} />
+
+        {isEdit && String(form.order_status || "").toLowerCase() === "cancelled" && (
+          <p className="wh-field__error">This order is cancelled and cannot be edited (same as Shopify).</p>
+        )}
+        {isEdit && String(form.order_status || "").toLowerCase() === "returned" && (
+          <p className="wh-field__error">This order is returned and cannot be edited (same as Shopify).</p>
+        )}
+        {shopifyLockedLines && (
+          <p className="wh-muted" style={{ marginBottom: "0.75rem" }}>
+            Fulfilled Shopify lines are locked. You can add new products, but cannot change or remove existing line quantities.
+          </p>
+        )}
 
         <form className="wh-form-stack" onSubmit={submitOrder}>
+          <IntegrationDestinationField
+            value={saveDestination}
+            onChange={handleDestinationChange}
+            disabled={disabled || formBusy}
+            shopifyConnected={shopifyConnected}
+            darazConnected={false}
+            shopifyStoreName={shopifyStoreName}
+            showDaraz={false}
+            lockedPlatform={isEdit && isStoreLinked ? ecomLink.platform : null}
+            lockedStoreName={ecomLink?.storeName || shopifyStoreName || darazStoreName}
+            error={fieldErrors.saveDestination}
+          />
+
           <FormBlock
             title="Products"
             description={
-              isEdit
-                ? "Review and adjust line items on this order."
-                : "Choose a warehouse, then search to add variants. Set quantity and pricing below."
+              catalogSource === "shopify"
+                ? "Searching Shopify catalog products for this warehouse."
+                : catalogSource === "daraz"
+                  ? "Searching Daraz catalog products for this warehouse."
+                  : isEdit
+                    ? "Adjust existing line items or search ERP products to add more."
+                    : "Choose a warehouse, then search ERP products to add variants."
             }
           >
-            {!isEdit && (
-              <FormField
-                id="order-warehouse"
-                label="Warehouse"
-                as="select"
-                value={warehouseId}
-                onChange={(e) => handleWarehouseChange(e.target.value)}
-                disabled={disabled}
-              >
-                <option value="">Select warehouse…</option>
-                {warehouses.map((w) => (
-                  <option key={w.id} value={String(w.id)}>{w.warehouse_name}</option>
-                ))}
-              </FormField>
-            )}
+            <FormField
+              id="order-warehouse"
+              label={isEdit ? "Warehouse (to add products)" : "Warehouse"}
+              as="select"
+              value={warehouseId}
+              onChange={(e) => handleWarehouseChange(e.target.value)}
+              disabled={disabled}
+              error={fieldErrors.warehouse_id || fieldErrors.items}
+            >
+              <option value="">Select warehouse…</option>
+              {warehouses.map((w) => (
+                <option key={w.id} value={String(w.id)}>{w.warehouse_name}</option>
+              ))}
+            </FormField>
 
-            {!warehouseId && !isEdit && (
+            {!warehouseId && (
               <div className="wh-order-create-empty">
-                <p className="wh-muted">Select a warehouse above to search and add products.</p>
+                <p className="wh-muted">
+                  {isEdit
+                    ? "Select a warehouse above to search and add more products to this order."
+                    : "Select a warehouse above to search and add products."}
+                </p>
               </div>
             )}
 
-            {warehouseId && !isEdit && (
+            {warehouseId && (
               <div className="wh-order-product-search">
                 <FormField
                   id="order-product-search"
-                  label="Search products"
+                  label={
+                    catalogSource === "shopify"
+                      ? "Search Shopify products"
+                      : catalogSource === "daraz"
+                        ? "Search Daraz products"
+                        : "Search products"
+                  }
                   value={productSearch}
                   onChange={(e) => {
                     setProductSearch(e.target.value);
                     openProductPicker();
                   }}
                   onFocus={openProductPicker}
-                  placeholder="Search by product name, variant, or SKU…"
-                  disabled={disabled || loadingProducts}
+                  placeholder={
+                    catalogSource === "shopify"
+                      ? "Search Shopify products by name, variant, or SKU…"
+                      : catalogSource === "daraz"
+                        ? "Search Daraz products by name, variant, or SKU…"
+                        : "Search by product name, variant, or SKU…"
+                  }
+                  disabled={disabled}
                 />
                 <div className="wh-order-product-search__actions">
-                  <Button type="button" variant="secondary" onClick={openProductPicker} disabled={disabled || loadingProducts}>
-                    Browse products
+                  <Button type="button" variant="secondary" onClick={openProductPicker} disabled={disabled}>
+                    {loadingProducts
+                      ? "Loading…"
+                      : isEdit
+                        ? "Add product"
+                        : "Browse products"}
                   </Button>
                   {items.length > 0 && (
                     <span className="wh-muted">{items.length} variant{items.length === 1 ? "" : "s"} selected</span>
@@ -652,7 +1039,17 @@ export default function CreateOrder() {
 
           {(isEdit || items.length > 0) && (
             <Card className="wh-card--table wh-order-items-card">
-              <OrderItemsCardHead itemCount={items.length} unitCount={unitCount} />
+              <OrderItemsCardHead
+                itemCount={items.length}
+                unitCount={unitCount}
+                actions={
+                  isEdit && !disabled ? (
+                    <Button type="button" variant="secondary" onClick={openProductPicker} disabled={!warehouseId}>
+                      Add product
+                    </Button>
+                  ) : null
+                }
+              />
               {items.length === 0 ? (
                 <p className="wh-muted wh-order-items-card__empty">No products selected yet.</p>
               ) : (
@@ -669,7 +1066,7 @@ export default function CreateOrder() {
                               </span>
                             )}
                           </div>
-                          {!disabled && (
+                          {!disabled && !isLockedLine(row._key) && (
                             <button
                               type="button"
                               className="wh-order-line-card__remove"
@@ -688,7 +1085,7 @@ export default function CreateOrder() {
                               type="button"
                               className="wh-qty-stepper__btn"
                               onClick={() => adjustQty(row._key, -1)}
-                              disabled={disabled || Number(row.quantity) <= 1}
+                              disabled={disabled || isLockedLine(row._key) || Number(row.quantity) <= 1}
                               aria-label="Decrease quantity"
                             >
                               −
@@ -698,7 +1095,7 @@ export default function CreateOrder() {
                               type="button"
                               className="wh-qty-stepper__btn"
                               onClick={() => adjustQty(row._key, 1)}
-                              disabled={disabled}
+                              disabled={disabled || isLockedLine(row._key)}
                               aria-label="Increase quantity"
                             >
                               +
@@ -797,9 +1194,13 @@ export default function CreateOrder() {
                 label="Phone number"
                 type="tel"
                 value={customerPhone}
-                onChange={(e) => setCustomerPhone(e.target.value)}
+                onChange={(e) => {
+                  clearFieldError("customer_phone", "customer_email");
+                  setCustomerPhone(e.target.value);
+                }}
                 disabled={disabled}
                 placeholder="Type phone to find an existing customer…"
+                error={fieldErrors.customer_phone}
               />
               {linkedCustomerId && (
                 <div className="wh-form-grid__full">
@@ -824,6 +1225,7 @@ export default function CreateOrder() {
                 onChange={(e) => setCust("customer_name", e.target.value)}
                 disabled={disabled}
                 placeholder="Full name"
+                error={fieldErrors.customer_name}
               />
               <FormField
                 id="order-customer-company"
@@ -864,6 +1266,7 @@ export default function CreateOrder() {
                 onChange={(e) => setCust("email", e.target.value)}
                 disabled={disabled}
                 placeholder="name@example.com"
+                error={fieldErrors.customer_email}
               />
               <FormField
                 id="order-city"
@@ -872,6 +1275,7 @@ export default function CreateOrder() {
                 value={form.city}
                 onChange={(e) => set("city", e.target.value)}
                 disabled={disabled}
+                error={fieldErrors.city}
               >
                 <option value="">Select city…</option>
                 {PAKISTAN_CITY_OPTIONS.map((opt) => (
@@ -891,12 +1295,46 @@ export default function CreateOrder() {
               <div className="wh-form-grid__full">
                 <FormField
                   id="order-address"
-                  label="Delivery address"
+                  label="Street address"
                   as="textarea"
                   rows={2}
                   value={form.delivery_address}
                   onChange={(e) => set("delivery_address", e.target.value)}
                   disabled={disabled}
+                  placeholder="Address line 1"
+                  error={fieldErrors.delivery_address}
+                />
+              </div>
+              <FormField
+                id="order-delivery-state"
+                label="State / Province"
+                value={form.delivery_state}
+                onChange={(e) => set("delivery_state", e.target.value)}
+                disabled={disabled}
+              />
+              <FormField
+                id="order-delivery-postal"
+                label="Postal code"
+                value={form.delivery_postal_code}
+                onChange={(e) => set("delivery_postal_code", e.target.value)}
+                disabled={disabled}
+              />
+              <FormField
+                id="order-delivery-country"
+                label="Country"
+                value={form.delivery_country}
+                onChange={(e) => set("delivery_country", e.target.value)}
+                disabled={disabled}
+                placeholder="e.g. Pakistan"
+              />
+              <div className="wh-form-grid__full">
+                <FormField
+                  id="order-tags"
+                  label="Order tags"
+                  value={form.tags}
+                  onChange={(e) => set("tags", e.target.value)}
+                  disabled={disabled}
+                  placeholder="Comma-separated (e.g. wholesale, urgent)"
                 />
               </div>
               <div className="wh-form-grid__full">
@@ -908,7 +1346,7 @@ export default function CreateOrder() {
                   value={customerForm.note}
                   onChange={(e) => setCust("note", e.target.value)}
                   disabled={disabled}
-                  placeholder="Notes about this customer"
+                  placeholder="Saved on the customer profile (synced to Shopify)"
                 />
               </div>
               <div className="wh-form-grid__full">
@@ -920,7 +1358,7 @@ export default function CreateOrder() {
                   value={form.notes}
                   onChange={(e) => set("notes", e.target.value)}
                   disabled={disabled}
-                  placeholder="Internal notes about this order"
+                  placeholder="Synced to the Shopify order note"
                 />
               </div>
             </div>
@@ -944,8 +1382,9 @@ export default function CreateOrder() {
                 fieldKey="order_status"
                 fieldOptions={field_options}
                 value={form.order_status}
-                onChange={(v) => set("order_status", v)}
+                onChange={setOrderStatus}
                 onAddOption={handleAddOption}
+                labelFor={(v) => ORDER_STATUS_LABELS[v] || v.replace(/_/g, " ")}
                 disabled={disabled}
               />
               <OrderFieldSelect
@@ -962,18 +1401,18 @@ export default function CreateOrder() {
                 fieldKey="fulfillment_status"
                 fieldOptions={field_options}
                 value={form.fulfillment_status}
-                onChange={(v) => set("fulfillment_status", v)}
+                onChange={setFulfillmentStatus}
                 onAddOption={handleAddOption}
                 disabled={disabled}
               />
             </div>
           </FormBlock>
 
-          <FormActions>
+          <FormActions ref={formActionsRef} error={actionError} message={actionMessage}>
             <Button type="button" variant="secondary" onClick={() => navigate(`${MODULE_BASE}/orders/manage`)}>
               Cancel
             </Button>
-            <Button type="submit" disabled={submitting || disabled}>
+            <Button type="submit" disabled={formBusy || disabled}>
               {submitting ? "Saving…" : isEdit ? "Update order" : "Create order"}
             </Button>
           </FormActions>
@@ -987,17 +1426,23 @@ export default function CreateOrder() {
         wide
         className="wh-modal--product-picker"
         footer={
-          <Button type="button" onClick={closeProductPicker}>
+          <Button type="button" modalPrimary onClick={closeProductPicker}>
             Done ({items.length} selected)
           </Button>
         }
       >
         <FormField
           id="order-product-search-modal"
-          label="Search products"
+          label={
+            catalogSource === "shopify"
+              ? "Search Shopify products"
+              : catalogSource === "daraz"
+                ? "Search Daraz products"
+                : "Search products"
+          }
           value={productSearch}
           onChange={(e) => setProductSearch(e.target.value)}
-          placeholder="Search by product name, variant, or SKU…"
+          placeholder="Type a product name, variant, or SKU…"
           disabled={disabled}
           autoFocus
         />
@@ -1010,7 +1455,7 @@ export default function CreateOrder() {
         title="Insufficient stock"
         footer={
           <>
-            <Button variant="secondary" onClick={() => setStockWarning(null)}>Cancel</Button>
+            <Button variant="secondary" modalPrimary onClick={() => setStockWarning(null)}>Cancel</Button>
             <Button variant="danger" onClick={confirmOversold}>Continue anyway</Button>
           </>
         }
@@ -1032,7 +1477,7 @@ export default function CreateOrder() {
         footer={
           <>
             <Button variant="secondary" onClick={createNewFromPrompt}>Create new customer</Button>
-            <Button onClick={useExistingCustomer}>Use this customer</Button>
+            <Button modalPrimary onClick={useExistingCustomer}>Use this customer</Button>
           </>
         }
       >
@@ -1055,14 +1500,14 @@ export default function CreateOrder() {
 
       <Modal
         open={customerUpdatePrompt}
-        onClose={() => finalizeSave({ updateExisting: false })}
+        onClose={() => confirmCustomerUpdate(false)}
         title="Update customer info?"
         footer={
           <>
-            <Button variant="secondary" onClick={() => finalizeSave({ updateExisting: false })} disabled={submitting}>
+            <Button variant="secondary" onClick={() => confirmCustomerUpdate(false)} disabled={submitting}>
               Keep existing
             </Button>
-            <Button onClick={() => finalizeSave({ updateExisting: true })} disabled={submitting}>
+            <Button modalPrimary onClick={() => confirmCustomerUpdate(true)} disabled={submitting}>
               Update customer
             </Button>
           </>
@@ -1070,6 +1515,15 @@ export default function CreateOrder() {
       >
         <p>You changed details for the linked customer. Do you want to update this customer's saved information, or keep it as-is and only use the new details for this order?</p>
       </Modal>
+
+      <ConfirmDeleteModal
+        open={deleteOpen}
+        title="Delete order"
+        recordName={orderNo || "this order"}
+        onConfirm={confirmDeleteOrder}
+        onClose={() => setDeleteOpen(false)}
+        loading={deleting}
+      />
 
       <UnsavedChangesDialog open={dialogOpen} onStay={stayOnPage} onDiscard={leavePage} reloadPending={reloadPending} />
     </div>

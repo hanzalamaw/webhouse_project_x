@@ -136,7 +136,7 @@ export default function CreateCategoryModal({
         {error && <p className="wh-field__error">{error}</p>}
         <div className="wh-modal__actions">
           <Button type="button" variant="secondary" onClick={handleClose}>Cancel</Button>
-          <Button type="submit" disabled={saving}>{saving ? "Creating…" : "Create Category"}</Button>
+          <Button type="submit" modalPrimary disabled={saving}>{saving ? "Creating…" : "Create Category"}</Button>
         </div>
       </form>
     </Modal>

@@ -26,6 +26,8 @@ import ModuleHub from "./portals/tenant-portal/pages/ModuleHub";
 import ModulePlaceholder from "./portals/tenant-portal/pages/ModulePlaceholder";
 import TenantLayout from "./components/layout/TenantLayout";
 import TenantModuleGuard from "./components/TenantModuleGuard";
+import TenantRouteLoading from "./components/TenantRouteLoading";
+import { TenantModulesProvider } from "./context/TenantModulesContext";
 import {
   TENANT_MODULE_DEFINITIONS,
   MODULE_SECTION_ROUTES,
@@ -45,7 +47,7 @@ function WhProtectedRoute({ children }) {
 
 function TenantProtectedRoute({ children }) {
   const { user, loading } = useAuth();
-  if (loading) return null;
+  if (loading && !user) return <TenantRouteLoading />;
   if (user?.portal === "wh_admin") return <Navigate to="/webhouse-portal/dashboard" replace />;
   if (!user || user.portal !== "tenant") {
     return <Navigate to="/erp1" replace />;
@@ -158,7 +160,9 @@ const router = createBrowserRouter([
   {
     element: (
       <TenantProtectedRoute>
-        <Outlet />
+        <TenantModulesProvider>
+          <Outlet />
+        </TenantModulesProvider>
       </TenantProtectedRoute>
     ),
     children: [

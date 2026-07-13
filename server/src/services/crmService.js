@@ -22,6 +22,9 @@ import {
   normalizeCustomerStatus,
   normalizeAddressType,
 } from "../utils/crmNormalize.js";
+import { syncEntityToShopify, deleteLinkedCustomerFromShopify } from "./ecommerce/ecomPush.js";
+import { requireShopifySync, requireShopifySyncIfLinked } from "./ecommerce/shopifySyncGuard.js";
+import { assertCustomerCanDelete, assertRequireShopifySyncOnSave } from "./ecommerce/shopifyPolicy.js";
 
 function assertOneOf(value, allowed, label) {
   if (!allowed.includes(value)) {
@@ -202,16 +205,59 @@ export const crmService = {
     const customer_name = requireString(body.customer_name, "Customer name");
     const customer_type = normalizeCustomerType(body.customer_type, "retailer");
     const status = normalizeCustomerStatus(body.status, "active");
-    return crmRepository.createCustomer(tenantId, userId, { ...body, customer_name, customer_type, status });
+    const customer = await crmRepository.createCustomer(tenantId, userId, { ...body, customer_name, customer_type, status });
+
+    // Persist addresses before Shopify sync so phone/company/address reach the store.
+    if (Array.isArray(body.addresses)) {
+      for (const addr of body.addresses) {
+        const address = String(addr.address || "").trim();
+        const city = String(addr.city || "").trim();
+        if (!address && !city) continue;
+        const address_type = normalizeAddressType(addr.address_type, "office");
+        await crmRepository.createAddress(tenantId, customer.id, {
+          address_type,
+          address: address || city,
+          city: city || null,
+          state: addr.state ? String(addr.state).trim() : null,
+          postal_code: addr.postal_code ? String(addr.postal_code).trim() : null,
+          country: addr.country ? String(addr.country).trim() : null,
+          is_default: address_type === "default"
+            || addr.is_default === true
+            || addr.is_default === 1
+            || addr.is_default === "1",
+        });
+      }
+    }
+
+    if (!body.syncToShopify) {
+      return crmRepository.getCustomer(tenantId, customer.id);
+    }
+    try {
+      const push = await syncEntityToShopify(tenantId, "customer", customer.id);
+      requireShopifySync(push, "Customer");
+      const refreshed = await crmRepository.getCustomer(tenantId, customer.id);
+      return { ...refreshed, shopifySync: push };
+    } catch (err) {
+      await cascadeSoftDeleteCrmCustomer(customer.id, tenantId);
+      throw err;
+    }
   },
 
   async updateCustomer(tenantId, userId, id, body) {
     const existing = await crmRepository.getCustomer(tenantId, id);
     if (!existing) return null;
+    // Order/checkout flows may patch customer details locally without a store push.
+    if (!body.allowLocalLinkedUpdate) {
+      await assertRequireShopifySyncOnSave(tenantId, "customer", id, body.syncToShopify);
+    }
+    // forceShopifyFullPush: client already saved fields/addresses; skip change-diff so phone/company/address still push.
+    const before = body.syncToShopify && !body.forceShopifyFullPush
+      ? await crmRepository.getCustomerProfile(tenantId, id)
+      : null;
     const customer_name = requireString(body.customer_name ?? existing.customer_name, "Customer name");
     const customer_type = normalizeCustomerType(body.customer_type ?? existing.customer_type, existing.customer_type);
     const status = normalizeCustomerStatus(body.status ?? existing.status, existing.status);
-    return crmRepository.updateCustomer(tenantId, userId, id, {
+    const updated = await crmRepository.updateCustomer(tenantId, userId, id, {
       ...existing,
       ...body,
       customer_name,
@@ -219,10 +265,35 @@ export const crmService = {
       status,
       tags: body.tags ?? existing.tags?.map((t) => t.tag_name) ?? [],
     });
+    if (!body.syncToShopify) return updated;
+    try {
+      const push = await syncEntityToShopify(tenantId, "customer", id, { beforeCustomer: before });
+      requireShopifySync(push, "Customer");
+      return { ...updated, shopifySync: push };
+    } catch (err) {
+      if (before) {
+        await crmRepository.updateCustomer(tenantId, userId, id, {
+          customer_name: before.customer_name,
+          company_name: before.company_name,
+          customer_type: before.customer_type,
+          phone: before.phone,
+          email: before.email,
+          status: before.status,
+          note: before.note,
+          tags: (before.tags || []).map((t) => (typeof t === "string" ? t : t.tag_name)),
+        });
+      }
+      throw err;
+    }
   },
 
   async deleteCustomer(tenantId, id) {
-    return cascadeSoftDeleteCrmCustomer(id, tenantId);
+    await assertCustomerCanDelete(tenantId, id);
+    const shopifySync = await deleteLinkedCustomerFromShopify(tenantId, id);
+    requireShopifySyncIfLinked(shopifySync, "Customer");
+    const deleted = await cascadeSoftDeleteCrmCustomer(id, tenantId);
+    if (!deleted) return { ok: false };
+    return { ok: true, shopifySync };
   },
 
   exportCustomers(tenantId) {
@@ -268,7 +339,9 @@ export const crmService = {
         }
         if (String(row.billing_address || "").trim()) {
           const customer = await crmRepository.getCustomer(tenantId, customerId);
-          const hasDefault = (customer.addresses || []).some((a) => a.is_default);
+          const hasDefault = (customer.addresses || []).some(
+            (a) => a.is_default === true || a.is_default === 1 || a.is_default === "1"
+          );
           if (!hasDefault) {
             await crmRepository.createAddress(tenantId, customerId, {
               address_type: "default",
@@ -296,20 +369,28 @@ export const crmService = {
     await assertCustomerExists(tenantId, customerId);
     const address_type = normalizeAddressType(body.address_type, "office");
     requireString(body.address, "Address");
+    const isDefault = body.is_default === true
+      || body.is_default === 1
+      || body.is_default === "1"
+      || address_type === "default";
     return crmRepository.createAddress(tenantId, customerId, {
       ...body,
-      address_type,
-      is_default: address_type === "default",
+      address_type: isDefault ? "default" : address_type,
+      is_default: isDefault,
     });
   },
 
   async updateAddress(tenantId, addressId, body) {
     const address_type = normalizeAddressType(body.address_type, "office");
     requireString(body.address, "Address");
+    const isDefault = body.is_default === true
+      || body.is_default === 1
+      || body.is_default === "1"
+      || address_type === "default";
     return crmRepository.updateAddress(tenantId, addressId, {
       ...body,
-      address_type,
-      is_default: address_type === "default",
+      address_type: isDefault ? "default" : address_type,
+      is_default: isDefault,
     });
   },
 
@@ -323,7 +404,14 @@ export const crmService = {
     const note_type = body.note_type || "note";
     assertOneOf(note_type, NOTE_TYPES, "note type");
     const bodyText = requireString(body.body, "Note body");
-    return crmRepository.createNote(tenantId, userId, customerId, { note_type, body: bodyText });
+    const note = await crmRepository.createNote(tenantId, userId, customerId, { note_type, body: bodyText });
+    // Notes live on crm_customers.note — push to Shopify when linked.
+    try {
+      await syncEntityToShopify(tenantId, "customer", customerId);
+    } catch {
+      // Local note still saved; Shopify push is best-effort for note appends.
+    }
+    return note;
   },
 
   // Complaints

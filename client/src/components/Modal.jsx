@@ -1,7 +1,9 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 
 export function Modal({ open, onClose, title, wide, className = "", children, footer }) {
+  const dialogRef = useRef(null);
+
   useEffect(() => {
     if (!open) return;
     const prev = document.body.style.overflow;
@@ -11,11 +13,31 @@ export function Modal({ open, onClose, title, wide, className = "", children, fo
     };
   }, [open]);
 
+  useEffect(() => {
+    if (!open) return undefined;
+    const onKeyDown = (e) => {
+      if (e.key !== "Enter" || e.repeat) return;
+      const target = e.target;
+      if (!dialogRef.current?.contains(target)) return;
+      if (target?.tagName === "TEXTAREA") return;
+      if (target?.isContentEditable) return;
+      if (target?.closest?.("[data-modal-enter-ignore]")) return;
+      const primary = dialogRef.current.querySelector("[data-modal-primary]:not(:disabled)");
+      if (!primary) return;
+      if (target === primary || primary.contains(target)) return;
+      e.preventDefault();
+      primary.click();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [open]);
+
   if (!open) return null;
 
   return createPortal(
     <div className="wh-modal-overlay" onClick={onClose}>
       <div
+        ref={dialogRef}
         className={`wh-modal${wide ? " wh-modal--wide" : ""}${className ? ` ${className}` : ""}`}
         onClick={(e) => e.stopPropagation()}
         role="dialog"

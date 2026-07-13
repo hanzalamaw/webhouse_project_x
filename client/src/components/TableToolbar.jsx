@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { getYearsFromRows, getFilterOptions } from "../utils/tableFilters";
+import { getYearsFromRows, getFilterOptions, normalizeToolbarFilterState } from "../utils/tableFilters";
 import { getFiscalYearsFromRows } from "../utils/fiscalYearFilter";
 import { useFiscalYear } from "../context/FiscalYearContext";
 
@@ -28,7 +28,7 @@ export function TableToolbar({
     return opts;
   }, [rows, filters]);
 
-  const set = (patch) => onChange({ ...value, ...patch });
+  const set = (patch) => onChange(normalizeToolbarFilterState(value, patch));
 
   const clear = () => {
     const cleared = { search: "", year: "", dateFrom: "", dateTo: "" };

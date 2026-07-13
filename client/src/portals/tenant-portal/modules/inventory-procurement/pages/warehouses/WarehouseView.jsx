@@ -5,6 +5,7 @@ import { useModulePermission } from "../../../../../../hooks/useModulePermission
 import { apiFetch } from "../../../../../../api/client";
 import { PageHeader } from "../../../../../../components/PageHeader";
 import { Button } from "../../../../../../components/Button";
+import { ConfirmDeleteModal } from "../../../../../../components/ConfirmDeleteModal";
 import { DetailGrid, DetailValue, RecordViewSummary } from "../../../../../../components/RecordView";
 import { formatPKR } from "../../../../../../utils/currency";
 import { formatDateTime } from "../../../../../../utils/dateTime";
@@ -15,11 +16,13 @@ import { ProductIcon, WarehouseIcon, LogsIcon } from "../../../../../../componen
 export default function WarehouseView() {
   const { warehouseId } = useParams();
   const { authFetch } = useAuth();
-  const { canEdit } = useModulePermission("inventory-procurement");
+  const { canEdit, canDelete } = useModulePermission("inventory-procurement");
   const navigate = useNavigate();
   const [warehouse, setWarehouse] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -35,6 +38,21 @@ export default function WarehouseView() {
   }, [authFetch, warehouseId]);
 
   useEffect(() => { load().catch(() => {}); }, [load]);
+
+  const confirmDelete = async () => {
+    setDeleting(true);
+    setError("");
+    try {
+      await apiFetch(`/inventory/warehouses/${warehouseId}`, { method: "DELETE" }, authFetch);
+      setDeleteOpen(false);
+      navigate(`${MODULE_BASE}/warehouses`);
+    } catch (e) {
+      setError(e.message);
+      setDeleteOpen(false);
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   if (loading) {
     return <div className="wh-page wh-page--wide"><p className="wh-muted">Loading…</p></div>;
@@ -63,14 +81,19 @@ export default function WarehouseView() {
         title="Warehouse details"
         description="Stock on hand, product lines, and recent movement activity."
         actions={
-          <>
+          <div className="wh-action-btns">
             <Button variant="secondary" onClick={() => navigate(`${MODULE_BASE}/warehouses`)}>Back</Button>
             {canEdit && (
               <Button onClick={() => navigate(`${MODULE_BASE}/warehouses/edit/${warehouseId}`)}>Edit warehouse</Button>
             )}
-          </>
+            {canDelete && (
+              <Button variant="danger" onClick={() => setDeleteOpen(true)}>Delete</Button>
+            )}
+          </div>
         }
       />
+
+      {error && <div className="wh-alert wh-alert--error">{error}</div>}
 
       <RecordViewSummary
         title={warehouse.warehouse_name}
@@ -194,6 +217,15 @@ export default function WarehouseView() {
           <DetailValue label="Created">{formatDateTime(warehouse.created_at)}</DetailValue>
         </DetailGrid>
       </ViewPanel>
+
+      <ConfirmDeleteModal
+        open={deleteOpen}
+        title="Delete warehouse"
+        recordName={warehouse.warehouse_name || "this warehouse"}
+        onConfirm={confirmDelete}
+        onClose={() => setDeleteOpen(false)}
+        loading={deleting}
+      />
     </div>
   );
 }

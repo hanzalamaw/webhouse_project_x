@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../../../../../../context/AuthContext";
+import { useModulePermission } from "../../../../../../hooks/useModulePermission";
 import { apiFetch } from "../../../../../../api/client";
 import { PageHeader } from "../../../../../../components/PageHeader";
 import { Card } from "../../../../../../components/Card";
 import { Button } from "../../../../../../components/Button";
+import { ConfirmDeleteModal } from "../../../../../../components/ConfirmDeleteModal";
 import { StatCard } from "../../../../../../components/StatCard";
 import { StatusBadge } from "../../../../../../components/Badge";
 import { DetailValue } from "../../../../../../components/DetailValue";
@@ -30,11 +32,14 @@ import {
 export default function OrderView() {
   const { orderId } = useParams();
   const { authFetch } = useAuth();
+  const { canEdit, canDelete } = useModulePermission("order-management");
   const navigate = useNavigate();
   const [order, setOrder] = useState(null);
   const [payments, setPayments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -53,11 +58,27 @@ export default function OrderView() {
     };
   }, [orderId, authFetch]);
 
+  const confirmDelete = async () => {
+    if (!order) return;
+    setDeleting(true);
+    setError("");
+    try {
+      await apiFetch(`/orders/${order.id}`, { method: "DELETE" }, authFetch);
+      setDeleteOpen(false);
+      navigate(`${MODULE_BASE}/orders/manage`);
+    } catch (e) {
+      setError(e.message);
+      setDeleteOpen(false);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   if (loading) {
     return <div className="wh-page"><p className="wh-muted">Loading…</p></div>;
   }
 
-  if (error || !order) {
+  if (!order) {
     return (
       <div className="wh-page">
         <PageHeader title="Order" />
@@ -76,6 +97,7 @@ export default function OrderView() {
   const amountDue = Math.max(0, payable - totalPaid);
   const afterSales = getOrderAfterSalesState(order);
   const hasAfterSales = Boolean(afterSales);
+  const canEditOrder = canEdit && String(order.order_status || "").toLowerCase() !== "cancelled";
 
   return (
     <div className="wh-page">
@@ -83,13 +105,20 @@ export default function OrderView() {
         title={`Order ${order.order_no}`}
         description={`Placed ${formatDateTime(order.created_at)}${order.created_by_name ? ` · by ${order.created_by_name}` : ""}`}
         actions={
-          <>
+          <div className="wh-action-btns">
             <Button variant="secondary" onClick={() => navigate(`${MODULE_BASE}/orders/manage`)}>Back</Button>
-            <Button onClick={() => navigate(`${MODULE_BASE}/orders/edit/${order.id}`)}>Edit</Button>
+            {canEditOrder && (
+              <Button onClick={() => navigate(`${MODULE_BASE}/orders/edit/${order.id}`)}>Edit</Button>
+            )}
+            {canDelete && (
+              <Button variant="danger" onClick={() => setDeleteOpen(true)}>Delete</Button>
+            )}
             <Button variant="secondary" onClick={() => navigate(`${MODULE_BASE}/printing?orderId=${order.id}`)}>Print</Button>
-          </>
+          </div>
         }
       />
+
+      {error && <div className="wh-alert wh-alert--error">{error}</div>}
 
       <div className="wh-stat-grid">
         <StatCard label="Payable" value={formatPKR(payable)} />
@@ -227,6 +256,15 @@ export default function OrderView() {
           </div>
         </Card>
       )}
+
+      <ConfirmDeleteModal
+        open={deleteOpen}
+        title="Delete order"
+        recordName={order.order_no || "this order"}
+        onConfirm={confirmDelete}
+        onClose={() => setDeleteOpen(false)}
+        loading={deleting}
+      />
     </div>
   );
 }

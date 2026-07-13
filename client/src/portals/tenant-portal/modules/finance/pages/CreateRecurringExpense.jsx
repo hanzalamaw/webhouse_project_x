@@ -33,6 +33,7 @@ export default function CreateRecurringExpense() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -90,10 +91,11 @@ export default function CreateRecurringExpense() {
       };
       if (isEdit) {
         await apiFetch(`/finance/recurring-expenses/${recurringId}`, { method: "PUT", body: JSON.stringify(body) }, authFetch);
+        setMessage("Recurring expense updated successfully.");
       } else {
         await apiFetch("/finance/recurring-expenses", { method: "POST", body: JSON.stringify(body) }, authFetch);
+        navigate(`${MODULE_BASE}/recurring-expenses`);
       }
-      navigate(`${MODULE_BASE}/recurring-expenses`);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -113,7 +115,7 @@ export default function CreateRecurringExpense() {
           description="Schedule repeating expenses with optional bank auto-deduct."
           actions={<Button variant="secondary" onClick={() => navigate(`${MODULE_BASE}/recurring-expenses`)}>Back</Button>}
         />
-        <FormPageAlerts error={error} />
+        <FormPageAlerts error={error} message={message} />
         <form className="wh-form-stack" onSubmit={submit}>
           <FormBlock title="Schedule" description="Amount, frequency, and next due date.">
             <div className="wh-form-grid">

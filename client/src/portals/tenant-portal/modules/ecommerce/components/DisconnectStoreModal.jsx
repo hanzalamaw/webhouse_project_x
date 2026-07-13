@@ -68,7 +68,7 @@ export default function DisconnectStoreModal({
       wide
       footer={
         <>
-          <Button type="button" variant="secondary" onClick={onClose} disabled={loading}>
+          <Button type="button" variant="secondary" modalPrimary onClick={onClose} disabled={loading}>
             Cancel
           </Button>
           <Button type="button" variant="danger" onClick={handleConfirm} disabled={loading}>

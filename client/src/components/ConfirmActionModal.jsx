@@ -12,6 +12,7 @@ export function ConfirmActionModal({
   variant = "danger",
   loading = false,
   error = "",
+  enterAction = variant === "danger" ? "cancel" : "confirm",
 }) {
   return (
     <Modal
@@ -20,10 +21,22 @@ export function ConfirmActionModal({
       title={title}
       footer={
         <>
-          <Button type="button" variant="secondary" onClick={onClose} disabled={loading}>
+          <Button
+            type="button"
+            variant="secondary"
+            modalPrimary={enterAction === "cancel"}
+            onClick={onClose}
+            disabled={loading}
+          >
             {cancelLabel}
           </Button>
-          <Button type="button" variant={variant} onClick={onConfirm} disabled={loading}>
+          <Button
+            type="button"
+            variant={variant}
+            modalPrimary={enterAction === "confirm"}
+            onClick={onConfirm}
+            disabled={loading}
+          >
             {loading ? "Please wait…" : confirmLabel}
           </Button>
         </>

@@ -41,16 +41,18 @@ export function isOrderEligibleForCancellation(order) {
 }
 
 export function isOrderEligibleForReturn(order) {
+  if (order?.is_shopify_linked) return false;
   return getActiveAfterSalesType(order) === null;
 }
 
 export function isOrderEligibleForExchange(order) {
+  if (order?.is_shopify_linked) return false;
   return getActiveAfterSalesType(order) === null;
 }
 
 export function isOrderPaid(order) {
   const status = String(order?.payment_status || "").toLowerCase();
-  return status === "paid" || status === "partially_paid";
+  return status === "paid" || status === "partial" || status === "partially_paid";
 }
 
 export function isOrderEligibleForRefund(order) {
@@ -97,6 +99,12 @@ const AFTER_SALES_LABELS = {
 
 export function afterSalesIneligibilityMessage(order, action) {
   const active = getActiveAfterSalesType(order);
+  if (action === "return" && order?.is_shopify_linked) {
+    return "Returns on Shopify-linked orders must be processed in Shopify admin.";
+  }
+  if (action === "exchange" && order?.is_shopify_linked) {
+    return "Exchanges on Shopify-linked orders must be processed in Shopify admin.";
+  }
   if (active === action) {
     return `This order already has ${AFTER_SALES_LABELS[action] || "this after-sales action"} recorded.`;
   }

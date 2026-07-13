@@ -7,6 +7,8 @@ import { SYNC_STATUS_USER, ERP_IMPORT_STATUS_USER } from "../utils/friendlyMessa
 import OrderConflicts from "./OrderConflicts";
 import DisconnectStoreModal from "./DisconnectStoreModal";
 import ImportPreviewPanel from "./ImportPreviewPanel";
+import PushLogPanel from "./PushLogPanel";
+import LocationMappingPanel from "./LocationMappingPanel";
 
 export default function ConnectedStoreSummary({
   platform,
@@ -25,10 +27,25 @@ export default function ConnectedStoreSummary({
   onRetrySync,
   onImported,
   showRetry,
+  retryLabel = "Sync again",
+  retryBusy = false,
+  autoSyncEnabled = true,
+  autoSyncSaving = false,
+  onAutoSyncChange,
 }) {
   const [disconnectOpen, setDisconnectOpen] = useState(false);
   const syncLabel = SYNC_STATUS_USER[syncStatus] || syncStatus || "—";
   const importLabel = ERP_IMPORT_STATUS_USER[erpImportStatus] || erpImportStatus || "—";
+
+  const granted = new Set(
+    String(connection?.grantedScopes || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
+  );
+  const missingWriteScopes = (connection?.requiredScopes || []).filter(
+    (s) => s.startsWith("write_") && !granted.has(s),
+  );
 
   const handleDisconnected = () => {
     setDisconnectOpen(false);
@@ -49,8 +66,8 @@ export default function ConnectedStoreSummary({
           </div>
           <div className="wh-action-btns">
             {showRetry && (
-              <Button variant="secondary" className="wh-btn--sm" onClick={onRetrySync}>
-                Sync again
+              <Button variant="secondary" className="wh-btn--sm" onClick={onRetrySync} disabled={retryBusy}>
+                {retryBusy ? "Syncing…" : retryLabel}
               </Button>
             )}
             <Button variant="danger" className="wh-btn--sm" onClick={() => setDisconnectOpen(true)}>
@@ -64,6 +81,36 @@ export default function ConnectedStoreSummary({
             {apiAccess.setupMessage}
           </p>
         )}
+
+        {platform === "shopify" && missingWriteScopes.length > 0 && (
+          <div className="wh-alert wh-alert--warning" style={{ marginBottom: "1rem" }}>
+            <strong>Changes can’t be pushed to your store yet.</strong> This connection is missing write
+            permission ({missingWriteScopes.join(", ")}). Disconnect and reconnect the store to grant it,
+            then your ERP edits will sync back to Shopify.
+          </div>
+        )}
+
+        <div
+          className="wh-inv-checkbox-inline"
+          style={{ marginBottom: "1.25rem", padding: "0.75rem 1rem", borderRadius: "var(--radius-md)", border: "1px solid var(--border-color)", background: "var(--surface-bg)" }}
+        >
+          <label className="wh-checkbox-item" style={{ margin: 0 }}>
+            <input
+              type="checkbox"
+              checked={Boolean(autoSyncEnabled)}
+              disabled={autoSyncSaving || !onAutoSyncChange}
+              onChange={(e) => onAutoSyncChange?.(e.target.checked)}
+            />
+            <span>
+              <strong>Auto-sync to ERP</strong>
+              <span className="wh-muted" style={{ display: "block", marginTop: "0.2rem", fontWeight: 400 }}>
+                {autoSyncEnabled
+                  ? "Shopify changes import automatically (webhooks + every 5 min). No need to open this page."
+                  : "New store data is fetched but stays in staging until you import manually."}
+              </span>
+            </span>
+          </label>
+        </div>
 
         <div className="wh-dash-grid">
           <div className="wh-dash-col-3">
@@ -115,6 +162,13 @@ export default function ConnectedStoreSummary({
         connection={connection}
         onImported={onImported}
       />
+
+      {platform === "shopify" || platform === "daraz" ? (
+        <>
+          <LocationMappingPanel platform={platform} authFetch={authFetch} />
+          <PushLogPanel platform={platform} authFetch={authFetch} />
+        </>
+      ) : null}
 
       <OrderConflicts platform={platform} />
 

@@ -27,6 +27,8 @@ export const WEBHOOK_TOPIC_SCOPES = {
   CUSTOMERS_UPDATE: "read_customers",
   CUSTOMERS_DELETE: "read_customers",
   INVENTORY_LEVELS_UPDATE: "read_inventory",
+  LOCATIONS_CREATE: "read_locations",
+  LOCATIONS_UPDATE: "read_locations",
   APP_UNINSTALLED: null,
 };
 

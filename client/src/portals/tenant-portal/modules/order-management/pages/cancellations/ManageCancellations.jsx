@@ -62,6 +62,7 @@ export default function ManageCancellations() {
       key: "actions",
       label: "",
       sortable: false,
+      filter: false,
       format: (_, row) => {
         const canRefund = isOrderPaid(row)
           && isOrderEligibleForRefund(row)

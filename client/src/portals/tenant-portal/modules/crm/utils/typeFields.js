@@ -36,5 +36,5 @@ export function resolvePresetOrOther(preset, custom, label) {
 }
 
 export function isDefaultAddressType(addressType) {
-  return addressType === "default";
+  return String(addressType || "").trim().toLowerCase() === "default";
 }

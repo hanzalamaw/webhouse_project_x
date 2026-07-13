@@ -35,7 +35,8 @@ const ADDRESS_INDEX = buildLabelIndex(ADDRESS_TYPE_LABELS);
 const ADDRESS_LEGACY = {
   billing: "office",
   shipping: "office",
-  default: "office",
+  // Note: do NOT map "default" → something else. "default" is a real address type
+  // (the customer's primary/default address) in ADDRESS_TYPES.
 };
 
 const CUSTOMER_PRESETS = CUSTOMER_TYPES.filter((t) => t !== "other");

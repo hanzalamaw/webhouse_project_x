@@ -9,6 +9,7 @@ import { Button } from "../../../../../../components/Button";
 import { SearchableSelect } from "../../../../../../components/SearchableSelect";
 import { FormBlock } from "../../../../../../components/FormBlock";
 import { FormPageLayout, FormActions } from "../../../../../../components/FormPageLayout";
+import { ConfirmDeleteModal } from "../../../../../../components/ConfirmDeleteModal";
 import { TypeWithOtherField } from "../../components/TypeWithOtherField";
 import {
   MODULE_BASE,
@@ -39,13 +40,16 @@ export default function CreateLead() {
   const { leadId } = useParams();
   const isEdit = Boolean(leadId);
   const { authFetch } = useAuth();
-  const { canCreate, canEdit, readOnly } = useModulePermission("crm");
+  const { canCreate, canEdit, canDelete, readOnly } = useModulePermission("crm");
   const { crm_users } = useCrmReference();
   const navigate = useNavigate();
   const [form, setForm] = useState(EMPTY);
   const [loading, setLoading] = useState(isEdit);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const disabled = readOnly || (isEdit ? !canEdit : !canCreate);
 
@@ -85,6 +89,7 @@ export default function CreateLead() {
     if (disabled) return;
     setSaving(true);
     setError("");
+    setMessage("");
     try {
       const body = {
         lead_name: form.lead_name.trim(),
@@ -98,14 +103,31 @@ export default function CreateLead() {
       };
       if (isEdit) {
         await apiFetch(`/crm/leads/${leadId}`, { method: "PUT", body: JSON.stringify(body) }, authFetch);
+        setMessage("Lead updated successfully.");
       } else {
         await apiFetch("/crm/leads", { method: "POST", body: JSON.stringify(body) }, authFetch);
+        navigate(`${MODULE_BASE}/leads/manage`);
       }
-      navigate(`${MODULE_BASE}/leads/manage`);
     } catch (err) {
       setError(err.message || "Save failed");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!isEdit || !leadId) return;
+    setDeleting(true);
+    setError("");
+    try {
+      await apiFetch(`/crm/leads/${leadId}`, { method: "DELETE" }, authFetch);
+      setDeleteOpen(false);
+      navigate(`${MODULE_BASE}/leads/manage`);
+    } catch (err) {
+      setError(err.message);
+      setDeleteOpen(false);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -130,9 +152,16 @@ export default function CreateLead() {
               : "Capture a new lead with contact details and assignment."
           }
           actions={
-            <Button variant="secondary" onClick={() => navigate(`${MODULE_BASE}/leads/manage`)}>
-              Back to leads
-            </Button>
+            <div className="wh-action-btns">
+              <Button variant="secondary" onClick={() => navigate(`${MODULE_BASE}/leads/manage`)}>
+                Back to leads
+              </Button>
+              {isEdit && canDelete && (
+                <Button type="button" variant="danger" onClick={() => setDeleteOpen(true)} disabled={deleting}>
+                  Delete
+                </Button>
+              )}
+            </div>
           }
         />
 
@@ -225,6 +254,7 @@ export default function CreateLead() {
           </FormBlock>
 
           {error && <p className="wh-field__error">{error}</p>}
+          {message && <p className="wh-form-message">{message}</p>}
 
           <FormActions>
             <Button type="button" variant="secondary" onClick={() => navigate(`${MODULE_BASE}/leads/manage`)}>
@@ -238,6 +268,15 @@ export default function CreateLead() {
           </FormActions>
         </form>
       </FormPageLayout>
+
+      <ConfirmDeleteModal
+        open={deleteOpen}
+        title="Delete lead"
+        recordName={form.lead_name || "this lead"}
+        onConfirm={confirmDelete}
+        onClose={() => setDeleteOpen(false)}
+        loading={deleting}
+      />
     </div>
   );
 }

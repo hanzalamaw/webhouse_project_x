@@ -23,6 +23,7 @@ export default function CreateTerminal() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
 
   const disabled = readOnly || (isEdit ? !canEdit : !canCreate);
 
@@ -64,10 +65,11 @@ export default function CreateTerminal() {
       const body = { ...form, outlet_id: Number(form.outlet_id) };
       if (isEdit) {
         await apiFetch(`/pos/terminals/${terminalId}`, { method: "PUT", body: JSON.stringify(body) }, authFetch);
+        setMessage("Terminal updated successfully.");
       } else {
         await apiFetch("/pos/terminals", { method: "POST", body: JSON.stringify(body) }, authFetch);
+        navigate(`${MODULE_BASE}/terminals`);
       }
-      navigate(`${MODULE_BASE}/terminals`);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -112,6 +114,7 @@ export default function CreateTerminal() {
           </FormBlock>
 
           {error && <p className="wh-field__error">{error}</p>}
+          {message && <p className="wh-form-message">{message}</p>}
           <FormActions>
             <Button type="button" variant="secondary" onClick={() => navigate(`${MODULE_BASE}/terminals`)}>Cancel</Button>
             {!disabled && (

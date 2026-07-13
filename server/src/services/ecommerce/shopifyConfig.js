@@ -1,5 +1,5 @@
 const DEFAULT_SCOPES =
-  "read_orders,read_all_orders,read_products,read_customers,read_inventory,read_locations";
+  "read_orders,read_all_orders,read_products,read_customers,read_inventory,read_locations,write_orders,write_products,write_customers,write_inventory,write_locations,write_fulfillments";
 
 export const WEBHOOK_TOPICS = [
   "ORDERS_CREATE",
@@ -15,6 +15,8 @@ export const WEBHOOK_TOPICS = [
   "CUSTOMERS_UPDATE",
   "CUSTOMERS_DELETE",
   "INVENTORY_LEVELS_UPDATE",
+  "LOCATIONS_CREATE",
+  "LOCATIONS_UPDATE",
   "APP_UNINSTALLED",
 ];
 
@@ -32,6 +34,8 @@ export const SHOPIFY_WEBHOOK_TOPIC = {
   CUSTOMERS_UPDATE: "customers/update",
   CUSTOMERS_DELETE: "customers/delete",
   INVENTORY_LEVELS_UPDATE: "inventory_levels/update",
+  LOCATIONS_CREATE: "locations/create",
+  LOCATIONS_UPDATE: "locations/update",
   APP_UNINSTALLED: "app/uninstalled",
 };
 
@@ -72,7 +76,8 @@ export function getShopifyConfig() {
 
 export function normalizeShopDomain(shop) {
   let domain = (shop || "").trim().toLowerCase();
-  domain = domain.replace(/^https?:\/\//, "").replace(/\/$/, "");
+  domain = domain.replace(/^https?:\/\//, "");
+  domain = domain.split("/")[0].replace(/\.+$/, "");
   if (!domain.includes(".")) {
     domain = `${domain}.myshopify.com`;
   }

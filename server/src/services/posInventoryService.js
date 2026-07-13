@@ -5,6 +5,7 @@ import {
   resolveVariantsFromBody,
   reconstructOptionsFromVariants,
   variantComboKey,
+  resolveIncomingVariantKey,
 } from "../utils/productVariants.js";
 
 const STATUS_VALUES = ["active", "inactive"];
@@ -131,28 +132,46 @@ async function persistPosVariantRow(tenantId, userId, productId, outletId, v) {
 
 async function syncPosProductVariants(tenantId, userId, productId, outletId, body, productName) {
   const { variants } = resolveVariantsFromBody(body, productName);
+  await posInventoryRepository.releaseSoftDeletedVariantSkus(tenantId, productId);
   const existing = await posInventoryRepository.getVariantsByProductId(tenantId, productId);
-  const existingByKey = new Map();
-  for (const v of existing) {
-    existingByKey.set(variantComboKey(v.attributes), v);
-  }
 
   const seenKeys = new Set();
+  const incomingIds = new Set();
   for (const v of variants) {
-    const key = v.combo_key || variantComboKey(v.attributes);
-    seenKeys.add(key);
-    const match = existingByKey.get(key);
-    await persistPosVariantRow(tenantId, userId, productId, outletId, {
-      ...v,
-      id: v.id || match?.id || null,
-    });
+    seenKeys.add(resolveIncomingVariantKey(v));
+    if (v.id) incomingIds.add(Number(v.id));
   }
 
   for (const v of existing) {
-    const key = variantComboKey(v.attributes);
-    if (!seenKeys.has(key)) {
-      await posInventoryRepository.softDeleteVariant(tenantId, v.id);
-    }
+    const key = variantComboKey(v.attributes || []);
+    if (seenKeys.has(key) || incomingIds.has(v.id)) continue;
+    await posInventoryRepository.softDeleteVariant(tenantId, v.id);
+  }
+
+  const remaining = await posInventoryRepository.getVariantsByProductId(tenantId, productId);
+  const existingByKey = new Map();
+  const existingById = new Map();
+  const existingBySku = new Map();
+  for (const v of remaining) {
+    const key = variantComboKey(v.attributes || []);
+    existingByKey.set(key, v);
+    existingById.set(v.id, v);
+    const skuKey = String(v.sku || "").trim().toLowerCase();
+    if (skuKey) existingBySku.set(skuKey, v);
+  }
+
+  for (const v of variants) {
+    const key = resolveIncomingVariantKey(v);
+    const skuKey = String(v.sku || "").trim().toLowerCase();
+    const matchById = v.id ? existingById.get(Number(v.id)) : null;
+    const matchByKey = existingByKey.get(key);
+    const matchBySku = skuKey ? existingBySku.get(skuKey) : null;
+    const match = matchById || matchByKey || matchBySku;
+
+    await persistPosVariantRow(tenantId, userId, productId, outletId, {
+      ...v,
+      id: Number(v.id) || match?.id || null,
+    });
   }
 }
 

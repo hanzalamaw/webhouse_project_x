@@ -1,5 +1,5 @@
-import { writeDb } from "../database/db.js";
 import { getAuditContext } from "./auditContext.js";
+import { logTenantAudit } from "./tenantAudit.js";
 
 let cachedInventoryModuleId = null;
 let cachedFinanceModuleId = null;
@@ -46,7 +46,7 @@ async function moduleIdForTable(table) {
  * Basic audit log for Finance and Inventory write operations.
  * @param {{ tenantId: number, userId: number | null, action: string, table: string, recordId: number | null }} entry
  */
-export async function logModuleWriteAudit({ tenantId, userId, action, table, recordId }) {
+export async function logModuleWriteAudit({ tenantId, userId, action, table, recordId, oldRow = null, newRow = null }) {
   const ctx = getAuditContext();
   const moduleId = await moduleIdForTable(table);
   const prefix = table.startsWith("finance_")
@@ -55,19 +55,20 @@ export async function logModuleWriteAudit({ tenantId, userId, action, table, rec
       ? "pos"
       : "inventory";
 
-  await writeDb.query(
-    `INSERT INTO audit_logs
-       (action, old_value, new_value, ip_address, device_info, tenant_id, module_id, user_id)
-     VALUES (?, NULL, ?, ?, ?, ?, ?, ?)`,
-    [
-      `${prefix}_${action}`,
-      JSON.stringify({ table, record_id: recordId, action }),
-      ctx?.ipAddress ?? ctx?.ip ?? null,
-      ctx?.deviceInfo ?? null,
-      tenantId,
-      moduleId,
-      userId,
-    ],
-    { skipTenantGuard: true, skipWriteAudit: true }
-  );
+  const auditAction = `${prefix}_${action}`;
+  const oldValue = oldRow || (action === "delete" ? { table, record_id: recordId } : null);
+  const newValue = newRow || (action === "insert" ? { table, record_id: recordId } : { table, record_id: recordId, action });
+
+  await logTenantAudit({
+    tenantId,
+    userId,
+    moduleId,
+    action: auditAction,
+    oldValue,
+    newValue,
+    ipAddress: ctx?.ipAddress ?? ctx?.ip ?? null,
+    deviceInfo: ctx?.deviceInfo ?? null,
+    skipIfImpersonated: true,
+    impersonatedBy: ctx?.impersonatedBy ?? null,
+  });
 }

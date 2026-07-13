@@ -17,6 +17,7 @@ import { registerOrderRoutes } from "./src/routes/orders.js";
 import { registerFinanceRoutes } from "./src/routes/finance.js";
 import { shopifyWebhookHandler } from "./src/routes/shopifyWebhooks.js";
 import { purgeSoftDeleted } from "./src/jobs/purgeSoftDeleted.js";
+import { runShopifyBackgroundSync } from "./src/jobs/shopifyBackgroundSync.js";
 
 dotenv.config();
 
@@ -36,6 +37,7 @@ app.use(cookieParser());
 app.use(express.json({ limit: JSON_BODY_LIMIT }));
 
 const PURGE_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const SHOPIFY_POLL_INTERVAL_MS = Number(process.env.SHOPIFY_POLL_INTERVAL_MS) || 5 * 60 * 1000;
 
 const startServer = async () => {
   const db = await createPool();
@@ -92,6 +94,9 @@ const startServer = async () => {
   server.on("listening", () => {
     setTimeout(runPurge, 5000);
     setInterval(runPurge, PURGE_INTERVAL_MS);
+    // Pull Shopify changes into the ERP without opening the ecommerce module.
+    setTimeout(() => runShopifyBackgroundSync().catch(() => {}), 15000);
+    setInterval(() => runShopifyBackgroundSync().catch(() => {}), SHOPIFY_POLL_INTERVAL_MS);
   });
 
   const shutdown = async (signal) => {

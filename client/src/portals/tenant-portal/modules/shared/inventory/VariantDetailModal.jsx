@@ -101,7 +101,7 @@ export default function VariantDetailModal({
           <Button type="button" variant="secondary" onClick={onClose}>
             Cancel
           </Button>
-          <Button type="submit" form="variant-detail-form">
+          <Button type="submit" form="variant-detail-form" modalPrimary>
             Save variant
           </Button>
         </>

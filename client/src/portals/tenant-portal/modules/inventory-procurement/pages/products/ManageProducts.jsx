@@ -120,7 +120,15 @@ export default function ManageProducts() {
       render: (row) => (
         <div className="wh-action-btns">
           <Button variant="secondary" className="wh-btn--sm" onClick={() => navigate(`${MODULE_BASE}/products/edit/${row.id}`)}>Edit</Button>
-          <Button variant="danger" className="wh-btn--sm" onClick={() => setDeleteRow(row)}>Delete</Button>
+          <Button
+            variant="danger"
+            className="wh-btn--sm"
+            onClick={() => setDeleteRow(row)}
+            disabled={(row.open_order_count || 0) > 0}
+            title={(row.open_order_count || 0) > 0 ? "Products on open orders cannot be deleted." : undefined}
+          >
+            Delete
+          </Button>
         </div>
       ),
     },

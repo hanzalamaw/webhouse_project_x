@@ -31,6 +31,7 @@ export default function CreateExpense() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -84,10 +85,11 @@ export default function CreateExpense() {
       };
       if (isEdit) {
         await apiFetch(`/finance/expenses/${expenseId}`, { method: "PUT", body: JSON.stringify(body) }, authFetch);
+        setMessage("Expense updated successfully.");
       } else {
         await apiFetch("/finance/expenses", { method: "POST", body: JSON.stringify(body) }, authFetch);
+        navigate(`${MODULE_BASE}/expenses`);
       }
-      navigate(`${MODULE_BASE}/expenses`);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -107,7 +109,7 @@ export default function CreateExpense() {
           description="Record a one-time business expense."
           actions={<Button variant="secondary" onClick={() => navigate(`${MODULE_BASE}/expenses`)}>Back</Button>}
         />
-        <FormPageAlerts error={error} />
+        <FormPageAlerts error={error} message={message} />
         <form className="wh-form-stack" onSubmit={submit}>
           <FormBlock title="Expense details" description="Title, amount, category, and payment method. Sub-category is optional for finer reporting.">
             <div className="wh-form-grid">

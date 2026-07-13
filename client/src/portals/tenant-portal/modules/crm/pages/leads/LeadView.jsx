@@ -7,6 +7,7 @@ import { PageHeader } from "../../../../../../components/PageHeader";
 import { FormBlock } from "../../../../../../components/FormBlock";
 import { FormPageLayout, FormActions } from "../../../../../../components/FormPageLayout";
 import { Button } from "../../../../../../components/Button";
+import { ConfirmDeleteModal } from "../../../../../../components/ConfirmDeleteModal";
 import { StatusBadge } from "../../../../../../components/Badge";
 import { RecordViewSummary, DetailGrid, DetailValue } from "../../../../../../components/RecordView";
 import { formatDateTime } from "../../../../../../utils/dateTime";
@@ -15,11 +16,13 @@ import { MODULE_BASE, LEAD_SOURCE_LABELS, LEAD_STATUS_LABELS } from "../../const
 export default function LeadView() {
   const { leadId } = useParams();
   const { authFetch } = useAuth();
-  const { canEdit } = useModulePermission("crm");
+  const { canEdit, canDelete } = useModulePermission("crm");
   const navigate = useNavigate();
   const [lead, setLead] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -35,6 +38,21 @@ export default function LeadView() {
   }, [authFetch, leadId]);
 
   useEffect(() => { load().catch(() => {}); }, [load]);
+
+  const confirmDelete = async () => {
+    setDeleting(true);
+    setError("");
+    try {
+      await apiFetch(`/crm/leads/${leadId}`, { method: "DELETE" }, authFetch);
+      setDeleteOpen(false);
+      navigate(`${MODULE_BASE}/leads/manage`);
+    } catch (e) {
+      setError(e.message);
+      setDeleteOpen(false);
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -69,9 +87,14 @@ export default function LeadView() {
               {canEdit && lead.status !== "converted" && (
                 <Button onClick={() => navigate(`${MODULE_BASE}/leads/edit/${leadId}`)}>Edit lead</Button>
               )}
+              {canDelete && (
+                <Button variant="danger" onClick={() => setDeleteOpen(true)}>Delete</Button>
+              )}
             </div>
           }
         />
+
+        {error && <p className="wh-field__error">{error}</p>}
 
         <div className="wh-form-stack">
           <RecordViewSummary
@@ -130,9 +153,23 @@ export default function LeadView() {
                 Edit lead
               </Button>
             )}
+            {canDelete && (
+              <Button type="button" variant="danger" onClick={() => setDeleteOpen(true)}>
+                Delete
+              </Button>
+            )}
           </FormActions>
         </div>
       </FormPageLayout>
+
+      <ConfirmDeleteModal
+        open={deleteOpen}
+        title="Delete lead"
+        recordName={lead.lead_name || "this lead"}
+        onConfirm={confirmDelete}
+        onClose={() => setDeleteOpen(false)}
+        loading={deleting}
+      />
     </div>
   );
 }

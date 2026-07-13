@@ -6,6 +6,7 @@ import { apiFetch } from "../../../../../../api/client";
 import { PageHeader } from "../../../../../../components/PageHeader";
 import { FormField } from "../../../../../../components/FormField";
 import { Button } from "../../../../../../components/Button";
+import { ConfirmDeleteModal } from "../../../../../../components/ConfirmDeleteModal";
 import { FormBlock } from "../../../../../../components/FormBlock";
 import { FormPageLayout, FormActions } from "../../../../../../components/FormPageLayout";
 import { MODULE_BASE, OUTLET_STATUSES, OUTLET_STATUS_LABELS, TERMINAL_STATUSES, TERMINAL_STATUS_LABELS } from "../../constants";
@@ -43,7 +44,7 @@ function newTerminalRow(existing = null) {
 export default function EditStore() {
   const { storeId } = useParams();
   const { authFetch } = useAuth();
-  const { canEdit, canCreate, readOnly } = useModulePermission("pos");
+  const { canEdit, canCreate, canDelete, readOnly } = useModulePermission("pos");
   const navigate = useNavigate();
   const [form, setForm] = useState(EMPTY);
   const [terminals, setTerminals] = useState([]);
@@ -51,6 +52,8 @@ export default function EditStore() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const disabled = readOnly || !canEdit;
 
@@ -134,6 +137,21 @@ export default function EditStore() {
     setTerminals((rows) => rows.filter((r) => r._key !== row._key));
   };
 
+  const confirmDelete = async () => {
+    setDeleting(true);
+    setError("");
+    try {
+      await apiFetch(`/pos/outlets/${storeId}`, { method: "DELETE" }, authFetch);
+      setDeleteOpen(false);
+      navigate(`${MODULE_BASE}/stores/manage`);
+    } catch (e) {
+      setError(e.message);
+      setDeleteOpen(false);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="wh-page">
@@ -148,8 +166,18 @@ export default function EditStore() {
         <PageHeader
           title="Edit Store"
           description="Update store details, hours, and terminals."
-          actions={<Button variant="secondary" onClick={() => navigate(`${MODULE_BASE}/stores/${storeId}`)}>Back to store</Button>}
+          actions={
+            <div className="wh-action-btns">
+              <Button variant="secondary" onClick={() => navigate(`${MODULE_BASE}/stores/${storeId}`)}>Back to store</Button>
+              {canDelete && (
+                <Button type="button" variant="danger" onClick={() => setDeleteOpen(true)} disabled={deleting}>
+                  Delete
+                </Button>
+              )}
+            </div>
+          }
         />
+        {error && <div className="wh-alert wh-alert--error">{error}</div>}
         <form onSubmit={submit} className="wh-form-stack">
           <FormBlock title="Store details" description="Name, city, status, address, and opening cash.">
             <div className="wh-form-grid wh-form-grid--3">
@@ -203,7 +231,6 @@ export default function EditStore() {
             )}
           </FormBlock>
 
-          {error && <p className="wh-field__error">{error}</p>}
           <FormActions>
             <Button type="button" variant="secondary" onClick={() => navigate(`${MODULE_BASE}/stores/${storeId}`)}>Cancel</Button>
             {!disabled && (
@@ -211,6 +238,15 @@ export default function EditStore() {
             )}
           </FormActions>
         </form>
+
+        <ConfirmDeleteModal
+          open={deleteOpen}
+          title="Delete store"
+          recordName={form.outlet_name || "this store"}
+          onConfirm={confirmDelete}
+          onClose={() => setDeleteOpen(false)}
+          loading={deleting}
+        />
       </FormPageLayout>
     </div>
   );

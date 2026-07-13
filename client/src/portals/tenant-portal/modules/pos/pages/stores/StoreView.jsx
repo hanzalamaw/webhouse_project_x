@@ -6,6 +6,7 @@ import { apiFetch } from "../../../../../../api/client";
 import { PageHeader } from "../../../../../../components/PageHeader";
 import { Card } from "../../../../../../components/Card";
 import { Button } from "../../../../../../components/Button";
+import { ConfirmDeleteModal } from "../../../../../../components/ConfirmDeleteModal";
 import { FormField } from "../../../../../../components/FormField";
 import { StatusBadge } from "../../../../../../components/Badge";
 import { formatPKR } from "../../../../../../utils/currency";
@@ -46,11 +47,13 @@ const EMPTY_TERMINAL = { terminal_name: "", device_code: "", status: "active" };
 export default function StoreView() {
   const { storeId } = useParams();
   const { authFetch } = useAuth();
-  const { canCreate, canEdit } = useModulePermission("pos");
+  const { canCreate, canEdit, canDelete } = useModulePermission("pos");
   const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [showTerminalForm, setShowTerminalForm] = useState(false);
   const [terminalForm, setTerminalForm] = useState(EMPTY_TERMINAL);
   const [savingTerminal, setSavingTerminal] = useState(false);
@@ -70,6 +73,21 @@ export default function StoreView() {
   }, [authFetch, storeId]);
 
   useEffect(() => { load().catch(() => {}); }, [load]);
+
+  const confirmDelete = async () => {
+    setDeleting(true);
+    setError("");
+    try {
+      await apiFetch(`/pos/outlets/${storeId}`, { method: "DELETE" }, authFetch);
+      setDeleteOpen(false);
+      navigate(`${MODULE_BASE}/stores/manage`);
+    } catch (e) {
+      setError(e.message);
+      setDeleteOpen(false);
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const addTerminal = async (e) => {
     e.preventDefault();
@@ -122,6 +140,9 @@ export default function StoreView() {
             {canEdit && (
               <Button variant="secondary" onClick={() => navigate(`${MODULE_BASE}/stores/edit/${storeId}`)}>Edit store</Button>
             )}
+            {canDelete && (
+              <Button variant="danger" onClick={() => setDeleteOpen(true)}>Delete</Button>
+            )}
             {canCreate && (
               <Button onClick={() => setShowTerminalForm((v) => !v)}>
                 {showTerminalForm ? "Cancel terminal" : "Add terminal"}
@@ -131,7 +152,7 @@ export default function StoreView() {
         }
       />
 
-      {error && <p className="wh-field__error">{error}</p>}
+      {error && <div className="wh-alert wh-alert--error">{error}</div>}
 
       <div className="wh-dash-grid">
         <div className="wh-dash-col-3">
@@ -254,6 +275,15 @@ export default function StoreView() {
           <p className="wh-panel__empty">No register shifts yet.</p>
         )}
       </Panel>
+
+      <ConfirmDeleteModal
+        open={deleteOpen}
+        title="Delete store"
+        recordName={outlet.outlet_name || "this store"}
+        onConfirm={confirmDelete}
+        onClose={() => setDeleteOpen(false)}
+        loading={deleting}
+      />
     </div>
   );
 }

@@ -36,6 +36,10 @@ function tw(alias, tenantId) {
   return `${alias}.tenant_id = ? AND ${alias}.deleted_at IS NULL`;
 }
 
+function twIdOnly(alias, tenantId) {
+  return `${alias}.tenant_id = ?`;
+}
+
 async function ensureOutlet(tenantId, outletId) {
   const [rows] = await readDb.query(
     `SELECT id FROM pos_outlets WHERE id = ? AND ${tw("pos_outlets", tenantId)} LIMIT 1`,
@@ -407,19 +411,31 @@ export const posInventoryRepository = {
   },
 
   async softDeleteVariant(tenantId, id) {
+    // Release SKU so uk_pos_variants_tenant_outlet_sku does not block reuse after removal.
     const [result] = await writeDb.query(
-      `UPDATE pos_product_variants SET deleted_at = NOW()
-       WHERE id = ? AND ${tw("pos_product_variants", tenantId)}`,
+      `UPDATE pos_product_variants
+       SET deleted_at = COALESCE(deleted_at, NOW()), sku = CONCAT('__deleted_', id)
+       WHERE id = ? AND tenant_id = ?`,
       [id, tenantId]
     );
     return result.affectedRows > 0;
+  },
+
+  async releaseSoftDeletedVariantSkus(tenantId, productId) {
+    await writeDb.query(
+      `UPDATE pos_product_variants
+       SET sku = CONCAT('__deleted_', id)
+       WHERE product_id = ? AND tenant_id = ? AND deleted_at IS NOT NULL
+         AND sku != CONCAT('__deleted_', id)`,
+      [productId, tenantId]
+    );
   },
 
   async getVariantAttributes(tenantId, variantId) {
     const [rows] = await readDb.query(
       `SELECT a.attribute_name, av.value
        FROM pos_variant_attribute_values av
-       JOIN pos_variant_attributes a ON a.id = av.attribute_id AND ${tw("a", tenantId)}
+       JOIN pos_variant_attributes a ON a.id = av.attribute_id AND ${twIdOnly("a", tenantId)}
        INNER JOIN pos_product_variants v ON v.id = av.variant_id AND ${tw("v", tenantId)}
        WHERE av.variant_id = ?`,
       [tenantId, tenantId, variantId]

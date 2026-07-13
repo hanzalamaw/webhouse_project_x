@@ -39,6 +39,7 @@ export default function CreateOutlet() {
   const [loading, setLoading] = useState(isEdit);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
 
   const disabled = readOnly || (isEdit ? !canEdit : !canCreate);
 
@@ -75,10 +76,11 @@ export default function CreateOutlet() {
       };
       if (isEdit) {
         await apiFetch(`/pos/outlets/${outletId}`, { method: "PUT", body: JSON.stringify(body) }, authFetch);
+        setMessage("Outlet updated successfully.");
       } else {
         await apiFetch("/pos/outlets", { method: "POST", body: JSON.stringify(body) }, authFetch);
+        navigate(`${MODULE_BASE}/outlets`);
       }
-      navigate(`${MODULE_BASE}/outlets`);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -127,6 +129,7 @@ export default function CreateOutlet() {
           </FormBlock>
 
           {error && <p className="wh-field__error">{error}</p>}
+          {message && <p className="wh-form-message">{message}</p>}
           <FormActions>
             <Button type="button" variant="secondary" onClick={() => navigate(`${MODULE_BASE}/outlets`)}>Cancel</Button>
             {!disabled && (

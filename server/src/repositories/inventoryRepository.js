@@ -2,9 +2,21 @@ import { readDb, writeDb } from "../database/db.js";
 import { assertAllowedMovementType, joinOnTenant } from "../utils/tenantScope.js";
 
 const PRODUCT_SELECT = `
-  p.id, p.product_name, p.unit, p.delivery_charges, p.discount, p.tax,
+  p.id, p.product_name, p.description, p.unit, p.delivery_charges, p.discount, p.tax,
   p.status, p.source, p.created_at, p.updated_at, p.category_id, p.tenant_id,
   c.category_name,
+  EXISTS (
+    SELECT 1 FROM ecom_entity_links el
+    WHERE el.tenant_id = p.tenant_id AND el.entity_type = 'product'
+      AND el.internal_id = p.id AND el.platform = 'shopify' AND el.deleted_at IS NULL
+  ) AS is_shopify_linked,
+  (
+    SELECT COUNT(DISTINCT o.id)
+    FROM orders o
+    INNER JOIN order_items oi ON oi.order_id = o.id AND oi.tenant_id = o.tenant_id AND oi.deleted_at IS NULL
+    WHERE o.tenant_id = p.tenant_id AND o.deleted_at IS NULL AND oi.product_id = p.id
+      AND o.order_status NOT IN ('cancelled', 'returned')
+  ) AS open_order_count,
   COUNT(DISTINCT v.id) AS variant_count,
   MIN(v.selling_price) AS min_selling_price,
   MAX(v.selling_price) AS max_selling_price,
@@ -33,6 +45,10 @@ const VARIANT_SELECT = `
 
 function tenantWhere(alias, tenantId) {
   return `${alias}.tenant_id = ? AND ${alias}.deleted_at IS NULL`;
+}
+
+function tenantIdOnly(alias, tenantId) {
+  return `${alias}.tenant_id = ?`;
 }
 
 export const inventoryRepository = {
@@ -365,10 +381,11 @@ export const inventoryRepository = {
   async createProduct(tenantId, data) {
     const [result] = await writeDb.query(
       `INSERT INTO inventory_products
-         (product_name, unit, delivery_charges, discount, tax, status, source, category_id, tenant_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (product_name, description, unit, delivery_charges, discount, tax, status, source, category_id, tenant_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))`,
       [
         data.product_name,
+        data.description || null,
         data.unit,
         data.delivery_charges ?? 0,
         data.discount ?? 0,
@@ -377,6 +394,7 @@ export const inventoryRepository = {
         data.source || "manual",
         data.category_id,
         tenantId,
+        data.created_at || null,
       ]
     );
     return result.insertId;
@@ -385,6 +403,7 @@ export const inventoryRepository = {
   async updateProduct(tenantId, id, data) {
     const sets = [
       "product_name = ?",
+      "description = ?",
       "unit = ?",
       "delivery_charges = ?",
       "discount = ?",
@@ -394,6 +413,7 @@ export const inventoryRepository = {
     ];
     const params = [
       data.product_name,
+      data.description ?? null,
       data.unit,
       data.delivery_charges ?? 0,
       data.discount ?? 0,
@@ -504,6 +524,25 @@ export const inventoryRepository = {
     return rows[0] || null;
   },
 
+  /** Case-insensitive SKU lookup; falls back from exact match. */
+  async findVariantBySkuLoose(tenantId, sku, excludeId = null) {
+    const trimmed = String(sku || "").trim();
+    if (!trimmed) return null;
+    const exact = await this.findVariantBySku(tenantId, trimmed, excludeId);
+    if (exact) return exact;
+    const params = [tenantId, trimmed];
+    let sql = `SELECT v.id, v.product_id, v.sku, v.variant_name, v.cost_price, v.selling_price, v.status
+       FROM inventory_product_variants v
+       WHERE v.tenant_id = ? AND LOWER(TRIM(v.sku)) = LOWER(TRIM(?)) AND v.deleted_at IS NULL`;
+    if (excludeId) {
+      sql += ` AND v.id != ?`;
+      params.push(excludeId);
+    }
+    sql += ` LIMIT 1`;
+    const [rows] = await readDb.query(sql, params);
+    return rows[0] || null;
+  },
+
   /** @deprecated use findVariantBySku */
   async findProductBySku(tenantId, sku, excludeId = null) {
     return this.findVariantBySku(tenantId, sku, excludeId);
@@ -537,19 +576,31 @@ export const inventoryRepository = {
   },
 
   async softDeleteVariant(tenantId, id) {
+    // Release SKU so uk_inventory_variants_tenant_sku does not block reuse after removal.
     const [result] = await writeDb.query(
-      `UPDATE inventory_product_variants SET deleted_at = NOW()
-       WHERE id = ? AND ${tenantWhere("inventory_product_variants", tenantId)}`,
+      `UPDATE inventory_product_variants
+       SET deleted_at = COALESCE(deleted_at, NOW()), sku = CONCAT('__deleted_', id)
+       WHERE id = ? AND tenant_id = ?`,
       [id, tenantId]
     );
     return result.affectedRows > 0;
+  },
+
+  async releaseSoftDeletedVariantSkus(tenantId, productId) {
+    await writeDb.query(
+      `UPDATE inventory_product_variants
+       SET sku = CONCAT('__deleted_', id)
+       WHERE product_id = ? AND tenant_id = ? AND deleted_at IS NOT NULL
+         AND sku != CONCAT('__deleted_', id)`,
+      [productId, tenantId]
+    );
   },
 
   async getVariantAttributes(tenantId, variantId) {
     const [rows] = await readDb.query(
       `SELECT a.attribute_name, av.value
        FROM inventory_variant_attribute_values av
-       JOIN inventory_variant_attributes a ON a.id = av.attribute_id AND ${tenantWhere("a", tenantId)}
+       JOIN inventory_variant_attributes a ON a.id = av.attribute_id AND ${tenantIdOnly("a", tenantId)}
        INNER JOIN inventory_product_variants v ON v.id = av.variant_id AND ${tenantWhere("v", tenantId)}
        WHERE av.variant_id = ?`,
       [tenantId, tenantId, variantId]
@@ -777,13 +828,18 @@ export const inventoryRepository = {
 
   async listAllWarehousesBrief(tenantId) {
     const [rows] = await readDb.query(
-      `SELECT id, warehouse_name, city, status
-       FROM inventory_warehouses
-       WHERE ${tenantWhere("inventory_warehouses", tenantId)}
-       ORDER BY warehouse_name ASC`,
+      `SELECT w.id, w.warehouse_name, w.city, w.status,
+              EXISTS (
+                SELECT 1 FROM ecom_location_links ll
+                WHERE ll.tenant_id = w.tenant_id AND ll.warehouse_id = w.id
+                  AND ll.deleted_at IS NULL AND ll.shopify_location_id IS NOT NULL
+              ) AS shopify_mapped
+       FROM inventory_warehouses w
+       WHERE ${tenantWhere("w", tenantId)}
+       ORDER BY w.warehouse_name ASC`,
       [tenantId]
     );
-    return rows;
+    return rows.map((r) => ({ ...r, shopify_mapped: Boolean(r.shopify_mapped) }));
   },
 
   // ── Stock levels (variant-scoped) ──────────────────────────────────────────

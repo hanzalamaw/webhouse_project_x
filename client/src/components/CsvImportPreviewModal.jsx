@@ -30,7 +30,7 @@ export function CsvImportPreviewModal({
       footer={
         <>
           <Button variant="secondary" onClick={onClose} disabled={loading}>Cancel</Button>
-          <Button onClick={onConfirm} disabled={loading || !rows.length}>
+          <Button modalPrimary onClick={onConfirm} disabled={loading || !rows.length}>
             {loading ? "Importing…" : `Continue import (${rows.length} row${rows.length === 1 ? "" : "s"})`}
           </Button>
         </>

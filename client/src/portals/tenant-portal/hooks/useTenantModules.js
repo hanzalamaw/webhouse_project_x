@@ -2,8 +2,12 @@ import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "../../../context/AuthContext";
 import { apiFetch } from "../../../api/client";
 import { filterAssignedModules } from "../modules/registry";
+import { useTenantModulesContext } from "../../../context/TenantModulesContext";
 
 export function useTenantModules() {
+  const shared = useTenantModulesContext();
+  if (shared) return shared;
+
   const { authFetch } = useAuth();
   const [assigned, setAssigned] = useState([]);
   const [loading, setLoading] = useState(true);

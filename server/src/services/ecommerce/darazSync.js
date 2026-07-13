@@ -2,6 +2,7 @@ import {
   normalizeDarazOrder,
   normalizeDarazProduct,
   normalizeDarazCustomer,
+  normalizeDarazWarehouse,
 } from "../../normalizers/daraz.js";
 import {
   darazCredentialsForStore,
@@ -19,14 +20,21 @@ import {
 import {
   maybeUpdateLinkedProduct,
 } from "./ecomImport.js";
+import {
+  fetchAllDarazWarehouses,
+  syncAllDarazWarehouses,
+} from "./darazLocationSync.js";
 
 const running = new Set();
 
 async function persistEntity(storeId, tenantId, entityType, raw, normalized, source, platform = "daraz") {
   const externalId =
-    entityType === "customer"
-      ? String(raw.buyer_id || raw.customer_id || raw.id)
-      : String(raw.order_id || raw.item_id || raw.product_id || raw.id);
+    entityType === "location"
+      ? String(normalized?.externalId || raw.code || raw.warehouse_code || raw.warehouseCode || "")
+      : entityType === "customer"
+        ? String(raw.buyer_id || raw.customer_id || raw.id)
+        : String(raw.order_id || raw.item_id || raw.product_id || raw.id);
+  if (!externalId) return;
   await upsertSyncedRecord(storeId, tenantId, entityType, externalId, raw, normalized, source, platform);
   if (entityType === "product") {
     await maybeUpdateLinkedProduct(tenantId, storeId, normalized);
@@ -61,10 +69,40 @@ export async function runDarazInitialSync(storeId, tenantId) {
   await addSyncLog(storeId, store.tenant_id, {
     syncType: "initial_sync",
     status: "started",
-    message: `Pulling orders and products from Daraz (${apiBase}, created_after=${orderParams.created_after})`,
+    message: `Pulling warehouses, orders and products from Daraz (${apiBase}, created_after=${orderParams.created_after})`,
   });
 
   try {
+    // Warehouses first so imported product stock lands in the mapped ERP warehouse.
+    try {
+      const warehouses = await fetchAllDarazWarehouses(store);
+      for (const wh of warehouses) {
+        const normalized = normalizeDarazWarehouse(wh);
+        if (!normalized.externalId) continue;
+        await persistEntity(
+          storeId,
+          store.tenant_id,
+          "location",
+          wh,
+          normalized,
+          "initial_sync",
+        );
+      }
+      const locResult = await syncAllDarazWarehouses(storeId, store.tenant_id, warehouses);
+      await addSyncLog(storeId, store.tenant_id, {
+        syncType: "initial_sync:location",
+        status: "success",
+        message: `Synced ${locResult.synced} warehouse(s)${locResult.deferred ? ` (${locResult.deferred} need mapping)` : ""}`,
+      });
+    } catch (error) {
+      await addSyncLog(storeId, store.tenant_id, {
+        syncType: "initial_sync:location",
+        status: "failed",
+        message: formatDarazError(error),
+      });
+      // Continue — orders/products still useful without warehouse mapping.
+    }
+
     let orders = [];
     try {
       orders = await fetchAllDaraz(

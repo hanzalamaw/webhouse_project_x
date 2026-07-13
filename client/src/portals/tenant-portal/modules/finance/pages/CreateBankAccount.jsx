@@ -26,6 +26,7 @@ export default function CreateBankAccount() {
   const [loading, setLoading] = useState(isEdit);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
 
   useEffect(() => {
     if (!isEdit) return;
@@ -59,10 +60,11 @@ export default function CreateBankAccount() {
       const body = { ...form, current_balance: Number(form.current_balance) };
       if (isEdit) {
         await apiFetch(`/finance/bank-accounts/${accountId}`, { method: "PUT", body: JSON.stringify(body) }, authFetch);
+        setMessage("Bank account updated successfully.");
       } else {
         await apiFetch("/finance/bank-accounts", { method: "POST", body: JSON.stringify(body) }, authFetch);
+        navigate(`${MODULE_BASE}/bank-accounts`);
       }
-      navigate(`${MODULE_BASE}/bank-accounts`);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -82,7 +84,7 @@ export default function CreateBankAccount() {
           description="Track balances used for expenses and recurring deductions."
           actions={<Button variant="secondary" onClick={() => navigate(`${MODULE_BASE}/bank-accounts`)}>Back</Button>}
         />
-        <FormPageAlerts error={error} />
+        <FormPageAlerts error={error} message={message} />
         <form className="wh-form-stack" onSubmit={submit}>
           <FormBlock title="Account details" description="Bank name, account title, and number.">
             <div className="wh-form-grid">

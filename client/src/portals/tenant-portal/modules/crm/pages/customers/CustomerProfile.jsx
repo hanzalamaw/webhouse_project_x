@@ -6,6 +6,7 @@ import { useFiscalYear } from "../../../../../../context/FiscalYearContext";
 import { apiFetch, TABLE_PAGE_SIZE } from "../../../../../../api/client";
 import { PageHeader } from "../../../../../../components/PageHeader";
 import { Button } from "../../../../../../components/Button";
+import { ConfirmDeleteModal } from "../../../../../../components/ConfirmDeleteModal";
 import { DataTable } from "../../../../../../components/DataTable";
 import { StatusBadge } from "../../../../../../components/Badge";
 import { DashboardFilter } from "../../../../../../components/DashboardFilter";
@@ -41,7 +42,7 @@ const OPEN_COMPLAINT_STATUSES = new Set(["open", "in_progress"]);
 
 function formatLocation(addresses) {
   const list = addresses || [];
-  const primary = list.find((a) => a.is_default) || list[0];
+  const primary = list.find((a) => a.is_default === true || a.is_default === 1 || a.is_default === "1") || list[0];
   if (!primary) return null;
   return [primary.city, primary.state].filter(Boolean).join(", ") || primary.address || null;
 }
@@ -49,7 +50,7 @@ function formatLocation(addresses) {
 export default function CustomerProfile() {
   const { customerId } = useParams();
   const { authFetch } = useAuth();
-  const { canCreate, canEdit } = useModulePermission("crm");
+  const { canCreate, canEdit, canDelete } = useModulePermission("crm");
   const navigate = useNavigate();
   const [customer, setCustomer] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -57,6 +58,9 @@ export default function CustomerProfile() {
   const [ordersPage, setOrdersPage] = useState(1);
   const [posPage, setPosPage] = useState(1);
   const [dashFilter, setDashFilter] = useState(createThisMonthDashboardFilter);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const defaultDashFilter = useMemo(() => createThisMonthDashboardFilter(), []);
   const fiscalYearStart = useFiscalYear();
 
   const load = useCallback(async () => {
@@ -73,6 +77,21 @@ export default function CustomerProfile() {
   }, [authFetch, customerId]);
 
   useEffect(() => { load().catch(() => {}); }, [load]);
+
+  const confirmDelete = async () => {
+    setDeleting(true);
+    setError("");
+    try {
+      await apiFetch(`/crm/customers/${customerId}`, { method: "DELETE" }, authFetch);
+      setDeleteOpen(false);
+      navigate(`${MODULE_BASE}/customers/manage`);
+    } catch (e) {
+      setError(e.message);
+      setDeleteOpen(false);
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const orders = customer?.orders || [];
   const posSales = customer?.pos_sales || [];
@@ -216,6 +235,20 @@ export default function CustomerProfile() {
                 Edit customer
               </Button>
             )}
+            {canDelete && (
+              <Button
+                variant="danger"
+                onClick={() => setDeleteOpen(true)}
+                disabled={Boolean(customer.is_shopify_linked) && (customer.orders?.length || 0) > 0}
+                title={
+                  customer.is_shopify_linked && (customer.orders?.length || 0) > 0
+                    ? "Shopify-linked customers with orders cannot be deleted."
+                    : undefined
+                }
+              >
+                Delete
+              </Button>
+            )}
             {canCreate && (
               <Button onClick={() => navigate(`${MODULE_BASE}/complaints/create`)}>Add complaint</Button>
             )}
@@ -223,11 +256,14 @@ export default function CustomerProfile() {
         }
       />
 
+      {error && <div className="wh-alert wh-alert--error">{error}</div>}
+
       <DashboardFilter
         rows={filterRows}
         dateField="created_at"
         value={dashFilter}
         onChange={setDashFilter}
+        defaultFilter={defaultDashFilter}
       />
 
       <ProfileHero
@@ -285,6 +321,14 @@ export default function CustomerProfile() {
           {formatDateTime(customer.converted_from_lead.converted_at)}
         </div>
       )}
+
+      <EntityPanel title="Notes" subtitle="Customer notes synced with Shopify when linked">
+        {String(customer.note || "").trim() ? (
+          <p className="wh-panel__text" style={{ whiteSpace: "pre-wrap", margin: 0 }}>{customer.note}</p>
+        ) : (
+          <p className="wh-panel__empty">No notes yet.</p>
+        )}
+      </EntityPanel>
 
       <EntityPanel title="Order overview" subtitle="E-commerce orders for this customer in the selected period" flush>
         {filteredOrders.length ? (
@@ -363,6 +407,15 @@ export default function CustomerProfile() {
           </EntityPanel>
         </div>
       </div>
+
+      <ConfirmDeleteModal
+        open={deleteOpen}
+        title="Delete customer"
+        recordName={customer.customer_name || "this customer"}
+        onConfirm={confirmDelete}
+        onClose={() => setDeleteOpen(false)}
+        loading={deleting}
+      />
     </div>
   );
 }

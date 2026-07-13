@@ -20,8 +20,22 @@ function getDisplayText(row, col) {
   return String(raw);
 }
 
+/** Plain text for column filters — never uses React formatters (e.g. action buttons). */
+function getFilterText(row, col) {
+  const raw = getColumnValue(row, col);
+  if (raw == null || raw === "") return "—";
+  if (typeof raw === "object") return "—";
+  return String(raw);
+}
+
+function compareFilterText(a, b) {
+  return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: "base" });
+}
+
 function isFilterable(col) {
-  return col.key && col.filter !== false;
+  if (!col.key || col.filter === false) return false;
+  if (col.key === "actions") return false;
+  return true;
 }
 
 function isDateColumn(col) {
@@ -396,7 +410,7 @@ export function DataTable({
         filterableColumns.every((col) => {
           const excludedSet = excluded[col.key];
           if (!excludedSet || excludedSet.size === 0) return true;
-          return !excludedSet.has(getDisplayText(row, col));
+          return !excludedSet.has(getFilterText(row, col));
         })
       );
     },
@@ -422,7 +436,7 @@ export function DataTable({
       otherFilters.every((oc) => {
         const excludedSet = excluded[oc.key];
         if (!excludedSet || excludedSet.size === 0) return true;
-        return !excludedSet.has(getDisplayText(row, oc));
+        return !excludedSet.has(getFilterText(row, oc));
       })
     );
   }, [sourceRows, excluded, filterableColumns, openColumn]);
@@ -436,12 +450,12 @@ export function DataTable({
         otherFilters.every((oc) => {
           const excludedSet = excluded[oc.key];
           if (!excludedSet || excludedSet.size === 0) return true;
-          return !excludedSet.has(getDisplayText(row, oc));
+          return !excludedSet.has(getFilterText(row, oc));
         })
       );
       options[col.key] = [
-        ...new Set(baseRows.map((row) => getDisplayText(row, col))),
-      ].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
+        ...new Set(baseRows.map((row) => getFilterText(row, col))),
+      ].sort(compareFilterText);
     }
     return options;
   }, [sourceRows, excluded, filterableColumns]);

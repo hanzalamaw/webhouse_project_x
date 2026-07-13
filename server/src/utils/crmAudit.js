@@ -16,13 +16,15 @@ export async function getCrmModuleId() {
 export async function logCrmActivity(tenantId, userId, action, summary, extra = {}) {
   const moduleId = await getCrmModuleId();
   const ctx = getAuditContext();
+  const { oldValue, newValue, ...rest } = extra;
   await logTenantAudit({
     tenantId,
     userId,
     moduleId,
     action: `crm_${action}`,
-    newValue: { summary, ...extra },
-    skipIfImpersonated: false,
+    oldValue: oldValue || null,
+    newValue: newValue || { summary, ...rest },
+    skipIfImpersonated: true,
     impersonatedBy: ctx?.impersonatedBy ?? null,
     ipAddress: ctx?.ipAddress ?? ctx?.ip ?? null,
     deviceInfo: ctx?.deviceInfo ?? null,

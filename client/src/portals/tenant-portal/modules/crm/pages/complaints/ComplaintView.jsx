@@ -7,6 +7,7 @@ import { PageHeader } from "../../../../../../components/PageHeader";
 import { FormBlock } from "../../../../../../components/FormBlock";
 import { FormPageLayout, FormActions } from "../../../../../../components/FormPageLayout";
 import { Button } from "../../../../../../components/Button";
+import { ConfirmDeleteModal } from "../../../../../../components/ConfirmDeleteModal";
 import { StatusBadge } from "../../../../../../components/Badge";
 import { RecordViewSummary, DetailGrid, DetailValue } from "../../../../../../components/RecordView";
 import { formatDateTime } from "../../../../../../utils/dateTime";
@@ -20,11 +21,13 @@ function formatPriority(priority) {
 export default function ComplaintView() {
   const { complaintId } = useParams();
   const { authFetch } = useAuth();
-  const { canEdit } = useModulePermission("crm");
+  const { canEdit, canDelete } = useModulePermission("crm");
   const navigate = useNavigate();
   const [complaint, setComplaint] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -40,6 +43,22 @@ export default function ComplaintView() {
   }, [authFetch, complaintId]);
 
   useEffect(() => { load().catch(() => {}); }, [load]);
+
+  const confirmDelete = async () => {
+    if (!complaint) return;
+    setDeleting(true);
+    setError("");
+    try {
+      await apiFetch(`/crm/complaints/${complaintId}`, { method: "DELETE" }, authFetch);
+      setDeleteOpen(false);
+      navigate(`${MODULE_BASE}/complaints/manage`);
+    } catch (e) {
+      setError(e.message);
+      setDeleteOpen(false);
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -74,9 +93,14 @@ export default function ComplaintView() {
               {canEdit && (
                 <Button onClick={() => navigate(`${MODULE_BASE}/complaints/edit/${complaintId}`)}>Edit complaint</Button>
               )}
+              {canDelete && (
+                <Button variant="danger" onClick={() => setDeleteOpen(true)}>Delete</Button>
+              )}
             </div>
           }
         />
+
+        {error && <div className="wh-alert wh-alert--error">{error}</div>}
 
         <div className="wh-form-stack">
           <RecordViewSummary
@@ -140,8 +164,20 @@ export default function ComplaintView() {
                 Edit complaint
               </Button>
             )}
+            {canDelete && (
+              <Button type="button" variant="danger" onClick={() => setDeleteOpen(true)}>Delete</Button>
+            )}
           </FormActions>
         </div>
+
+        <ConfirmDeleteModal
+          open={deleteOpen}
+          title="Delete complaint"
+          recordName={complaint.subject || "this complaint"}
+          onConfirm={confirmDelete}
+          onClose={() => setDeleteOpen(false)}
+          loading={deleting}
+        />
       </FormPageLayout>
     </div>
   );

@@ -24,8 +24,24 @@ export default function CreatePayment() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+
+  const selectedOrder = useMemo(
+    () => orders.find((o) => String(o.id) === String(form.order_id)),
+    [orders, form.order_id],
+  );
+
+  const paymentBlocked = useMemo(() => {
+    if (!selectedOrder?.is_shopify_linked) return "";
+    const status = String(selectedOrder.payment_status || "").toLowerCase();
+    if (["paid", "partial", "partially_paid", "refunded"].includes(status)) {
+      return "Payments on this Shopify-linked order are managed in Shopify.";
+    }
+    return "";
+  }, [selectedOrder]);
 
   const disabled = readOnly || (isEdit ? !canEdit : !canCreate);
+  const formDisabled = disabled || Boolean(paymentBlocked);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
   const orderOptions = useMemo(
@@ -66,7 +82,7 @@ export default function CreatePayment() {
 
   const submit = async (e) => {
     e.preventDefault();
-    if (disabled) return;
+    if (formDisabled) return;
     setSaving(true);
     setError("");
     try {
@@ -79,10 +95,11 @@ export default function CreatePayment() {
       };
       if (isEdit) {
         await apiFetch(`/orders/payments/${paymentId}`, { method: "PUT", body: JSON.stringify(body) }, authFetch);
+        setMessage("Payment updated successfully.");
       } else {
         await apiFetch("/orders/payments", { method: "POST", body: JSON.stringify(body) }, authFetch);
+        navigate(`${MODULE_BASE}/payments/manage`);
       }
-      navigate(`${MODULE_BASE}/payments/manage`);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -100,29 +117,31 @@ export default function CreatePayment() {
           <FormBlock title="Payment details">
             <div className="wh-form-grid wh-form-grid--2">
               <FormField label="Order">
-                <SearchableSelect options={orderOptions} value={form.order_id} onChange={(v) => set("order_id", v)} disabled={disabled || isEdit} />
+                <SearchableSelect options={orderOptions} value={form.order_id} onChange={(v) => set("order_id", v)} disabled={formDisabled || isEdit} />
               </FormField>
               <FormField label="Amount">
-                <input className="wh-input" type="number" min="0" step="0.01" value={form.amount} onChange={(e) => set("amount", e.target.value)} disabled={disabled} required />
+                <input className="wh-input" type="number" min="0" step="0.01" value={form.amount} onChange={(e) => set("amount", e.target.value)} disabled={formDisabled} required />
               </FormField>
               <FormField label="Payment method">
-                <select className="wh-input" value={form.payment_method} onChange={(e) => set("payment_method", e.target.value)} disabled={disabled}>
+                <select className="wh-input" value={form.payment_method} onChange={(e) => set("payment_method", e.target.value)} disabled={formDisabled}>
                   {PAYMENT_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
                 </select>
               </FormField>
               <FormField label="Status">
-                <select className="wh-input" value={form.payment_status} onChange={(e) => set("payment_status", e.target.value)} disabled={disabled}>
+                <select className="wh-input" value={form.payment_status} onChange={(e) => set("payment_status", e.target.value)} disabled={formDisabled}>
                   {PAYMENT_RECORD_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
                 </select>
               </FormField>
               <FormField label="Paid at">
-                <input className="wh-input" type="datetime-local" value={form.paid_at} onChange={(e) => set("paid_at", e.target.value)} disabled={disabled} />
+                <input className="wh-input" type="datetime-local" value={form.paid_at} onChange={(e) => set("paid_at", e.target.value)} disabled={formDisabled} />
               </FormField>
             </div>
           </FormBlock>
+          {paymentBlocked && <p className="wh-field__error">{paymentBlocked}</p>}
           {error && <p className="wh-field__error">{error}</p>}
+          {message && <p className="wh-form-message">{message}</p>}
           <FormActions>
-            <Button type="submit" disabled={saving || disabled}>{saving ? "Saving…" : "Save"}</Button>
+            <Button type="submit" disabled={saving || formDisabled}>{saving ? "Saving…" : "Save"}</Button>
             <Button type="button" variant="secondary" onClick={() => navigate(`${MODULE_BASE}/payments/manage`)}>Cancel</Button>
           </FormActions>
         </form>

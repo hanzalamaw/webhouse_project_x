@@ -20,6 +20,7 @@ export function topicToEntityType(topic) {
   if (topic.startsWith("products/")) return "product";
   if (topic.startsWith("customers/")) return "customer";
   if (topic === "inventory_levels/update") return "inventory";
+  if (topic.startsWith("locations/")) return "location";
   return null;
 }
 

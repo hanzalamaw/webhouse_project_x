@@ -24,13 +24,12 @@ export function getFiscalYearEndDate(fiscalYearLabel, fiscalYearStart) {
   return end;
 }
 
-/** Filter range for fiscal year label: start of FY through min(now, FY end). */
-export function getFiscalYearFilterRange(fiscalYearLabel, fiscalYearStart, asOf = new Date()) {
-  const start = getFiscalYearStartDate(fiscalYearLabel, fiscalYearStart);
-  const fyEnd = getFiscalYearEndDate(fiscalYearLabel, fiscalYearStart);
-  const end = asOf < fyEnd ? new Date(asOf) : fyEnd;
-  end.setHours(23, 59, 59, 999);
-  return { start, end };
+/** Full fiscal year range for dashboard/list filtering. */
+export function getFiscalYearFilterRange(fiscalYearLabel, fiscalYearStart) {
+  return {
+    start: getFiscalYearStartDate(fiscalYearLabel, fiscalYearStart),
+    end: getFiscalYearEndDate(fiscalYearLabel, fiscalYearStart),
+  };
 }
 
 export function getFiscalYearsFromRows(rows, dateField, fiscalYearStart) {
@@ -44,5 +43,7 @@ export function getFiscalYearsFromRows(rows, dateField, fiscalYearStart) {
     const fy = getFiscalYearForDate(d, fiscalYearStart);
     if (fy != null) years.add(fy);
   }
+  const current = getFiscalYearForDate(new Date(), fiscalYearStart);
+  if (current != null) years.add(current);
   return [...years].sort((a, b) => b - a);
 }

@@ -21,6 +21,10 @@ import {
 import { onAppInstalled, retryPostInstall } from "../services/ecommerce/shopifySync.js";
 import { verifyStoreApiAccess, getRequiredScopes } from "../services/ecommerce/shopifyAccess.js";
 import { createEcomSharedHandlers } from "./ecomSharedHandlers.js";
+import { getEcomLinkStatus, getShopifyLinkStatus, retryPushByExternalId } from "../services/ecommerce/ecomPush.js";
+import { repairCustomerLinksFromOrders, reconcileImportedData } from "../services/ecommerce/ecomImport.js";
+import { getPushLogs } from "../repositories/ecommerceRepository.js";
+import { getLocationMappingData, applyLocationSelections } from "../services/ecommerce/locationSync.js";
 
 const router = Router();
 const SESSION_COOKIE = "shopify_oauth_session";
@@ -142,9 +146,21 @@ router.get("/oauth/callback", async (req, res) => {
     );
   }
 
-  if (stateData.shop !== shopDomain) {
+  let expectedShop = stateData.shop;
+  try {
+    expectedShop = normalizeShopDomain(stateData.shop);
+  } catch {
+    // keep raw value for error message
+  }
+  if (expectedShop !== shopDomain) {
+    console.warn(
+      `[shopify oauth] shop mismatch: expected=${expectedShop} callback=${shopDomain} state=${stateKey.slice(0, 8)}…`,
+    );
+    const hint =
+      `Shop mismatch: you started connecting ${expectedShop} but Shopify returned ${shopDomain}. ` +
+      "Use the exact .myshopify.com domain from Shopify Admin → Settings → Domains, close other OAuth tabs, and click Integrate once.";
     return res.redirect(
-      `${config.frontendIntegrationsUrl}?shopify_error=${encodeURIComponent("OAuth shop mismatch — restart integration")}`,
+      `${config.frontendIntegrationsUrl}?shopify_error=${encodeURIComponent(hint)}`,
     );
   }
 
@@ -221,7 +237,7 @@ router.get("/oauth/session", async (req, res) => {
     initialSyncStatus: store.initial_sync_status,
     webhooksRegistered: Boolean(store.webhooks_registered),
     lastSyncedAt: store.last_synced_at,
-    counts: await getEntityCounts(store.id),
+    counts: await getEntityCounts(store.id, store.tenant_id),
   });
 });
 
@@ -248,6 +264,11 @@ router.post("/sync/import", async (req, res) => {
   await shared.handleImport(req, res, store);
 });
 
+router.post("/sync/auto-sync", async (req, res) => {
+  const store = await getStoreFromRequest(req);
+  await shared.handleAutoSyncSetting(req, res, store);
+});
+
 router.get("/sync/status", async (req, res) => {
   const store = await getStoreFromRequest(req);
   if (!store) {
@@ -262,6 +283,7 @@ router.get("/sync/status", async (req, res) => {
     storeId: store.id,
     shop: store.store_url,
     storeName: store.store_name,
+    autoSyncEnabled: store.auto_sync_enabled !== false,
     grantedScopes: store.granted_scopes,
     requiredScopes: getRequiredScopes(),
     apiAccess: {
@@ -273,7 +295,7 @@ router.get("/sync/status", async (req, res) => {
     initialSyncStatus: store.initial_sync_status,
     webhooksRegistered: Boolean(store.webhooks_registered),
     lastSyncedAt: store.last_synced_at,
-    counts: await getEntityCounts(store.id),
+    counts: await getEntityCounts(store.id, store.tenant_id),
     ...importExtras,
   });
 });
@@ -294,8 +316,22 @@ router.post("/sync/retry", async (req, res) => {
     return res.status(401).json({ success: false, error: "Not connected" });
   }
 
+  // First, synchronously repair already-imported records from data already fetched
+  // (fixes wrong dates + stock stuck in the wrong warehouse) so the user gets an
+  // immediate, accurate result. Then kick off a fresh background pull from Shopify.
+  let repaired = { products: 0, customers: 0, orders: 0, failed: 0 };
+  try {
+    repaired = await reconcileImportedData(store.id, store.tenant_id);
+  } catch (err) {
+    console.error("Reconcile error:", err);
+  }
+
   retryPostInstall(store.id, store.tenant_id).catch((err) => console.error("Retry sync error:", err));
-  res.json({ success: true, message: "Retry started — check sync log" });
+  res.json({
+    success: true,
+    repaired,
+    message: `Repaired ${repaired.products} products, ${repaired.orders} orders, ${repaired.customers} customers. Fetching latest from Shopify in the background…`,
+  });
 });
 
 router.post("/sync/import-inventory", async (req, res) => {
@@ -303,6 +339,65 @@ router.post("/sync/import-inventory", async (req, res) => {
   if (!store) return res.status(401).json({ success: false, error: "Not connected" });
   req.body = { entities: ["product"], ...(req.body || {}) };
   await shared.handleImport(req, res, store);
+});
+
+router.get("/sync/link", async (req, res) => {
+  const entityType = String(req.query.entityType || "").trim();
+  const entityId = Number(req.query.entityId);
+  if (!entityType || !entityId) {
+    return res.status(400).json({ success: false, error: "entityType and entityId are required" });
+  }
+  if (!req.tenantId) {
+    return res.status(401).json({ success: false, error: "Unauthorized" });
+  }
+  const status = await getEcomLinkStatus(req.tenantId, entityType, entityId);
+  res.json({ success: true, ...status });
+});
+
+router.post("/sync/repair-customer-links", async (req, res) => {
+  const store = await getStoreFromRequest(req);
+  if (!store) return res.status(401).json({ success: false, error: "Not connected" });
+  const result = await repairCustomerLinksFromOrders(req.tenantId, store.id);
+  res.json({ success: true, ...result });
+});
+
+router.get("/sync/push-logs", async (req, res) => {
+  const store = await getStoreFromRequest(req);
+  if (!store) return res.json({ success: true, logs: [] });
+  const onlyFailed = req.query.onlyFailed === "1" || req.query.onlyFailed === "true";
+  const logs = await getPushLogs(store.id, { onlyFailed });
+  res.json({ success: true, logs });
+});
+
+router.post("/sync/push-retry", async (req, res) => {
+  const store = await getStoreFromRequest(req);
+  if (!store) return res.status(401).json({ success: false, error: "Not connected" });
+  const syncType = String(req.body?.syncType || "");
+  const entityType = String(req.body?.entityType || syncType.replace(/^erp_push:/, "")).trim();
+  const externalId = String(req.body?.externalId || "").trim();
+  if (!entityType || !externalId) {
+    return res.status(400).json({ success: false, error: "entityType and externalId are required" });
+  }
+  const result = await retryPushByExternalId(req.tenantId, store.id, entityType, externalId);
+  if (!result.ok) {
+    return res.status(result.skipped ? 409 : 400).json({ success: false, ...result });
+  }
+  res.json({ success: true, ...result });
+});
+
+router.get("/locations", async (req, res) => {
+  const store = await getStoreFromRequest(req);
+  if (!store) return res.status(401).json({ success: false, error: "Not connected" });
+  const data = await getLocationMappingData(req.tenantId, store.id);
+  res.json({ success: true, ...data });
+});
+
+router.post("/locations/import", async (req, res) => {
+  const store = await getStoreFromRequest(req);
+  if (!store) return res.status(401).json({ success: false, error: "Not connected" });
+  const selections = Array.isArray(req.body?.selections) ? req.body.selections : [];
+  const data = await applyLocationSelections(req.tenantId, store.id, selections);
+  res.json({ success: true, ...data });
 });
 
 router.get("/sync/logs", async (req, res) => {
@@ -327,14 +422,14 @@ router.get("/db/:entityType", async (req, res) => {
     return res.status(400).json({ success: false, error: "Invalid entity type" });
   }
 
-  const records = await getSyncedRecords(store.id, entityType, 100);
+  const records = await getSyncedRecords(store.id, store.tenant_id, entityType, 100);
   res.json({
     success: true,
     source: "database",
     records,
     raw: records.map((r) => r.raw),
     normalized: records.map((r) => r.normalized),
-    counts: await getEntityCounts(store.id),
+    counts: await getEntityCounts(store.id, store.tenant_id),
   });
 });
 

@@ -27,6 +27,7 @@ export default function CreateVendorBill() {
   const [loading, setLoading] = useState(isEdit);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
 
   useEffect(() => {
     if (!isEdit) return;
@@ -60,10 +61,11 @@ export default function CreateVendorBill() {
       const body = { ...form, bill_amount: Number(form.bill_amount) };
       if (isEdit) {
         await apiFetch(`/finance/vendor-bills/${billId}`, { method: "PUT", body: JSON.stringify(body) }, authFetch);
+        setMessage("Vendor bill updated successfully.");
       } else {
         await apiFetch("/finance/vendor-bills", { method: "POST", body: JSON.stringify(body) }, authFetch);
+        navigate(`${MODULE_BASE}/vendor-bills`);
       }
-      navigate(`${MODULE_BASE}/vendor-bills`);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -83,7 +85,7 @@ export default function CreateVendorBill() {
           description="Record a vendor invoice and track payment status."
           actions={<Button variant="secondary" onClick={() => navigate(`${MODULE_BASE}/vendor-bills`)}>Back</Button>}
         />
-        <FormPageAlerts error={error} />
+        <FormPageAlerts error={error} message={message} />
         <form className="wh-form-stack" onSubmit={submit}>
           <FormBlock title="Bill details" description="Vendor, amount, and due date.">
             <div className="wh-form-grid">

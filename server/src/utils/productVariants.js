@@ -17,6 +17,11 @@ export function variantComboKey(attributes = []) {
     .join("|");
 }
 
+export function resolveIncomingVariantKey(variant = {}) {
+  if (variant.combo_key != null) return String(variant.combo_key);
+  return variantComboKey(variant.attributes || []);
+}
+
 export function comboKeyFromMap(combo = {}) {
   const attributes = Object.entries(combo).map(([attribute_name, value]) => ({
     attribute_name,
@@ -112,9 +117,11 @@ export function buildVariantsFromOptions(options, ctx = {}) {
   const combos = cartesianCombinations(options);
   const rowByKey = new Map();
   for (const row of ctx.variant_rows || []) {
-    if (row.combo_key) rowByKey.set(row.combo_key, row);
-    else if (row.combo) rowByKey.set(comboKeyFromMap(row.combo), row);
-    else if (row.attributes?.length) rowByKey.set(variantComboKey(row.attributes), row);
+    const keys = new Set();
+    if (row.combo_key != null) keys.add(String(row.combo_key));
+    if (row.combo && Object.keys(row.combo).length) keys.add(comboKeyFromMap(row.combo));
+    if (row.attributes?.length) keys.add(variantComboKey(row.attributes));
+    for (const k of keys) rowByKey.set(k, row);
   }
 
   return combos.map((combo, index) => {

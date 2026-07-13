@@ -10,6 +10,7 @@ export function registerEcommerceRoutes(app, verifyToken) {
   const auth = [verifyToken, establishTenantContext, requireTenant, stripTenantIdFromRequest, impersonationAudit];
 
   app.get("/api/ecommerce/dashboard", auth, ecommerceController.dashboard);
+  app.get("/api/ecommerce/sync/link", auth, ecommerceController.syncLink);
 
   app.get("/api/shopify/oauth/install", auth, createShopifyInstallHandler());
   app.get("/api/daraz/oauth/install", auth, createDarazInstallHandler());

@@ -1,33 +1,47 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useAuth } from "../../../../../context/AuthContext";
 import { API_BASE } from "../../../../../config/api";
-import { ecomApiGet, ecomApiPostEmpty } from "../api/ecommerceClient";
+import { ecomApiGet, ecomApiPostEmpty, ecomApiPost } from "../api/ecommerceClient";
 import { Card } from "../../../../../components/Card";
 import { Button } from "../../../../../components/Button";
 import ConnectedStoreSummary from "./ConnectedStoreSummary";
 import { friendlyConnectError } from "../utils/friendlyMessages";
+import { readCachedConnection, writeCachedConnection, clearCachedConnection } from "../utils/connectionCache";
 
 const DARAZ_STEPS = [
   "Click Connect Daraz — you will be redirected to Daraz.",
   "Sign in with your seller account.",
   "Authorize the connection.",
-  "We fetch your data first, then you choose what to import into your ERP.",
+  "We fetch your warehouses, orders, products, and customers first, then you choose what to import into your ERP.",
 ];
 
 export default function DarazTab() {
   const { authFetch } = useAuth();
-  const [connection, setConnection] = useState(null);
+  const [connection, setConnection] = useState(() => readCachedConnection("daraz"));
+  const [statusLoading, setStatusLoading] = useState(true);
   const [connecting, setConnecting] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [notice, setNotice] = useState("");
+  const [autoSyncSaving, setAutoSyncSaving] = useState(false);
   const pollRef = useRef(null);
+  const prevSyncStatusRef = useRef(null);
 
   const connected = connection?.connected;
 
   const loadSyncStatus = useCallback(async () => {
-    const data = await ecomApiGet("daraz", "sync/status", authFetch);
-    if (data.connected) setConnection(data);
-    else setConnection(null);
-    return data;
+    try {
+      const data = await ecomApiGet("daraz", "sync/status", authFetch);
+      if (data.connected) {
+        setConnection(data);
+        writeCachedConnection("daraz", data);
+      } else {
+        setConnection(null);
+        clearCachedConnection("daraz");
+      }
+      return data;
+    } finally {
+      setStatusLoading(false);
+    }
   }, [authFetch]);
 
   useEffect(() => {
@@ -49,6 +63,23 @@ export default function DarazTab() {
     return () => clearInterval(pollRef.current);
   }, [connected, loadSyncStatus]);
 
+  useEffect(() => {
+    const status = connection?.initialSyncStatus;
+    const prev = prevSyncStatusRef.current;
+    prevSyncStatusRef.current = status;
+    if (!syncing) return;
+    if (status === "completed" || status === "failed") {
+      setSyncing(false);
+      if (prev === "running" || prev === "pending") {
+        setNotice(
+          status === "completed"
+            ? "Re-sync finished — warehouses, orders, products, and customers are up to date."
+            : "Re-sync failed. Check sync status and try again.",
+        );
+      }
+    }
+  }, [connection?.initialSyncStatus, syncing]);
+
   const handleConnect = async () => {
     setNotice("");
     setConnecting(true);
@@ -68,19 +99,53 @@ export default function DarazTab() {
   };
 
   const handleRetrySync = async () => {
-    setNotice("Syncing your store…");
-    await ecomApiPostEmpty("daraz", "sync/retry", authFetch);
+    setSyncing(true);
+    setNotice("Re-syncing from Daraz… fetching warehouses, orders, products, and customers.");
+    setConnection((prev) => (prev ? { ...prev, initialSyncStatus: "running" } : prev));
+    try {
+      await ecomApiPostEmpty("daraz", "sync/retry", authFetch);
+    } catch {
+      setSyncing(false);
+      setNotice("Could not start the re-sync. Please try again.");
+      return;
+    }
     setTimeout(loadSyncStatus, 1500);
   };
 
   const handleDisconnect = () => {
     setConnection(null);
+    clearCachedConnection("daraz");
     setNotice("");
   };
 
   const handleImported = () => {
     loadSyncStatus();
   };
+
+  const handleAutoSyncChange = async (enabled) => {
+    setAutoSyncSaving(true);
+    try {
+      await ecomApiPost("daraz", "sync/auto-sync", authFetch, { enabled });
+      setConnection((prev) => (prev ? { ...prev, autoSyncEnabled: enabled } : prev));
+      setNotice(
+        enabled
+          ? "Auto-sync is on — new store data will import into your ERP automatically."
+          : "Auto-sync is off — use Import review below when you want data in your ERP.",
+      );
+    } catch (err) {
+      setNotice(err.message || "Could not update auto-sync setting.");
+    } finally {
+      setAutoSyncSaving(false);
+    }
+  };
+
+  if (statusLoading && !connected) {
+    return (
+      <Card>
+        <p className="wh-muted" style={{ margin: 0 }}>Checking store connection…</p>
+      </Card>
+    );
+  }
 
   if (connected) {
     const counts = connection.counts || {};
@@ -102,7 +167,12 @@ export default function DarazTab() {
           onDisconnect={handleDisconnect}
           onRetrySync={handleRetrySync}
           onImported={handleImported}
-          showRetry={connection.initialSyncStatus === "failed"}
+          showRetry
+          retryBusy={syncing || connection.initialSyncStatus === "running"}
+          retryLabel={connection.initialSyncStatus === "failed" ? "Retry sync" : "Re-sync from Daraz"}
+          autoSyncEnabled={connection.autoSyncEnabled !== false}
+          autoSyncSaving={autoSyncSaving}
+          onAutoSyncChange={handleAutoSyncChange}
         />
       </>
     );

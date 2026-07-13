@@ -31,17 +31,71 @@ export function normalizeDarazOrder(order) {
   };
 }
 
+function extractMultiWarehouseInventories(sku) {
+  const raw =
+    sku?.multiWarehouseInventories
+    || sku?.MultiWarehouseInventories?.MultiWarehouseInventory
+    || sku?.multi_warehouse_inventories
+    || [];
+  const list = Array.isArray(raw) ? raw : raw ? [raw] : [];
+  return list
+    .map((row) => ({
+      locationId: String(row.WarehouseCode ?? row.warehouseCode ?? row.warehouse_code ?? row.code ?? "").trim(),
+      available: Math.max(0, Math.floor(Number(row.SellableQuantity ?? row.Quantity ?? row.quantity ?? row.sellable_quantity ?? 0) || 0)),
+    }))
+    .filter((row) => row.locationId);
+}
+
+export function normalizeDarazWarehouse(warehouse) {
+  const code = String(
+    warehouse.code
+    || warehouse.warehouse_code
+    || warehouse.warehouseCode
+    || warehouse.WarehouseCode
+    || "",
+  ).trim();
+  const status = String(warehouse.status || warehouse.Status || "ACTIVE").toUpperCase();
+  return {
+    externalId: code,
+    platform: "daraz",
+    name: warehouse.name || warehouse.warehouseName || warehouse.warehouse_name || code || "Daraz warehouse",
+    address: warehouse.detailAddress || warehouse.detail_address || warehouse.address || "",
+    city: warehouse.city || warehouse.locationLevel3Label || "",
+    province: warehouse.province || warehouse.locationLevel2Label || "",
+    country: warehouse.country || warehouse.locationLevel1Label || "",
+    zip: warehouse.post_code || warehouse.postalCode || "",
+    active: status !== "INACTIVE" && status !== "DISABLED" && warehouse.active !== false,
+    defaultAddress: Boolean(warehouse.defaultAddress ?? warehouse.default_address),
+  };
+}
+
 export function normalizeDarazProduct(product) {
+  const skusRaw = product.skus || product.Skus?.Sku || [];
+  const skusList = Array.isArray(skusRaw) ? skusRaw : skusRaw ? [skusRaw] : [];
+  const firstSku = skusList[0] || {};
+  const inventoryLevels = extractMultiWarehouseInventories(firstSku);
+
   return {
     erpProductId: erpId("daraz", String(product.item_id || product.product_id)),
     externalId: String(product.item_id || product.product_id || ""),
     platform: "daraz",
-    sku: product.seller_sku || product.shop_sku || String(product.item_id || ""),
+    sku: firstSku.SellerSku || firstSku.seller_sku || product.seller_sku || product.shop_sku || String(product.item_id || ""),
     name: product.name || product.attributes?.name || "",
-    price: parseFloat(product.price ?? product.special_price ?? 0),
+    description: product.attributes?.description || product.description || "",
+    price: parseFloat(firstSku.price ?? product.price ?? product.special_price ?? 0),
     currency: "PKR",
-    status: product.status || "unknown",
-    stock: product.quantity ?? product.available ?? null,
+    status: product.status || firstSku.Status || "unknown",
+    stock: firstSku.quantity ?? product.quantity ?? product.available ?? null,
+    inventoryLevels,
+    primaryCategory: product.primary_category || product.PrimaryCategory || null,
+    skus: skusList.map((sku) => ({
+      skuId: String(sku.SkuId ?? sku.sku_id ?? "").trim() || null,
+      sellerSku: String(sku.SellerSku ?? sku.seller_sku ?? "").trim(),
+      price: parseFloat(sku.price ?? sku.Price ?? 0) || 0,
+      quantity: Math.max(0, Math.floor(Number(sku.quantity ?? sku.Quantity ?? 0) || 0)),
+      status: sku.Status || sku.status || null,
+      inventoryLevels: extractMultiWarehouseInventories(sku),
+    })),
     createdAt: product.created_time || product.create_time || null,
   };
 }

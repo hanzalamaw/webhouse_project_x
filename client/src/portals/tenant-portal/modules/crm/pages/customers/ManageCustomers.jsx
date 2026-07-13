@@ -58,9 +58,9 @@ export default function ManageCustomers() {
     if (!deleteRow) return;
     setDeleting(true);
     try {
-      await apiFetch(`/crm/customers/${deleteRow.id}`, { method: "DELETE" }, authFetch);
+      const res = await apiFetch(`/crm/customers/${deleteRow.id}`, { method: "DELETE" }, authFetch);
       setDeleteRow(null);
-      setMessage("Customer deleted.");
+      setMessage(res?.message || "Customer deleted.");
       await load();
     } catch (e) {
       setError(e.message);
@@ -91,7 +91,17 @@ export default function ManageCustomers() {
       render: (row) => (
         <div className="wh-action-btns" onClick={(e) => e.stopPropagation()}>
           {canEdit && <Button variant="secondary" className="wh-btn--sm" onClick={() => navigate(`${MODULE_BASE}/customers/edit/${row.id}`)}>Edit</Button>}
-          {canDelete && <Button variant="danger" className="wh-btn--sm" onClick={() => setDeleteRow(row)}>Delete</Button>}
+          {canDelete && (
+            <Button
+              variant="danger"
+              className="wh-btn--sm"
+              onClick={() => setDeleteRow(row)}
+              disabled={row.is_shopify_linked && (row.order_count || 0) > 0}
+              title={row.is_shopify_linked && (row.order_count || 0) > 0 ? "Shopify-linked customers with orders cannot be deleted." : undefined}
+            >
+              Delete
+            </Button>
+          )}
         </div>
       ),
     },
@@ -137,7 +147,9 @@ export default function ManageCustomers() {
           "All notes and remarks",
           "All complaints linked to this customer",
           "Customer tags",
-          "After 7 days, this record is permanently removed (linked orders may be affected)",
+          ...(deleteRow?.is_shopify_linked && deleteRow?.order_count > 0
+            ? ["Shopify-linked customers with orders cannot be deleted."]
+            : ["After 7 days, this record is permanently removed"]),
         ]}
         onConfirm={confirmDelete}
         onClose={() => setDeleteRow(null)}

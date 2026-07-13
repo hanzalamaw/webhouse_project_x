@@ -1,10 +1,12 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../../../../../../context/AuthContext";
+import { useModulePermission } from "../../../../../../hooks/useModulePermission";
 import { apiFetch } from "../../../../../../api/client";
 import { PageHeader } from "../../../../../../components/PageHeader";
 import { FormField } from "../../../../../../components/FormField";
 import { Button } from "../../../../../../components/Button";
+import { ConfirmDeleteModal } from "../../../../../../components/ConfirmDeleteModal";
 import { SearchableSelect } from "../../../../../../components/SearchableSelect";
 import { useInventoryReference } from "../../hooks/useInventoryReference";
 import { FormBlock } from "../../../../../../components/FormBlock";
@@ -18,9 +20,26 @@ import ProductOptionsEditor, {
   mapVariantRowsFromApi,
 } from "../../../shared/inventory/ProductOptionsEditor";
 import { PRODUCT_STATUS, PRODUCT_UNITS, MODULE_BASE } from "../../constants";
+import { useEcomSyncLink } from "../../../ecommerce/hooks/useShopifySyncLink";
+import { useConnectedEcomStores } from "../../../ecommerce/hooks/useConnectedEcomStores";
+import { ecomApiGet } from "../../../ecommerce/api/ecommerceClient";
+import { IntegrationDestinationField } from "../../../ecommerce/components/IntegrationDestinationField";
+import { INTEGRATION_DESTINATIONS } from "../../../ecommerce/constants";
+import { resolveIntegrationSave, resolveLinkedEditSave } from "../../../ecommerce/utils/integrationDestination";
+import {
+  validateProductForShopifyOrErp,
+  validateProductForDaraz,
+  syncValidationSummary,
+  scrollToFirstFieldError,
+} from "../../../ecommerce/utils/syncFieldValidation";
+import { ProductSyncSetupSection } from "../../components/ProductSyncSetupSection";
+import { applyDefaultWarehouseStocks } from "../../components/ProductInventorySetupField";
+import { ProductChannelPicker } from "../../components/ProductChannelPicker";
+import { DarazProductFormFields, EMPTY_DARAZ_FIELDS } from "../../components/DarazProductFormFields";
 
 const INITIAL = {
   product_name: "",
+  description: "",
   sku_prefix: "",
   unit: "piece",
   status: "active",
@@ -32,19 +51,25 @@ const INITIAL = {
   category_id: "",
 };
 
+function toFormValue(value) {
+  if (value === null || value === undefined || value === "") return "";
+  return String(value);
+}
+
 function mapProductToForm(product) {
   const variants = product.variants || [];
   const first = variants[0];
   return {
     product_name: product.product_name || "",
+    description: product.description || "",
     sku_prefix: "",
     unit: product.unit || "piece",
     status: product.status || "active",
-    default_cost_price: first?.cost_price ?? "",
-    default_selling_price: first?.selling_price ?? "",
-    delivery_charges: product.delivery_charges ?? "0",
-    discount: product.discount ?? "0",
-    tax: product.tax ?? "0",
+    default_cost_price: toFormValue(first?.cost_price),
+    default_selling_price: toFormValue(first?.selling_price),
+    delivery_charges: toFormValue(product.delivery_charges ?? 0),
+    discount: toFormValue(product.discount ?? 0),
+    tax: toFormValue(product.tax ?? 0),
     category_id: product.category_id ? String(product.category_id) : "",
   };
 }
@@ -99,17 +124,17 @@ function normalizeVariantRows(rows) {
     combo_key: row.combo_key ?? "",
     sku: String(row.sku || "").trim(),
     variant_name: String(row.variant_name || "").trim(),
-    cost_price: row.cost_price,
-    selling_price: row.selling_price,
+    cost_price: toFormValue(row.cost_price),
+    selling_price: toFormValue(row.selling_price),
     status: row.status || "active",
     combo: row.combo || {},
     stock_levels: (row.stock_levels || []).map((sl) => ({
-      warehouse_id: sl.warehouse_id,
+      warehouse_id: sl.warehouse_id != null ? Number(sl.warehouse_id) : null,
       reserved_qty: Number(sl.reserved_qty) || 0,
       damaged_qty: Number(sl.damaged_qty) || 0,
     })),
     warehouse_stocks: (row.warehouse_stocks || []).map((ws) => ({
-      warehouse_id: ws.warehouse_id,
+      warehouse_id: ws.warehouse_id != null ? Number(ws.warehouse_id) : null,
       initial_qty: Number(ws.initial_qty) || 0,
       reserved_qty: Number(ws.reserved_qty) || 0,
       damaged_qty: Number(ws.damaged_qty) || 0,
@@ -118,12 +143,38 @@ function normalizeVariantRows(rows) {
   }));
 }
 
-function serializeProductState(form, options, variantRows) {
+function serializeProductState(form, options, variantRows, daraz, saveDestination) {
   return JSON.stringify({
     form,
     options: normalizeOptions(options),
     variantRows: normalizeVariantRows(variantRows),
+    daraz,
+    saveDestination,
   });
+}
+
+function buildDarazVariantPayload(form, daraz) {
+  const sku = String(daraz.seller_sku || "").trim();
+  const qty = Math.max(0, Number(daraz.quantity) || 0);
+  const warehouseId = daraz.warehouse_id ? Number(daraz.warehouse_id) : null;
+  return {
+    combo_key: "default",
+    sku,
+    variant_name: form.product_name.trim() || sku,
+    cost_price: Number(daraz.cost_price) || 0,
+    selling_price: Number(daraz.price) || 0,
+    status: form.status || "active",
+    attributes: [],
+    warehouse_stocks: warehouseId
+      ? [{
+          warehouse_id: warehouseId,
+          initial_qty: qty,
+          reserved_qty: 0,
+          damaged_qty: 0,
+          stock_notes: "Opening stock for Daraz listing",
+        }]
+      : [],
+  };
 }
 
 export default function CreateProduct() {
@@ -131,20 +182,79 @@ export default function CreateProduct() {
   const { productId } = useParams();
   const isEdit = Boolean(productId);
   const { authFetch } = useAuth();
+  const { canDelete } = useModulePermission("inventory-procurement");
   const { categories, warehouses, loading: refLoading, reload } = useInventoryReference();
   const [form, setForm] = useState(INITIAL);
   const [options, setOptions] = useState(() => makeDefaultOptions());
   const [variantRows, setVariantRows] = useState([]);
   const [loadingProduct, setLoadingProduct] = useState(isEdit);
   const [error, setError] = useState("");
+  const [fieldErrors, setFieldErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState("");
   const [createCategoryOpen, setCreateCategoryOpen] = useState(false);
   const [baseline, setBaseline] = useState(null);
   const [createBaseline, setCreateBaseline] = useState(null);
   const [pendingBaselineCapture, setPendingBaselineCapture] = useState(false);
+  const [entitySource, setEntitySource] = useState("manual");
+  const [saveDestination, setSaveDestination] = useState(INTEGRATION_DESTINATIONS.ERP);
+  const [daraz, setDaraz] = useState(() => ({ ...EMPTY_DARAZ_FIELDS }));
+  const [inventoryStockEnabled, setInventoryStockEnabled] = useState(true);
+  const [defaultWarehouseId, setDefaultWarehouseId] = useState("");
+  const [defaultInitialQty, setDefaultInitialQty] = useState("0");
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [openOrderCount, setOpenOrderCount] = useState(0);
+  const formRef = useRef(form);
+  const optionsRef = useRef(options);
+  const variantRowsRef = useRef(variantRows);
+  formRef.current = form;
+  optionsRef.current = options;
+  variantRowsRef.current = variantRows;
 
-  const set = (key, value) => setForm((f) => ({ ...f, [key]: value }));
+  const setVariantRowsLive = useCallback((next) => {
+    const resolved = typeof next === "function" ? next(variantRowsRef.current) : next;
+    variantRowsRef.current = resolved;
+    setVariantRows(resolved);
+  }, []);
+
+  const { link: ecomLink, loading: linkLoading, isLinked: isStoreLinked } = useEcomSyncLink(
+    "product",
+    productId,
+    { enabled: isEdit },
+  );
+  const {
+    shopifyConnected,
+    darazConnected,
+    shopifyStoreName,
+    darazStoreName,
+    shopifyConnection,
+    darazConnection,
+    loading: storesLoading,
+    refresh: refreshStores,
+  } = useConnectedEcomStores();
+  const formBusy = loadingProduct || linkLoading || submitting || storesLoading;
+  const isDarazFlow = !isEdit && saveDestination === INTEGRATION_DESTINATIONS.DARAZ;
+  const isShopifyFlow = !isEdit && saveDestination === INTEGRATION_DESTINATIONS.SHOPIFY;
+
+  const clearFieldError = (...keys) => {
+    setFieldErrors((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const key of keys) {
+        if (next[key]) {
+          delete next[key];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  };
+
+  const set = (key, value) => {
+    clearFieldError(key);
+    setForm((f) => ({ ...f, [key]: value }));
+  };
 
   const categoryOptions = useMemo(
     () => categories.map((c) => ({ value: String(c.id), label: c.category_name })),
@@ -155,9 +265,70 @@ export default function CreateProduct() {
     [warehouses]
   );
 
+  const importPlatform = shopifyConnected ? "shopify" : darazConnected ? "daraz" : null;
+  const importConnection = shopifyConnected ? shopifyConnection : darazConnection;
+  const importShopQuery = shopifyConnection?.shop
+    ? `?shop=${encodeURIComponent(shopifyConnection.shop)}`
+    : "";
+
+  const variantStockKey = useMemo(
+    () => variantRows.map((r) => r.combo_key).join("|"),
+    [variantRows],
+  );
+
+  useEffect(() => {
+    if (isEdit || !warehouseOptions.length) return;
+    setDefaultWarehouseId((prev) => prev || warehouseOptions[0].value);
+    setDaraz((prev) => ({
+      ...prev,
+      warehouse_id: prev.warehouse_id || warehouseOptions[0].value,
+    }));
+  }, [isEdit, warehouseOptions]);
+
+  // Prefer the ERP warehouse already mapped to a Daraz warehouse code.
+  useEffect(() => {
+    if (isEdit || !darazConnected || !warehouseOptions.length) return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await ecomApiGet("daraz", "locations", authFetch);
+        const mapped = (data.locations || []).find((loc) => loc.warehouseId);
+        if (cancelled || !mapped?.warehouseId) return;
+        const value = String(mapped.warehouseId);
+        if (!warehouseOptions.some((o) => o.value === value)) return;
+        setDaraz((prev) => ({ ...prev, warehouse_id: value }));
+        setDefaultWarehouseId(value);
+      } catch {
+        // Keep first-warehouse fallback when locations API is unavailable.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isEdit, darazConnected, warehouseOptions, authFetch]);
+
+  useEffect(() => {
+    if (isEdit || isDarazFlow || !inventoryStockEnabled) return;
+    setVariantRowsLive((rows) =>
+      applyDefaultWarehouseStocks(rows, {
+        enabled: inventoryStockEnabled,
+        warehouseId: defaultWarehouseId,
+        initialQty: defaultInitialQty,
+      }),
+    );
+  }, [
+    isEdit,
+    isDarazFlow,
+    inventoryStockEnabled,
+    defaultWarehouseId,
+    defaultInitialQty,
+    variantStockKey,
+    setVariantRowsLive,
+  ]);
+
   const currentSnapshot = useMemo(
-    () => serializeProductState(form, options, variantRows),
-    [form, options, variantRows]
+    () => serializeProductState(form, options, variantRows, daraz, saveDestination),
+    [form, options, variantRows, daraz, saveDestination]
   );
 
   const isDirty = useMemo(() => {
@@ -166,17 +337,33 @@ export default function CreateProduct() {
   }, [baseline, createBaseline, currentSnapshot, isEdit]);
 
   const { dialogOpen, stayOnPage, leavePage, reloadPending, navigateSafely } = useUnsavedChangesGuard(isDirty, {
-    enabled: isEdit ? baseline !== null && !loadingProduct : createBaseline !== null && !refLoading,
+    enabled: isEdit ? baseline !== null && !loadingProduct && !refLoading : createBaseline !== null && !refLoading,
     mode: isEdit ? "edit" : "create",
   });
+
+  const confirmDelete = async () => {
+    if (!isEdit || !productId) return;
+    setDeleting(true);
+    setError("");
+    try {
+      await apiFetch(`/inventory/products/${productId}`, { method: "DELETE" }, authFetch);
+      setDeleteOpen(false);
+      navigateSafely(`${MODULE_BASE}/products/manage`);
+    } catch (e) {
+      setError(e.message);
+      setDeleteOpen(false);
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   useEffect(() => {
     if (isEdit || createBaseline || refLoading || loadingProduct) return undefined;
     const timer = window.setTimeout(() => {
-      setCreateBaseline(serializeProductState(form, options, variantRows));
+      setCreateBaseline(serializeProductState(form, options, variantRows, daraz, saveDestination));
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [isEdit, createBaseline, refLoading, loadingProduct, form, options, variantRows]);
+  }, [isEdit, createBaseline, refLoading, loadingProduct, form, options, variantRows, daraz, saveDestination]);
 
   useEffect(() => {
     if (!isEdit) return undefined;
@@ -200,6 +387,12 @@ export default function CreateProduct() {
         setForm(nextForm);
         setOptions(nextOptions);
         setVariantRows(nextRows);
+        setOpenOrderCount(Number(data.open_order_count) || 0);
+        const source = data.source || "manual";
+        setEntitySource(source);
+        if (source === "shopify") setSaveDestination(INTEGRATION_DESTINATIONS.SHOPIFY);
+        else if (source === "daraz") setSaveDestination(INTEGRATION_DESTINATIONS.DARAZ);
+        else setSaveDestination(INTEGRATION_DESTINATIONS.ERP);
         setPendingBaselineCapture(true);
       })
       .catch((e) => {
@@ -216,49 +409,111 @@ export default function CreateProduct() {
   useEffect(() => {
     if (!isEdit || loadingProduct || !pendingBaselineCapture) return undefined;
     const timer = window.setTimeout(() => {
-      setBaseline(currentSnapshot);
+      setBaseline(
+        serializeProductState(
+          formRef.current,
+          optionsRef.current,
+          variantRowsRef.current,
+          daraz,
+          saveDestination,
+        ),
+      );
       setPendingBaselineCapture(false);
-    }, 0);
+    }, 100);
     return () => window.clearTimeout(timer);
-  }, [isEdit, loadingProduct, pendingBaselineCapture, currentSnapshot]);
+  }, [isEdit, loadingProduct, pendingBaselineCapture, daraz, saveDestination]);
 
-  const validate = () => {
-    if (!form.product_name.trim()) return "Product name is required";
-    if (!form.category_id) return "Category is required";
-    if (!variantRows.length) return "At least one variant is required";
+  const onChannelChange = (channel) => {
+    setSaveDestination(channel);
+    setCreateBaseline(null);
+    setError("");
+    setFieldErrors({});
+    setMessage("");
+  };
 
-    for (const opt of options) {
-      if (opt.attribute_name.trim() && !opt.values.length) {
-        return `Add at least one value for attribute "${opt.attribute_name}"`;
-      }
+  const saveProduct = async (payload, { syncToShopify = false, syncToDaraz = false, source = "manual", info = "" } = {}) => {
+    const body = { ...payload, syncToShopify, syncToDaraz, source };
+    if (!isEdit && !isDarazFlow && inventoryStockEnabled && defaultWarehouseId) {
+      body.default_warehouse_stock = {
+        enabled: true,
+        warehouse_id: Number(defaultWarehouseId),
+        initial_qty: Number(defaultInitialQty) || 0,
+      };
     }
-
-    const skus = new Set();
-    for (let i = 0; i < variantRows.length; i++) {
-      const v = variantRows[i];
-      const label = v.variant_name || `Variant ${i + 1}`;
-      if (!v.sku.trim()) return `SKU is required for ${label}`;
-      if (skus.has(v.sku.trim())) return `Duplicate SKU: ${v.sku}`;
-      skus.add(v.sku.trim());
-      if (v.cost_price === "" || Number(v.cost_price) < 0) return `Valid cost price is required for ${label}`;
-      if (v.selling_price === "" || Number(v.selling_price) < 0) return `Valid selling price is required for ${label}`;
+    if (isEdit) {
+      await apiFetch(`/inventory/products/${productId}`, { method: "PUT", body: JSON.stringify(body) }, authFetch);
+      setMessage(
+        syncToShopify
+          ? "Product updated and synced to Shopify."
+          : syncToDaraz
+            ? "Product updated and synced to Daraz."
+            : (info || "Product updated successfully."),
+      );
+      setBaseline(serializeProductState(form, options, variantRows, daraz, saveDestination));
+    } else {
+      const created = await apiFetch("/inventory/products", { method: "POST", body: JSON.stringify(body) }, authFetch);
+      setMessage(
+        syncToShopify
+          ? "Product created and synced to Shopify."
+          : syncToDaraz
+            ? "Product created and synced to Daraz."
+            : (info || "Product created successfully."),
+      );
+      navigateSafely(`${MODULE_BASE}/products/edit/${created.id}`);
     }
-    return "";
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    const err = validate();
-    if (err) {
-      setError(err);
+    const errors = isDarazFlow
+      ? validateProductForDaraz({ form, daraz, warehouseOptions })
+      : validateProductForShopifyOrErp({ form, options, variantRows });
+    if (Object.keys(errors).length) {
+      setFieldErrors(errors);
+      setError(syncValidationSummary(errors));
+      scrollToFirstFieldError();
       return;
     }
-    setSubmitting(true);
-    setError("");
-    setMessage("");
-    try {
-      const payload = {
+    setFieldErrors({});
+
+    let payload;
+    if (isDarazFlow && !isEdit) {
+      const variant = buildDarazVariantPayload(form, daraz);
+      payload = {
         product_name: form.product_name,
+        description: form.description.trim() || null,
+        sku_prefix: form.sku_prefix.trim() || undefined,
+        unit: form.unit,
+        status: form.status,
+        category_id: Number(form.category_id),
+        delivery_charges: Number(form.delivery_charges) || 0,
+        discount: Number(form.discount) || 0,
+        tax: Number(form.tax) || 0,
+        default_cost_price: daraz.cost_price !== "" ? Number(daraz.cost_price) : undefined,
+        default_selling_price: daraz.price !== "" ? Number(daraz.price) : undefined,
+        options: [],
+        variants: [variant],
+        daraz_brand: daraz.brand.trim(),
+        daraz_short_description: (daraz.short_description || form.description).trim().slice(0, 250),
+        daraz_package: {
+          length: String(daraz.package?.length || "10"),
+          width: String(daraz.package?.width || "10"),
+          height: String(daraz.package?.height || "10"),
+          weight: String(daraz.package?.weight || "0.5"),
+        },
+      };
+    } else {
+      const rowsForSave = !isEdit && inventoryStockEnabled
+        ? applyDefaultWarehouseStocks(variantRowsRef.current, {
+            enabled: inventoryStockEnabled,
+            warehouseId: defaultWarehouseId,
+            initialQty: defaultInitialQty,
+          })
+        : variantRowsRef.current;
+
+      payload = {
+        product_name: form.product_name,
+        description: form.description.trim() || null,
         sku_prefix: form.sku_prefix.trim() || undefined,
         unit: form.unit,
         status: form.status,
@@ -271,20 +526,35 @@ export default function CreateProduct() {
         options: options
           .filter((o) => o.attribute_name.trim() && o.values.length)
           .map((o) => ({ attribute_name: o.attribute_name.trim(), values: o.values })),
-        variants: variantRows.map((row) => buildVariantRowPayload(row, isEdit)),
+        variants: rowsForSave.map((row) => buildVariantRowPayload(row, isEdit)),
       };
+    }
 
-      if (isEdit) {
-        await apiFetch(`/inventory/products/${productId}`, { method: "PUT", body: JSON.stringify(payload) }, authFetch);
-        setMessage("Product updated successfully.");
-      } else {
-        await apiFetch("/inventory/products", { method: "POST", body: JSON.stringify(payload) }, authFetch);
-        setMessage("Product created successfully.");
-        await reload();
-      }
-      setTimeout(() => navigateSafely(`${MODULE_BASE}/products/manage`), 700);
-    } catch (e) {
-      setError(e.message);
+    const resolved = isEdit && isStoreLinked
+      ? resolveLinkedEditSave(ecomLink, entitySource)
+      : resolveIntegrationSave(saveDestination, {
+          shopifyConnected,
+          darazConnected,
+        });
+    if (!resolved || resolved.error) {
+      setFieldErrors({ saveDestination: resolved?.error || "Could not resolve save destination." });
+      setError(resolved?.error || "Could not resolve save destination.");
+      scrollToFirstFieldError();
+      return;
+    }
+
+    setSubmitting(true);
+    setError("");
+    setMessage("");
+    try {
+      await saveProduct(payload, {
+        syncToShopify: resolved.syncToShopify,
+        syncToDaraz: resolved.syncToDaraz,
+        source: resolved.source,
+        info: resolved.info,
+      });
+    } catch (saveErr) {
+      setError(saveErr.message);
     } finally {
       setSubmitting(false);
     }
@@ -305,19 +575,107 @@ export default function CreateProduct() {
       <FormPageLayout>
         <PageHeader
           title={isEdit ? "Edit Product" : "Create New Product"}
-          description="Define attributes and values — variants are generated automatically (e.g. Color × Size)."
+          description={
+            isEdit
+              ? "Update product details, variants, and stock."
+              : isDarazFlow
+                ? "Daraz listing — brand, seller SKU, package size, and stock."
+                : isShopifyFlow
+                  ? "Shopify-style options & variants — generated automatically (e.g. Color × Size)."
+                  : "Create an ERP inventory product with optional variants and stock."
+          }
           actions={
-            <Button variant="secondary" onClick={() => navigate(`${MODULE_BASE}/products/manage`)}>
-              Manage Products
-            </Button>
+            <div className="wh-action-btns">
+              <Button variant="secondary" onClick={() => navigate(`${MODULE_BASE}/products/manage`)}>
+                Manage Products
+              </Button>
+              {isEdit && canDelete && (
+                <Button
+                  type="button"
+                  variant="danger"
+                  onClick={() => setDeleteOpen(true)}
+                  disabled={deleting || openOrderCount > 0}
+                  title={openOrderCount > 0 ? "Products on open orders cannot be deleted." : undefined}
+                >
+                  Delete
+                </Button>
+              )}
+            </div>
           }
         />
 
         <form onSubmit={handleSubmit} className="wh-form-stack">
-          <FormBlock title="Basic information" description="Product name, unit, and SKU prefix for auto-generated variant SKUs.">
+          {!isEdit && (
+            <ProductChannelPicker
+              value={saveDestination}
+              onChange={onChannelChange}
+              shopifyConnected={shopifyConnected}
+              darazConnected={darazConnected}
+              shopifyStoreName={shopifyStoreName}
+              darazStoreName={darazStoreName}
+              disabled={formBusy}
+              error={fieldErrors.saveDestination}
+            />
+          )}
+
+          {isEdit && (
+            <IntegrationDestinationField
+              value={saveDestination || INTEGRATION_DESTINATIONS.ERP}
+              onChange={setSaveDestination}
+              disabled={formBusy}
+              shopifyConnected={shopifyConnected}
+              darazConnected={darazConnected}
+              shopifyStoreName={shopifyStoreName}
+              darazStoreName={darazStoreName}
+              lockedPlatform={isStoreLinked ? ecomLink.platform : null}
+              lockedStoreName={ecomLink?.storeName || shopifyStoreName || darazStoreName}
+              error={fieldErrors.saveDestination}
+            />
+          )}
+
+          <FormBlock
+            title="Basic information"
+            description={
+              isDarazFlow
+                ? "Name and full description shown on Daraz."
+                : "Product name, description, unit, and SKU prefix for auto-generated variant SKUs."
+            }
+          >
             <div className="wh-form-grid">
-              <FormField id="product_name" label="Product name" value={form.product_name} onChange={(e) => set("product_name", e.target.value)} required />
-              <FormField id="sku_prefix" label="SKU prefix" value={form.sku_prefix} onChange={(e) => set("sku_prefix", e.target.value)} placeholder="e.g. TS" />
+              <FormField
+                id="product_name"
+                label="Product name"
+                value={form.product_name}
+                onChange={(e) => set("product_name", e.target.value)}
+                required
+                error={fieldErrors.product_name}
+              />
+              <div className="wh-form-grid__full">
+                <FormField
+                  id="description"
+                  label={isDarazFlow ? "Full description" : "Description"}
+                  as="textarea"
+                  rows={isDarazFlow ? 5 : 4}
+                  value={form.description}
+                  onChange={(e) => set("description", e.target.value)}
+                  placeholder={
+                    isDarazFlow
+                      ? "Detailed product description for the Daraz listing"
+                      : "Product description (syncs to Shopify)"
+                  }
+                  required={isDarazFlow}
+                  error={fieldErrors.description}
+                />
+              </div>
+              {!isDarazFlow && (
+                <FormField
+                  id="sku_prefix"
+                  label="SKU prefix"
+                  value={form.sku_prefix}
+                  onChange={(e) => set("sku_prefix", e.target.value)}
+                  placeholder="e.g. TS"
+                />
+              )}
               <FormField id="unit" label="Unit" as="select" value={form.unit} onChange={(e) => set("unit", e.target.value)}>
                 {PRODUCT_UNITS.map((u) => (<option key={u} value={u}>{u}</option>))}
               </FormField>
@@ -327,65 +685,135 @@ export default function CreateProduct() {
             </div>
           </FormBlock>
 
-          <FormBlock title="Default variant pricing" description="Applied to new generated variants. Override per variant below.">
-            <div className="wh-form-grid">
-              <FormField id="default_cost_price" label="Default cost price (PKR)" type="number" min="0" step="0.01" value={form.default_cost_price} onChange={(e) => set("default_cost_price", e.target.value)} />
-              <FormField id="default_selling_price" label="Default selling price (PKR)" type="number" min="0" step="0.01" value={form.default_selling_price} onChange={(e) => set("default_selling_price", e.target.value)} />
-            </div>
-          </FormBlock>
-
-          <FormBlock title="Product pricing" description="Delivery, discount, and tax at product level.">
-            <div className="wh-form-grid">
-              <FormField id="delivery_charges" label="Delivery charges (PKR)" type="number" min="0" step="0.01" value={form.delivery_charges} onChange={(e) => set("delivery_charges", e.target.value)} />
-              <FormField id="discount" label="Discount (PKR)" type="number" min="0" step="0.01" value={form.discount} onChange={(e) => set("discount", e.target.value)} />
-              <FormField id="tax" label="Tax (PKR)" type="number" min="0" step="0.01" value={form.tax} onChange={(e) => set("tax", e.target.value)} />
-            </div>
-          </FormBlock>
-
-          <FormBlock title="Category" description="Assign this product to a category.">
-            {refLoading ? (
-              <p className="wh-muted">Loading categories…</p>
-            ) : (
-              <div className={categoryOptions.length === 0 ? "wh-form-grid" : "wh-form-grid wh-form-grid--field-action"}>
-                {categoryOptions.length === 0 ? (
-                  <p className="wh-field__error wh-form-grid__full">No categories yet. Create one to continue.</p>
-                ) : (
-                  <SearchableSelect id="category_id" label="Category" options={categoryOptions} value={form.category_id} onChange={(v) => set("category_id", v)} placeholder="Search categories…" />
-                )}
-                <div className={categoryOptions.length === 0 ? "wh-form-grid__actions" : "wh-form-grid--field-action__btn"}>
-                  <Button type="button" variant="secondary" onClick={() => setCreateCategoryOpen(true)}>New category</Button>
+          {isDarazFlow ? (
+            <DarazProductFormFields
+              daraz={daraz}
+              onChange={(next) => {
+                setFieldErrors((prev) => {
+                  const keys = Object.keys(prev).filter((k) => k.startsWith("daraz_"));
+                  if (!keys.length && !prev.category_id) return prev;
+                  const copy = { ...prev };
+                  keys.forEach((k) => delete copy[k]);
+                  delete copy.category_id;
+                  return copy;
+                });
+                setDaraz(next);
+              }}
+              erpCategoryOptions={categoryOptions}
+              erpCategoryId={form.category_id}
+              onErpCategoryChange={(v) => set("category_id", v)}
+              onCreateErpCategory={() => setCreateCategoryOpen(true)}
+              warehouseOptions={warehouseOptions}
+              disabled={formBusy}
+              refLoading={refLoading}
+              fieldErrors={fieldErrors}
+            />
+          ) : (
+            <>
+              <FormBlock title="Default variant pricing" description="Applied to new generated variants. Override per variant below.">
+                <div className="wh-form-grid">
+                  <FormField id="default_cost_price" label="Default cost price (PKR)" type="number" min="0" step="0.01" value={form.default_cost_price} onChange={(e) => set("default_cost_price", e.target.value)} />
+                  <FormField id="default_selling_price" label="Default selling price (PKR)" type="number" min="0" step="0.01" value={form.default_selling_price} onChange={(e) => set("default_selling_price", e.target.value)} />
                 </div>
-              </div>
-            )}
-          </FormBlock>
+              </FormBlock>
 
-          <FormBlock title="Options & variants" description="Add options and values (like Shopify). Variants are generated automatically — set price and stock per row.">
-            {warehouseOptions.length === 0 && !isEdit ? (
-              <p className="wh-field__error">No warehouses found. Create a warehouse first to set initial stock.</p>
-            ) : (
-              <ProductOptionsEditor
-                options={options}
-                onOptionsChange={setOptions}
-                variantRows={variantRows}
-                onVariantRowsChange={setVariantRows}
-                productName={form.product_name}
-                skuPrefix={form.sku_prefix}
-                defaultCostPrice={form.default_cost_price}
-                defaultSellingPrice={form.default_selling_price}
-                statusOptions={PRODUCT_STATUS}
-                isEdit={isEdit}
-                warehouseOptions={warehouseOptions}
-                showWarehouseStock={!isEdit && warehouseOptions.length > 0}
-              />
-            )}
-          </FormBlock>
+              <FormBlock title="Product pricing" description="Delivery, discount, and tax at product level.">
+                <div className="wh-form-grid">
+                  <FormField id="delivery_charges" label="Delivery charges (PKR)" type="number" min="0" step="0.01" value={form.delivery_charges} onChange={(e) => set("delivery_charges", e.target.value)} />
+                  <FormField id="discount" label="Discount (PKR)" type="number" min="0" step="0.01" value={form.discount} onChange={(e) => set("discount", e.target.value)} />
+                  <FormField id="tax" label="Tax (PKR)" type="number" min="0" step="0.01" value={form.tax} onChange={(e) => set("tax", e.target.value)} />
+                </div>
+              </FormBlock>
+
+              <FormBlock title="Category" description="Assign this product to a category.">
+                {refLoading ? (
+                  <p className="wh-muted">Loading categories…</p>
+                ) : (
+                  <div className={categoryOptions.length === 0 ? "wh-form-grid" : "wh-form-grid wh-form-grid--field-action"}>
+                    {categoryOptions.length === 0 ? (
+                      <p className="wh-field__error wh-form-grid__full">No categories yet. Create one to continue.</p>
+                    ) : (
+                      <SearchableSelect
+                        id="category_id"
+                        label="Category"
+                        options={categoryOptions}
+                        value={form.category_id}
+                        onChange={(v) => set("category_id", v)}
+                        placeholder="Search categories…"
+                        error={fieldErrors.category_id}
+                      />
+                    )}
+                    <div className={categoryOptions.length === 0 ? "wh-form-grid__actions" : "wh-form-grid--field-action__btn"}>
+                      <Button type="button" variant="secondary" onClick={() => setCreateCategoryOpen(true)}>New category</Button>
+                    </div>
+                  </div>
+                )}
+              </FormBlock>
+
+              <FormBlock title="Options & variants" description="Add options and values (like Shopify). Variants are generated automatically — set price and stock per row.">
+                {fieldErrors.variants || fieldErrors.options ? (
+                  <p className="wh-field__error">{fieldErrors.variants || fieldErrors.options}</p>
+                ) : null}
+                {warehouseOptions.length === 0 && !isEdit ? (
+                  <p className="wh-field__error">No warehouses found. Create a warehouse first to set initial stock.</p>
+                ) : (
+                  <ProductOptionsEditor
+                    key={productId || "new"}
+                    options={options}
+                    onOptionsChange={setOptions}
+                    variantRows={variantRows}
+                    onVariantRowsChange={setVariantRowsLive}
+                    productName={form.product_name}
+                    skuPrefix={form.sku_prefix}
+                    defaultCostPrice={form.default_cost_price}
+                    defaultSellingPrice={form.default_selling_price}
+                    statusOptions={PRODUCT_STATUS}
+                    isEdit={isEdit}
+                    warehouseOptions={warehouseOptions}
+                    showWarehouseStock={!isEdit && warehouseOptions.length > 0}
+                    fieldErrors={fieldErrors}
+                  />
+                )}
+              </FormBlock>
+
+              {!isEdit && (
+                <ProductSyncSetupSection
+                  authFetch={authFetch}
+                  importPlatform={importPlatform}
+                  importConnection={importConnection}
+                  importShopQuery={importShopQuery}
+                  onStoreImported={() => refreshStores().catch(() => {})}
+                  inventoryStockEnabled={inventoryStockEnabled}
+                  onInventoryStockEnabledChange={setInventoryStockEnabled}
+                  defaultWarehouseId={defaultWarehouseId}
+                  onDefaultWarehouseIdChange={setDefaultWarehouseId}
+                  defaultInitialQty={defaultInitialQty}
+                  onDefaultInitialQtyChange={setDefaultInitialQty}
+                  warehouseOptions={warehouseOptions}
+                  saveDestination={saveDestination}
+                  shopifyConnected={shopifyConnected}
+                  disabled={formBusy}
+                />
+              )}
+            </>
+          )}
 
           {error && <p className="wh-field__error">{error}</p>}
           {message && <p className="wh-form-message">{message}</p>}
 
           <FormActions>
             <Button type="button" variant="secondary" onClick={() => navigate(`${MODULE_BASE}/products/manage`)}>Cancel</Button>
-            <Button type="submit" disabled={submitting}>{submitting ? "Saving…" : isEdit ? "Save Product" : "Create Product"}</Button>
+            <Button type="submit" disabled={formBusy}>
+              {submitting
+                ? "Saving…"
+                : isEdit
+                  ? "Save Product"
+                  : isDarazFlow
+                    ? "Create & push to Daraz"
+                    : isShopifyFlow
+                      ? "Create & sync to Shopify"
+                      : "Create Product"}
+            </Button>
           </FormActions>
         </form>
 
@@ -399,6 +827,15 @@ export default function CreateProduct() {
           }}
         />
       </FormPageLayout>
+
+      <ConfirmDeleteModal
+        open={deleteOpen}
+        title="Delete product"
+        recordName={form.product_name || "this product"}
+        onConfirm={confirmDelete}
+        onClose={() => setDeleteOpen(false)}
+        loading={deleting}
+      />
 
       <UnsavedChangesDialog
         open={dialogOpen}

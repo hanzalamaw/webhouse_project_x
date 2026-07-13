@@ -1,6 +1,7 @@
 import { readDb, writeDb, getPool } from "../database/db.js";
 import { DELAYED_ORDER_DAYS } from "../utils/orderConstants.js";
 import { joinOnTenant } from "../utils/tenantScope.js";
+import { buildDashboardDateSql, isAllTimeDashboardFilter } from "../utils/dashboardDateFilter.js";
 
 function tw(alias, tenantId) {
   return `${alias}.tenant_id = ? AND ${alias}.deleted_at IS NULL`;
@@ -27,7 +28,12 @@ const ORDER_LIST_SELECT = `
          EXISTS (SELECT 1 FROM order_exchanges oe
             WHERE oe.order_id = o.id AND oe.tenant_id = o.tenant_id AND oe.deleted_at IS NULL) AS has_exchange,
          EXISTS (SELECT 1 FROM order_refunds orf
-            WHERE orf.order_id = o.id AND orf.tenant_id = o.tenant_id AND orf.deleted_at IS NULL) AS has_refund
+            WHERE orf.order_id = o.id AND orf.tenant_id = o.tenant_id AND orf.deleted_at IS NULL) AS has_refund,
+         EXISTS (
+           SELECT 1 FROM ecom_entity_links el
+           WHERE el.tenant_id = o.tenant_id AND el.entity_type = 'order'
+             AND el.internal_id = o.id AND el.platform = 'shopify' AND el.deleted_at IS NULL
+         ) AS is_shopify_linked
   FROM orders o
   LEFT JOIN crm_customers c ON c.id = o.customer_id AND ${joinOnTenant("o", "c")}
   LEFT JOIN users u ON u.id = o.created_by AND ${joinOnTenant("o", "u")}
@@ -99,7 +105,28 @@ export const orderRepository = {
     return rows;
   },
 
-  async listWarehouseProducts(tenantId, warehouseId) {
+  async listWarehouseProducts(tenantId, warehouseId, { source } = {}) {
+    const params = [warehouseId, tenantId];
+    const src = String(source || "").toLowerCase().trim();
+    let sourceSql = "";
+    if (src === "shopify" || src === "daraz") {
+      sourceSql = ` AND (
+           LOWER(TRIM(COALESCE(p.source, ''))) = ?
+           OR EXISTS (
+             SELECT 1 FROM ecom_entity_links el
+             WHERE el.tenant_id = p.tenant_id
+               AND el.internal_id = p.id
+               AND el.entity_type = 'product'
+               AND el.platform = ?
+               AND el.deleted_at IS NULL
+           )
+         )`;
+      params.push(src, src);
+    } else if (src === "manual" || src === "erp") {
+      // ERP-only: exclude marketplace-catalog products
+      sourceSql = ` AND LOWER(TRIM(COALESCE(NULLIF(p.source, ''), 'manual'))) NOT IN ('shopify', 'daraz')`;
+    }
+
     const [rows] = await readDb.query(
       `SELECT p.id AS product_id, p.product_name,
               p.delivery_charges, p.discount, p.tax,
@@ -112,8 +139,9 @@ export const orderRepository = {
          ON sl.variant_id = v.id AND sl.warehouse_id = ? AND ${joinOnTenant("v", "sl")}
        WHERE p.tenant_id = ? AND p.deleted_at IS NULL AND p.status = 'active'
          AND LOWER(TRIM(v.status)) = 'active'
+         ${sourceSql}
        ORDER BY p.product_name ASC, v.variant_name ASC`,
-      [warehouseId, tenantId]
+      params
     );
     return rows;
   },
@@ -148,82 +176,106 @@ export const orderRepository = {
     }
   },
 
-  async dashboardStats(tenantId) {
+  async dashboardStats(tenantId, filter = {}) {
+    const date = buildDashboardDateSql(filter, "created_at");
+    const returnDate = buildDashboardDateSql(filter, "created_at");
+    const paymentDate = buildDashboardDateSql(filter, "o.created_at");
     const [[stats]] = await readDb.query(
       `SELECT
-         (SELECT COUNT(*) FROM orders WHERE tenant_id = ? AND deleted_at IS NULL) AS total_orders,
-         (SELECT COUNT(*) FROM orders WHERE tenant_id = ? AND deleted_at IS NULL AND order_status = 'pending') AS pending_orders,
-         (SELECT COUNT(*) FROM orders WHERE tenant_id = ? AND deleted_at IS NULL AND order_status = 'confirmed') AS confirmed_orders,
-         (SELECT COUNT(*) FROM orders WHERE tenant_id = ? AND deleted_at IS NULL AND order_status = 'cancelled') AS cancelled_orders,
-         (SELECT COUNT(*) FROM order_returns WHERE tenant_id = ? AND deleted_at IS NULL) AS return_requests,
-         (SELECT COUNT(*) FROM order_exchanges WHERE tenant_id = ? AND deleted_at IS NULL) AS exchange_requests,
+         (SELECT COUNT(*) FROM orders WHERE tenant_id = ? AND deleted_at IS NULL${date.sql}) AS total_orders,
+         (SELECT COUNT(*) FROM orders WHERE tenant_id = ? AND deleted_at IS NULL AND order_status = 'pending'${date.sql}) AS pending_orders,
+         (SELECT COUNT(*) FROM orders WHERE tenant_id = ? AND deleted_at IS NULL AND order_status = 'confirmed'${date.sql}) AS confirmed_orders,
+         (SELECT COUNT(*) FROM orders WHERE tenant_id = ? AND deleted_at IS NULL AND order_status = 'cancelled'${date.sql}) AS cancelled_orders,
+         (SELECT COUNT(*) FROM order_returns WHERE tenant_id = ? AND deleted_at IS NULL${returnDate.sql}) AS return_requests,
+         (SELECT COUNT(*) FROM order_exchanges WHERE tenant_id = ? AND deleted_at IS NULL${returnDate.sql}) AS exchange_requests,
          (SELECT COALESCE(SUM(op.amount), 0) FROM order_payments op
-            WHERE op.tenant_id = ? AND op.deleted_at IS NULL AND op.payment_method = 'cod') AS cod_amount,
+            INNER JOIN orders o ON o.id = op.order_id AND o.tenant_id = op.tenant_id AND o.deleted_at IS NULL
+            WHERE op.tenant_id = ? AND op.deleted_at IS NULL AND op.payment_method = 'cod'${paymentDate.sql}) AS cod_amount,
+         (SELECT COALESCE(SUM(payable_amount), 0) FROM orders
+            WHERE tenant_id = ? AND deleted_at IS NULL${date.sql}) AS total_revenue,
          (SELECT COUNT(*) FROM orders WHERE tenant_id = ? AND deleted_at IS NULL
             AND fulfillment_status != 'fulfilled'
             AND order_status NOT IN ('cancelled', 'returned')
-            AND created_at < DATE_SUB(NOW(), INTERVAL ? DAY)) AS delayed_orders`,
+            AND created_at < DATE_SUB(NOW(), INTERVAL ? DAY)${date.sql}) AS delayed_orders`,
       [
-        tenantId, tenantId, tenantId, tenantId, tenantId, tenantId,
-        tenantId, tenantId, DELAYED_ORDER_DAYS,
+        tenantId, ...date.params,
+        tenantId, ...date.params,
+        tenantId, ...date.params,
+        tenantId, ...date.params,
+        tenantId, ...returnDate.params,
+        tenantId, ...returnDate.params,
+        tenantId, ...paymentDate.params,
+        tenantId, ...date.params,
+        tenantId, DELAYED_ORDER_DAYS, ...date.params,
       ]
     );
     return stats;
   },
 
-  async dashboardOrdersByStatus(tenantId) {
+  async dashboardOrdersByStatus(tenantId, filter = {}) {
+    const date = buildDashboardDateSql(filter, "created_at");
     const [rows] = await readDb.query(
       `SELECT order_status AS label, COUNT(*) AS count
-       FROM orders WHERE tenant_id = ? AND deleted_at IS NULL
+       FROM orders WHERE tenant_id = ? AND deleted_at IS NULL${date.sql}
        GROUP BY order_status ORDER BY count DESC`,
-      [tenantId]
+      [tenantId, ...date.params]
     );
     return rows;
   },
 
-  async dashboardFulfillmentByStatus(tenantId) {
+  async dashboardFulfillmentByStatus(tenantId, filter = {}) {
+    const date = buildDashboardDateSql(filter, "created_at");
     const [rows] = await readDb.query(
       `SELECT fulfillment_status AS label, COUNT(*) AS count
-       FROM orders WHERE tenant_id = ? AND deleted_at IS NULL
+       FROM orders WHERE tenant_id = ? AND deleted_at IS NULL${date.sql}
        GROUP BY fulfillment_status ORDER BY count DESC`,
-      [tenantId]
+      [tenantId, ...date.params]
     );
     return rows;
   },
 
-  async dashboardPaymentByStatus(tenantId) {
+  async dashboardPaymentByStatus(tenantId, filter = {}) {
+    const date = buildDashboardDateSql(filter, "created_at");
     const [rows] = await readDb.query(
       `SELECT payment_status AS label, COUNT(*) AS count
-       FROM orders WHERE tenant_id = ? AND deleted_at IS NULL
+       FROM orders WHERE tenant_id = ? AND deleted_at IS NULL${date.sql}
        GROUP BY payment_status ORDER BY count DESC`,
-      [tenantId]
+      [tenantId, ...date.params]
     );
     return rows;
   },
 
-  async dashboardOrdersByMonth(tenantId, months = 6) {
+  async dashboardOrdersByMonth(tenantId, filter = {}, months = 6) {
+    const date = buildDashboardDateSql(filter, "created_at");
+    const params = [tenantId];
+    let rollingSql = "";
+    if (isAllTimeDashboardFilter(filter)) {
+      rollingSql = ` AND created_at >= DATE_SUB(DATE_FORMAT(NOW(), '%Y-%m-01'), INTERVAL ? MONTH)`;
+      params.push(months - 1);
+    }
+    params.push(...date.params);
     const [rows] = await readDb.query(
       `SELECT DATE_FORMAT(created_at, '%Y-%m') AS month_key,
               MONTHNAME(created_at) AS month_label,
               COUNT(*) AS count,
               COALESCE(SUM(payable_amount), 0) AS revenue
        FROM orders
-       WHERE tenant_id = ? AND deleted_at IS NULL
-         AND created_at >= DATE_SUB(DATE_FORMAT(NOW(), '%Y-%m-01'), INTERVAL ? MONTH)
+       WHERE tenant_id = ? AND deleted_at IS NULL${rollingSql}${date.sql}
        GROUP BY month_key, month_label
        ORDER BY month_key ASC`,
-      [tenantId, months - 1]
+      params
     );
     return rows;
   },
 
-  async dashboardRecentOrders(tenantId, limit = 8) {
+  async dashboardRecentOrders(tenantId, filter = {}, limit = 50) {
+    const date = buildDashboardDateSql(filter, "o.created_at");
     const [rows] = await readDb.query(
       `${ORDER_LIST_SELECT}
-       WHERE ${tw("o", tenantId)}
+       WHERE ${tw("o", tenantId)}${date.sql}
        ORDER BY o.created_at DESC
        LIMIT ?`,
-      [tenantId, limit]
+      [tenantId, ...date.params, limit]
     );
     return rows;
   },
@@ -281,8 +333,9 @@ export const orderRepository = {
         `INSERT INTO orders
            (order_no, order_source, order_status, payment_status, fulfillment_status,
             total_amount, discount_amount, delivery_charges, payable_amount,
-            city, delivery_address, notes, customer_id, created_by, tenant_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            city, delivery_address, delivery_state, delivery_postal_code, delivery_country,
+            notes, tags, customer_id, created_by, tenant_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))`,
         [
           data.order_no,
           data.order_source,
@@ -295,10 +348,15 @@ export const orderRepository = {
           data.payable_amount,
           data.city,
           data.delivery_address,
+          data.delivery_state || null,
+          data.delivery_postal_code || null,
+          data.delivery_country || null,
           data.notes,
+          data.tags || null,
           data.customer_id,
           userId,
           tenantId,
+          data.created_at || null,
         ]
       );
       const orderId = result.insertId;
@@ -335,7 +393,8 @@ export const orderRepository = {
       `UPDATE orders SET
          order_source = ?, order_status = ?, payment_status = ?, fulfillment_status = ?,
          total_amount = ?, discount_amount = ?, delivery_charges = ?, payable_amount = ?,
-         city = ?, delivery_address = ?, notes = ?, customer_id = ?
+         city = ?, delivery_address = ?, delivery_state = ?, delivery_postal_code = ?,
+         delivery_country = ?, notes = ?, tags = ?, customer_id = ?
        WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL`,
       [
         data.order_source,
@@ -348,7 +407,11 @@ export const orderRepository = {
         data.payable_amount,
         data.city,
         data.delivery_address,
+        data.delivery_state || null,
+        data.delivery_postal_code || null,
+        data.delivery_country || null,
         data.notes,
+        data.tags || null,
         data.customer_id,
         id,
         tenantId,
@@ -576,7 +639,12 @@ export const orderRepository = {
       `SELECT oc.*, o.order_no, o.payment_status, o.payable_amount,
               EXISTS (SELECT 1 FROM order_refunds orf
                 WHERE orf.order_id = o.id AND orf.deleted_at IS NULL) AS has_refund,
-              u.name AS cancelled_by_name, c.customer_name
+              CASE
+                WHEN oc.reason LIKE 'Imported from Shopify%' THEN 'Shopify'
+                WHEN oc.reason LIKE 'Auto-recorded from order status change%' THEN 'System'
+                ELSE u.name
+              END AS cancelled_by_name,
+              c.customer_name
        FROM order_cancellations oc
        INNER JOIN orders o ON o.id = oc.order_id AND ${joinOnTenant("oc", "o")}
        LEFT JOIN users u ON u.id = oc.cancelled_by AND ${joinOnTenant("oc", "u")}
@@ -588,15 +656,41 @@ export const orderRepository = {
     return rows;
   },
 
+  async updateCancellation(tenantId, id, data) {
+    const fields = [];
+    const params = [];
+    if (data.cancelled_at != null) {
+      fields.push("cancelled_at = ?");
+      params.push(data.cancelled_at);
+    }
+    if (data.reason != null) {
+      fields.push("reason = ?");
+      params.push(data.reason);
+    }
+    if (!fields.length) return false;
+    const [result] = await writeDb.query(
+      `UPDATE order_cancellations SET ${fields.join(", ")}
+       WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL`,
+      [...params, id, tenantId]
+    );
+    return result.affectedRows > 0;
+  },
+
   async createCancellation(tenantId, userId, data) {
     const pool = getPool();
     const connection = await pool.getConnection();
     try {
       await connection.beginTransaction();
+      const cancelledAt = data.cancelled_at ?? null;
       const [result] = await connection.execute(
-        `INSERT INTO order_cancellations (reason, order_id, cancelled_by, tenant_id)
-         VALUES (?, ?, ?, ?)`,
-        [data.reason, data.order_id, userId, tenantId]
+        cancelledAt
+          ? `INSERT INTO order_cancellations (reason, order_id, cancelled_by, tenant_id, cancelled_at)
+             VALUES (?, ?, ?, ?, ?)`
+          : `INSERT INTO order_cancellations (reason, order_id, cancelled_by, tenant_id)
+             VALUES (?, ?, ?, ?)`,
+        cancelledAt
+          ? [data.reason, data.order_id, userId, tenantId, cancelledAt]
+          : [data.reason, data.order_id, userId, tenantId]
       );
       await connection.execute(
         `UPDATE orders SET order_status = 'cancelled'
@@ -776,5 +870,68 @@ export const orderRepository = {
       ]
     );
     return (result.affectedRows ?? 0) === 1;
+  },
+
+  async revertCancellation(tenantId, cancellationId, orderId, previousOrderStatus) {
+    await writeDb.query(
+      `DELETE FROM order_cancellations WHERE id = ? AND tenant_id = ?`,
+      [cancellationId, tenantId],
+    );
+    await writeDb.query(
+      `UPDATE orders SET order_status = ? WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL`,
+      [previousOrderStatus, orderId, tenantId],
+    );
+  },
+
+  async revertReturn(tenantId, returnId, orderId, previousOrderStatus) {
+    await writeDb.query(
+      `DELETE FROM order_returns WHERE id = ? AND tenant_id = ?`,
+      [returnId, tenantId],
+    );
+    await writeDb.query(
+      `UPDATE orders SET order_status = ? WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL`,
+      [previousOrderStatus, orderId, tenantId],
+    );
+  },
+
+  async revertExchange(tenantId, exchangeId) {
+    await writeDb.query(
+      `DELETE FROM order_exchanges WHERE id = ? AND tenant_id = ?`,
+      [exchangeId, tenantId],
+    );
+  },
+
+  async revertRefund(tenantId, refundId, orderId, previousPaymentStatus) {
+    await writeDb.query(
+      `DELETE FROM order_refunds WHERE id = ? AND tenant_id = ?`,
+      [refundId, tenantId],
+    );
+    await writeDb.query(
+      `UPDATE orders SET payment_status = ? WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL`,
+      [previousPaymentStatus, orderId, tenantId],
+    );
+  },
+
+  async countOrdersForCustomer(tenantId, customerId) {
+    const [[row]] = await readDb.query(
+      `SELECT COUNT(*) AS count
+       FROM orders
+       WHERE customer_id = ? AND tenant_id = ? AND deleted_at IS NULL`,
+      [customerId, tenantId],
+    );
+    return Number(row?.count) || 0;
+  },
+
+  async countOpenOrdersForProduct(tenantId, productId) {
+    const [[row]] = await readDb.query(
+      `SELECT COUNT(DISTINCT o.id) AS count
+       FROM orders o
+       INNER JOIN order_items oi ON oi.order_id = o.id AND oi.tenant_id = o.tenant_id AND oi.deleted_at IS NULL
+       WHERE o.tenant_id = ? AND o.deleted_at IS NULL
+         AND oi.product_id = ?
+         AND o.order_status NOT IN ('cancelled', 'returned')`,
+      [tenantId, productId],
+    );
+    return Number(row?.count) || 0;
   },
 };

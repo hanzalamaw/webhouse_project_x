@@ -16,9 +16,10 @@ function slugify(value) {
 }
 
 function comboKey(combo) {
-  return Object.keys(combo)
-    .sort()
-    .map((k) => `${k}=${combo[k]}`)
+  return Object.entries(combo)
+    .map(([attribute_name, value]) => ({ attribute_name, value }))
+    .sort((a, b) => String(a.attribute_name).localeCompare(String(b.attribute_name)))
+    .map((a) => `${String(a.attribute_name).trim()}=${String(a.value).trim()}`)
     .join("|");
 }
 
@@ -79,11 +80,7 @@ export function mapVariantRowsFromApi(variants = []) {
       combo[a.attribute_name] = a.value;
     }
     return {
-      combo_key: (v.attributes || [])
-        .slice()
-        .sort((a, b) => a.attribute_name.localeCompare(b.attribute_name))
-        .map((a) => `${a.attribute_name}=${a.value}`)
-        .join("|"),
+      combo_key: comboKey(combo),
       combo,
       id: v.id,
       sku: v.sku || "",
@@ -259,17 +256,50 @@ function StockPopover({
   const popRef = useRef(null);
 
   useEffect(() => {
+    const next = locationId || warehouseOptions[0]?.value || "";
+    if (next) setWhId(next);
+  }, [locationId, warehouseOptions]);
+
+  useEffect(() => {
     const existing = getStockForLocation(row, whId, isEdit);
     setQty(String(existing?.qty ?? existing?.initial_qty ?? 0));
   }, [row, whId, isEdit]);
 
+  const applyIfChanged = useCallback(() => {
+    if (isEdit || !whId) return;
+    const existing = getStockForLocation(row, whId, isEdit);
+    const existingQty = Number(existing?.qty ?? existing?.initial_qty ?? 0);
+    const newQty = Number(qty) || 0;
+    if (newQty !== existingQty) {
+      onApply(row.combo_key, whId, newQty);
+    }
+  }, [isEdit, whId, row, qty, onApply]);
+
+  const closePopover = useCallback(() => {
+    applyIfChanged();
+    onClose();
+  }, [applyIfChanged, onClose]);
+
+  const applyIfChangedRef = useRef(applyIfChanged);
+  applyIfChangedRef.current = applyIfChanged;
+
   useEffect(() => {
     const onClick = (e) => {
-      if (popRef.current && !popRef.current.contains(e.target)) onClose();
+      if (popRef.current && !popRef.current.contains(e.target)) closePopover();
     };
     document.addEventListener("mousedown", onClick);
     return () => document.removeEventListener("mousedown", onClick);
-  }, [onClose]);
+  }, [closePopover]);
+
+  useEffect(() => () => applyIfChangedRef.current(), []);
+
+  useEffect(() => {
+    const form = popRef.current?.closest("form");
+    if (!form) return undefined;
+    const onSubmit = () => applyIfChangedRef.current();
+    form.addEventListener("submit", onSubmit, true);
+    return () => form.removeEventListener("submit", onSubmit, true);
+  }, []);
 
   return (
     <div className="wh-inv-stock-popover" ref={popRef} role="dialog" aria-label="Set stock">
@@ -283,6 +313,12 @@ function StockPopover({
           className="wh-inv-stock-popover__qty"
           value={qty}
           onChange={(e) => setQty(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              onApply(row.combo_key, whId, Number(qty) || 0);
+            }
+          }}
           autoFocus
         />
         {warehouseOptions.length > 1 && (
@@ -346,6 +382,7 @@ export default function ProductOptionsEditor({
   isEdit = false,
   warehouseOptions = [],
   showWarehouseStock = false,
+  fieldErrors = {},
 }) {
   const optionKeyRef = useRef(0);
   const rowOverridesRef = useRef(new Map());
@@ -416,7 +453,13 @@ export default function ProductOptionsEditor({
     [options]
   );
 
+  const skipInitialSyncRef = useRef(isEdit && variantRows.length > 0);
+
   useEffect(() => {
+    if (skipInitialSyncRef.current) {
+      skipInitialSyncRef.current = false;
+      return;
+    }
     syncVariantRows();
   }, [optionSignature, skuPrefix, productName, defaultCostPrice, defaultSellingPrice, syncVariantRows]);
 
@@ -522,25 +565,26 @@ export default function ProductOptionsEditor({
 
   const applyStock = (rowKey, warehouseId, qty) => {
     if (!warehouseId) return;
-    onVariantRowsChange(
-      variantRows.map((r) => {
-        if (r.combo_key !== rowKey) return r;
-        if (isEdit) return r;
-        const stocks = [...(r.warehouse_stocks || [])];
-        const idx = stocks.findIndex((s) => String(s.warehouse_id) === String(warehouseId));
-        const entry = {
-          _key: idx >= 0 ? stocks[idx]._key : `wh-${warehouseId}`,
-          warehouse_id: warehouseId,
-          initial_qty: String(qty),
-          reserved_qty: idx >= 0 ? stocks[idx].reserved_qty : "0",
-          damaged_qty: idx >= 0 ? stocks[idx].damaged_qty : "0",
-          stock_notes: idx >= 0 ? stocks[idx].stock_notes : "",
-        };
-        if (idx >= 0) stocks[idx] = entry;
-        else stocks.push(entry);
-        return { ...r, warehouse_stocks: stocks };
-      })
-    );
+    const nextRows = variantRows.map((r) => {
+      if (r.combo_key !== rowKey) return r;
+      if (isEdit) return r;
+      const stocks = [...(r.warehouse_stocks || [])];
+      const idx = stocks.findIndex((s) => String(s.warehouse_id) === String(warehouseId));
+      const entry = {
+        _key: idx >= 0 ? stocks[idx]._key : `wh-${warehouseId}`,
+        warehouse_id: warehouseId,
+        initial_qty: String(qty),
+        reserved_qty: idx >= 0 ? stocks[idx].reserved_qty : "0",
+        damaged_qty: idx >= 0 ? stocks[idx].damaged_qty : "0",
+        stock_notes: idx >= 0 ? stocks[idx].stock_notes : "",
+      };
+      if (idx >= 0) stocks[idx] = entry;
+      else stocks.push(entry);
+      const updated = { ...r, warehouse_stocks: stocks };
+      rowOverridesRef.current.set(rowKey, updated);
+      return updated;
+    });
+    onVariantRowsChange(nextRows);
     setStockPopoverKey(null);
   };
 
@@ -677,7 +721,7 @@ export default function ProductOptionsEditor({
                       <td className="wh-inv-variants-table__variant">
                         <button
                           type="button"
-                          className="wh-inv-variant-cell wh-inv-variant-cell--btn"
+                          className={`wh-inv-variant-cell wh-inv-variant-cell--btn${fieldErrors[`variant_${row.combo_key}_sku`] ? " wh-inv-variant-cell--error" : ""}`}
                           onClick={() => openVariantModal(row.combo_key)}
                         >
                           <span className="wh-inv-variant-cell__thumb" aria-hidden="true">
@@ -690,7 +734,7 @@ export default function ProductOptionsEditor({
                         </button>
                       </td>
                       <td className="wh-inv-variants-table__price" onClick={(e) => e.stopPropagation()}>
-                        <div className="wh-inv-price-input-wrap">
+                        <div className={`wh-inv-price-input-wrap${fieldErrors[`variant_${row.combo_key}_cost_price`] ? " wh-inv-price-input-wrap--error" : ""}`}>
                           <span className="wh-inv-price-input-wrap__prefix">Rs</span>
                           <input
                             type="number"
@@ -704,7 +748,7 @@ export default function ProductOptionsEditor({
                         </div>
                       </td>
                       <td className="wh-inv-variants-table__price" onClick={(e) => e.stopPropagation()}>
-                        <div className="wh-inv-price-input-wrap">
+                        <div className={`wh-inv-price-input-wrap${fieldErrors[`variant_${row.combo_key}_selling_price`] ? " wh-inv-price-input-wrap--error" : ""}`}>
                           <span className="wh-inv-price-input-wrap__prefix">Rs</span>
                           <input
                             type="number"

@@ -6,8 +6,9 @@ import {
   getPendingOrderConflicts,
   countPendingOrderConflicts,
   resolveOrderConflict,
+  updateAutoSyncEnabled,
 } from "../repositories/ecommerceRepository.js";
-import { getImportPreview, importEntitiesToErp } from "../services/ecommerce/ecomImport.js";
+import { getImportPreview, importEntitiesToErp, applyResolvedOrderToErp } from "../services/ecommerce/ecomImport.js";
 
 export function createEcomSharedHandlers(platform) {
   return {
@@ -45,7 +46,7 @@ export function createEcomSharedHandlers(platform) {
       if (!result.success) return res.status(400).json(result);
       res.json({
         ...result,
-        counts: await getEntityCounts(store.id),
+        counts: await getEntityCounts(store.id, store.tenant_id),
         preview: await getImportPreview(store.id, store.tenant_id),
       });
     },
@@ -56,30 +57,40 @@ export function createEcomSharedHandlers(platform) {
         erpImportStatus: store.erp_import_status || "pending",
         pendingImportCount: preview.pendingImportCount,
         hasPendingImport: preview.hasPendingImport,
-        pendingConflictCount: await countPendingOrderConflicts(store.id),
+        pendingConflictCount: await countPendingOrderConflicts(store.id, store.tenant_id),
       };
     },
 
     async handleConflicts(_req, res, store) {
       if (!store) return res.status(401).json({ success: false, error: "Not connected" });
-      res.json({ success: true, conflicts: await getPendingOrderConflicts(store.id) });
+      res.json({ success: true, conflicts: await getPendingOrderConflicts(store.id, store.tenant_id) });
     },
 
     async handleResolveConflict(req, res, store) {
       if (!store) return res.status(401).json({ success: false, error: "Not connected" });
       const action = req.body?.action === "update" ? "update" : "keep";
-      const ok = await resolveOrderConflict(store.id, req.params.externalId, action);
+      const ok = await resolveOrderConflict(store.id, store.tenant_id, req.params.externalId, action);
       if (!ok) return res.status(404).json({ success: false, error: "Conflict not found" });
+      if (action === "update") {
+        await applyResolvedOrderToErp(store.id, store.tenant_id, req.params.externalId);
+      }
       res.json({
         success: true,
-        counts: await getEntityCounts(store.id),
-        pendingConflictCount: await countPendingOrderConflicts(store.id),
+        counts: await getEntityCounts(store.id, store.tenant_id),
+        pendingConflictCount: await countPendingOrderConflicts(store.id, store.tenant_id),
       });
     },
 
     async handleSyncLogs(_req, res, store) {
       if (!store) return res.json({ logs: [] });
       res.json({ logs: await getSyncLogs(store.id, 150) });
+    },
+
+    async handleAutoSyncSetting(req, res, store) {
+      if (!store) return res.status(401).json({ success: false, error: "Not connected" });
+      const enabled = req.body?.enabled !== false && req.body?.enabled !== 0 && req.body?.enabled !== "0";
+      await updateAutoSyncEnabled(store.id, store.tenant_id, enabled);
+      res.json({ success: true, autoSyncEnabled: enabled });
     },
   };
 }

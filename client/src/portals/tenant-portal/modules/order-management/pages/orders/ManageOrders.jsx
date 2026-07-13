@@ -81,9 +81,9 @@ export default function ManageOrders() {
     if (!deleteRow) return;
     setDeleting(true);
     try {
-      await apiFetch(`/orders/${deleteRow.id}`, { method: "DELETE" }, authFetch);
+      const res = await apiFetch(`/orders/${deleteRow.id}`, { method: "DELETE" }, authFetch);
       setDeleteRow(null);
-      setMessage("Order deleted.");
+      setMessage(res?.message || res?.shopifySync?.shopifyNote || "Order deleted.");
       await load();
     } catch (e) {
       setError(e.message);

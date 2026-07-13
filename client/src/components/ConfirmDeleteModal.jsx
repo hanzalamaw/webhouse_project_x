@@ -44,7 +44,7 @@ export function ConfirmDeleteModal({
           <Button type="button" variant="secondary" onClick={handleClose}>
             Cancel
           </Button>
-          <Button type="button" variant="danger" disabled={!canDelete || loading} onClick={handleConfirm}>
+          <Button type="button" variant="danger" modalPrimary disabled={!canDelete || loading} onClick={handleConfirm}>
             {loading ? "Deleting…" : "Delete"}
           </Button>
         </>
@@ -68,6 +68,12 @@ export function ConfirmDeleteModal({
         className="wh-field__input"
         value={input}
         onChange={(e) => setInput(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && canDelete && !loading) {
+            e.preventDefault();
+            handleConfirm();
+          }
+        }}
         placeholder={confirmPhrase}
         autoFocus
       />
