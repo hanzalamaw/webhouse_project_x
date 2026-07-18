@@ -7,6 +7,7 @@ import {
   countPendingOrderConflicts,
   resolveOrderConflict,
   updateAutoSyncEnabled,
+  countUnmappedLocationLinks,
 } from "../repositories/ecommerceRepository.js";
 import { getImportPreview, importEntitiesToErp, applyResolvedOrderToErp } from "../services/ecommerce/ecomImport.js";
 
@@ -53,11 +54,13 @@ export function createEcomSharedHandlers(platform) {
 
     async handleSyncStatusExtras(store) {
       const preview = await getImportPreview(store.id, store.tenant_id);
+      const unmappedLocationCount = await countUnmappedLocationLinks(store.id);
       return {
         erpImportStatus: store.erp_import_status || "pending",
         pendingImportCount: preview.pendingImportCount,
         hasPendingImport: preview.hasPendingImport,
         pendingConflictCount: await countPendingOrderConflicts(store.id, store.tenant_id),
+        unmappedLocationCount,
       };
     },
 

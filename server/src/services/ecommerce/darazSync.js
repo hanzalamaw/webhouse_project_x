@@ -9,6 +9,7 @@ import {
   apiBaseFromStore,
   fetchAllDaraz,
   orderFetchParams,
+  formatDarazDetail,
 } from "./darazClient.js";
 import {
   addSyncLog,
@@ -16,6 +17,7 @@ import {
   updateInitialSyncStatus,
   touchLastSynced,
   getStoreById,
+  getEntityCounts,
 } from "../../repositories/ecommerceRepository.js";
 import {
   maybeUpdateLinkedProduct,
@@ -32,7 +34,7 @@ async function persistEntity(storeId, tenantId, entityType, raw, normalized, sou
     entityType === "location"
       ? String(normalized?.externalId || raw.code || raw.warehouse_code || raw.warehouseCode || "")
       : entityType === "customer"
-        ? String(raw.buyer_id || raw.customer_id || raw.id)
+        ? String(normalized?.externalId || raw.buyer_id || raw.customer_id || raw.id || "")
         : String(raw.order_id || raw.item_id || raw.product_id || raw.id);
   if (!externalId) return;
   await upsertSyncedRecord(storeId, tenantId, entityType, externalId, raw, normalized, source, platform);
@@ -44,11 +46,58 @@ async function persistEntity(storeId, tenantId, entityType, raw, normalized, sou
 
 function formatDarazError(error) {
   const data = error.response?.data;
-  if (data?.message) {
-    const code = data.code ? String(data.code) : "";
-    return code && !String(data.message).includes(code) ? `${code}: ${data.message}` : data.message;
+  if (data) {
+    const code = data.code != null ? String(data.code) : "";
+    const msg = data.message || data.msg || `Daraz API error${code ? ` ${code}` : ""}`;
+    const detailText = formatDarazDetail(data.detail ?? data.details);
+    let full = code && !String(msg).includes(code) ? `${code}: ${msg}` : msg;
+    if (detailText && !full.includes(detailText)) full = `${full} (${detailText})`;
+    return full;
   }
   return error.message || "Unknown error";
+}
+
+/** Dedupe buyers from orders by buyer_id, then phone, then email. */
+function collectCustomersFromOrders(orders = []) {
+  const seen = new Map();
+
+  const keyFor = (buyer) => {
+    if (buyer.buyer_id) return `id:${String(buyer.buyer_id).trim().toLowerCase()}`;
+    const phone = String(buyer.phone || "").replace(/\D/g, "");
+    if (phone.length >= 7) return `phone:${phone}`;
+    const email = String(buyer.buyer_email || buyer.email || "").trim().toLowerCase();
+    if (email) return `email:${email}`;
+    if (buyer.order_id) return `order:${buyer.order_id}`;
+    return null;
+  };
+
+  for (const order of orders) {
+    const address = order.address_billing || order.address_shipping || {};
+    const buyer = {
+      buyer_id: order.buyer_id || order.customer_id || null,
+      buyer_name: [order.customer_first_name, order.customer_last_name].filter(Boolean).join(" ")
+        || [address.first_name, address.last_name].filter(Boolean).join(" ")
+        || "Unknown",
+      buyer_email: address.customer_email || order.buyer_email || "",
+      phone: address.phone || address.phone2 || order.buyer_phone || "",
+      order_id: order.order_id,
+      order_count: 1,
+    };
+    const key = keyFor(buyer);
+    if (!key) continue;
+    if (seen.has(key)) {
+      const prev = seen.get(key);
+      prev.order_count = (prev.order_count || 1) + 1;
+      if (!prev.buyer_email && buyer.buyer_email) prev.buyer_email = buyer.buyer_email;
+      if (!prev.phone && buyer.phone) prev.phone = buyer.phone;
+      if ((!prev.buyer_name || prev.buyer_name === "Unknown") && buyer.buyer_name) {
+        prev.buyer_name = buyer.buyer_name;
+      }
+    } else {
+      seen.set(key, buyer);
+    }
+  }
+  return [...seen.values()];
 }
 
 export async function runDarazInitialSync(storeId, tenantId) {
@@ -64,6 +113,7 @@ export async function runDarazInitialSync(storeId, tenantId) {
   const creds = darazCredentialsForStore(store);
   const apiBase = apiBaseFromStore(store);
   const orderParams = orderFetchParams(apiBase);
+  const summary = { warehouses: 0, orders: 0, products: 0, customers: 0, deferredWarehouses: 0 };
 
   await updateInitialSyncStatus(storeId, tenantId, "running");
   await addSyncLog(storeId, store.tenant_id, {
@@ -89,6 +139,8 @@ export async function runDarazInitialSync(storeId, tenantId) {
         );
       }
       const locResult = await syncAllDarazWarehouses(storeId, store.tenant_id, warehouses);
+      summary.warehouses = locResult.synced || warehouses.length;
+      summary.deferredWarehouses = locResult.deferred || 0;
       await addSyncLog(storeId, store.tenant_id, {
         syncType: "initial_sync:location",
         status: "success",
@@ -123,6 +175,7 @@ export async function runDarazInitialSync(storeId, tenantId) {
           "initial_sync",
         );
       }
+      summary.orders = orders.length;
       await addSyncLog(storeId, store.tenant_id, {
         syncType: "initial_sync:order",
         status: "success",
@@ -147,20 +200,34 @@ export async function runDarazInitialSync(storeId, tenantId) {
         "products",
         "product_list",
       );
+      let productOk = 0;
+      let productErr = 0;
       for (const product of products) {
-        await persistEntity(
-          storeId,
-          store.tenant_id,
-          "product",
-          product,
-          normalizeDarazProduct(product),
-          "initial_sync",
-        );
+        try {
+          await persistEntity(
+            storeId,
+            store.tenant_id,
+            "product",
+            product,
+            normalizeDarazProduct(product),
+            "initial_sync",
+          );
+          productOk += 1;
+        } catch (err) {
+          productErr += 1;
+          await addSyncLog(storeId, store.tenant_id, {
+            syncType: "initial_sync:product",
+            status: "failed",
+            externalId: String(product.item_id || product.product_id || ""),
+            message: err.message || "Failed to stage product",
+          });
+        }
       }
+      summary.products = productOk;
       await addSyncLog(storeId, store.tenant_id, {
         syncType: "initial_sync:product",
-        status: "success",
-        message: `Synced ${products.length} product(s)`,
+        status: productErr ? "partial" : "success",
+        message: `Synced ${productOk} product(s)${productErr ? ` (${productErr} failed)` : ""}`,
       });
     } catch (error) {
       const msg = formatDarazError(error);
@@ -172,43 +239,37 @@ export async function runDarazInitialSync(storeId, tenantId) {
       throw error;
     }
 
-    const seen = new Map();
-    for (const order of orders) {
-      const buyerId = order.buyer_id || order.customer_first_name || order.order_id;
-      if (!seen.has(buyerId)) {
-        seen.set(buyerId, {
-          buyer_id: order.buyer_id || buyerId,
-          buyer_name: [order.customer_first_name, order.customer_last_name]
-            .filter(Boolean)
-            .join(" "),
-          buyer_email: order.address_billing?.customer_email || order.buyer_email,
-          phone: order.address_billing?.phone || order.buyer_phone,
-          order_count: 1,
-        });
-      }
-    }
-    const customers = [...seen.values()];
+    const customers = collectCustomersFromOrders(orders);
     for (const buyer of customers) {
+      const normalized = normalizeDarazCustomer(buyer);
+      if (!normalized.externalId) continue;
       await persistEntity(
         storeId,
         store.tenant_id,
         "customer",
         buyer,
-        normalizeDarazCustomer(buyer),
+        normalized,
         "initial_sync",
       );
     }
+    summary.customers = customers.length;
     await addSyncLog(storeId, store.tenant_id, {
       syncType: "initial_sync:customer",
       status: "success",
       message: `Synced ${customers.length} customer(s) from orders`,
     });
 
+    const counts = await getEntityCounts(storeId, store.tenant_id);
     await updateInitialSyncStatus(storeId, tenantId, "completed");
     await addSyncLog(storeId, store.tenant_id, {
       syncType: "initial_sync",
       status: "completed",
-      message: "Store data fetched — review and import into your ERP when ready",
+      message:
+        `Fetched ${summary.warehouses} warehouse(s)`
+        + `${summary.deferredWarehouses ? ` (${summary.deferredWarehouses} need mapping)` : ""}`
+        + `, ${summary.orders} order(s), ${summary.products} product(s), ${summary.customers} customer(s). `
+        + `Staged totals — products: ${counts.product || 0}, orders: ${counts.order || 0}, `
+        + `customers: ${counts.customer || 0}, warehouses: ${counts.location || 0}. Review and import into your ERP when ready.`,
     });
   } catch (error) {
     await updateInitialSyncStatus(storeId, tenantId, "failed");

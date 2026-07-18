@@ -84,7 +84,11 @@ export default function EcommerceDashboard() {
     () =>
       entityByPlatform.map((row, i) => ({
         label: row.platform === "shopify" ? "Shopify" : row.platform === "daraz" ? "Daraz" : row.platform,
-        value: Number(row.orders) + Number(row.products) + Number(row.customers),
+        value:
+          Number(row.orders || 0)
+          + Number(row.products || 0)
+          + Number(row.customers || 0)
+          + Number(row.locations || 0),
         color: CHART_COLORS[i % CHART_COLORS.length],
       })),
     [entityByPlatform],
@@ -94,10 +98,12 @@ export default function EcommerceDashboard() {
     const orders = Number(stats.synced_orders) || 0;
     const products = Number(stats.synced_products) || 0;
     const customers = Number(stats.synced_customers) || 0;
+    const locations = Number(stats.synced_locations) || 0;
     return [
       { label: "Orders", value: orders, color: "var(--color-accent)" },
       { label: "Products", value: products, color: "var(--color-success)" },
       { label: "Customers", value: customers, color: "var(--color-warning)" },
+      { label: "Warehouses", value: locations, color: "var(--color-info, #64748b)" },
     ].filter((s) => s.value > 0);
   }, [stats]);
 
@@ -159,6 +165,13 @@ export default function EcommerceDashboard() {
       <div className="wh-dash-grid">
         <div className="wh-dash-col-3">
           <Kpi
+            label="Warehouses / Locations"
+            value={num(stats.synced_locations)}
+            hint="Shopify locations · Daraz warehouses"
+          />
+        </div>
+        <div className="wh-dash-col-3">
+          <Kpi
             label="Sync Events (24h)"
             value={dash(stats.sync_logs_24h)}
             hint={`${dash(stats.total_sync_logs)} all time`}
@@ -180,6 +193,9 @@ export default function EcommerceDashboard() {
             tone={Number(stats.webhooks_active) > 0 ? "success" : "warning"}
           />
         </div>
+      </div>
+
+      <div className="wh-dash-grid">
         <div className="wh-dash-col-3">
           <Kpi
             label="Last Synced"
@@ -207,7 +223,8 @@ export default function EcommerceDashboard() {
                 centerValue={
                   (Number(stats.synced_orders) || 0) +
                   (Number(stats.synced_products) || 0) +
-                  (Number(stats.synced_customers) || 0)
+                  (Number(stats.synced_customers) || 0) +
+                  (Number(stats.synced_locations) || 0)
                 }
                 centerLabel="records"
               />
@@ -262,7 +279,8 @@ export default function EcommerceDashboard() {
                       </div>
                     </div>
                     <span className="wh-mini-row__value">
-                      {store.order_count}o · {store.product_count}p · {store.customer_count}c
+                      {store.order_count ?? 0}o · {store.product_count ?? 0}p · {store.customer_count ?? 0}c
+                      {(Number(store.location_count) || 0) > 0 ? ` · ${store.location_count}w` : ""}
                     </span>
                     <StatusBadge status={store.initial_sync_status || store.status} />
                   </div>

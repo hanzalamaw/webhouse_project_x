@@ -146,6 +146,7 @@ export const orderController = {
       if (!result?.deleted) return res.status(404).json({ message: "Order not found" });
       res.json({
         ok: true,
+        message: result.message || "Order deleted.",
         shopifySync: result.shopifySync || null,
       });
     } catch (e) {

@@ -105,6 +105,7 @@ function orderTablesForPurge(tables) {
 /**
  * Hard-delete rows soft-deleted more than PURGE_AFTER_DAYS ago.
  * Uses multi-pass deletes so FK constraints resolve (children before parents).
+ * Intended to run once daily (start of day) — not on a short poll loop.
  */
 export async function purgeSoftDeleted() {
   const discovered = await discoverSoftDeleteTables();

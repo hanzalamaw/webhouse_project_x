@@ -140,7 +140,21 @@ export default function LocationMappingPanel({ platform = "shopify", authFetch: 
   const placeNoun = isDaraz ? "warehouse" : "location";
 
   if (loading) return null;
-  if (!data || !(data.locations || []).length) return null;
+
+  if (!data || !(data.locations || []).length) {
+    if (!isDaraz) return null;
+    return (
+      <div style={{ marginTop: "1rem" }}>
+        <Card>
+          <h3 className="wh-card__title">Daraz warehouses</h3>
+          <p className="wh-muted" style={{ margin: "0.35rem 0 0" }}>
+            No Daraz warehouses were returned. Re-sync from the Daraz tab, then map each warehouse to an ERP warehouse so stock can push correctly.
+          </p>
+          {notice && <p className="wh-form-message" style={{ marginTop: "0.75rem" }}>{notice}</p>}
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div style={{ marginTop: "1rem" }}>

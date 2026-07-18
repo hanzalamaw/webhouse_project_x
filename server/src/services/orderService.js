@@ -557,15 +557,18 @@ export const orderService = {
     try {
       requireShopifySyncIfLinked(shopifySync, "Order");
     } catch (err) {
-      const detail = shopifySync?.error || shopifySync?.reason || err.message;
+      const detail = shopifySync?.error || err.message || shopifySync?.reason;
       const error = new Error(
-        `Order was not deleted. Cancel it in Shopify first, or fix sync: ${detail}`,
+        `Order was not deleted in ERP. Shopify blocked the delete: ${detail}`,
       );
       error.status = 409;
       throw error;
     }
     const deleted = await cascadeSoftDeleteOrder(id, tenantId);
-    return { deleted, shopifySync };
+    const message = shopifySync?.skipped
+      ? "Order deleted."
+      : `Order deleted from ERP. Shopify was cancelled with a note — permanent Shopify delete in ${shopifySync.delayLabel || "7 days"}.`;
+    return { deleted, shopifySync, message };
   },
 
   async exportOrders(tenantId) {

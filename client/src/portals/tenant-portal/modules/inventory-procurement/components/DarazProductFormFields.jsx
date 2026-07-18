@@ -35,10 +35,11 @@ export function DarazProductFormFields({
             label="Brand"
             value={daraz.brand || ""}
             onChange={(e) => set("brand", e.target.value)}
-            placeholder="e.g. No Brand / Nike"
+            placeholder='e.g. No Brand'
             disabled={disabled}
             required
             error={fieldErrors.daraz_brand}
+            hint='Must match a Daraz brand exactly. Use "No Brand" if unsure.'
           />
           <FormField
             id="daraz_seller_sku"
@@ -164,6 +165,11 @@ export function DarazProductFormFields({
             disabled={disabled || !warehouseOptions.length}
             error={fieldErrors.daraz_warehouse_id}
           />
+          <p className="wh-muted" style={{ margin: "-0.5rem 0 0", gridColumn: "1 / -1", fontSize: "0.85em" }}>
+            {warehouseOptions.length <= 1
+              ? "With one warehouse, stock is sent as a simple quantity — no Daraz multi-warehouse mapping needed."
+              : "ERP warehouse that holds opening stock for this listing."}
+          </p>
           <FormField
             id="daraz_quantity"
             label="Sellable quantity"
@@ -180,12 +186,22 @@ export function DarazProductFormFields({
             label="Selling price (PKR)"
             type="number"
             min="0"
-            step="0.01"
+            step="1"
             value={daraz.price ?? ""}
-            onChange={(e) => set("price", e.target.value)}
+            onChange={(e) => {
+              const raw = e.target.value;
+              if (raw === "") {
+                set("price", "");
+                return;
+              }
+              // Enforce whole numbers in the UI for Daraz Pakistan.
+              const n = Number(raw);
+              set("price", Number.isFinite(n) ? String(Math.round(n)) : raw);
+            }}
             disabled={disabled}
             required
             error={fieldErrors.daraz_price}
+            hint="Whole rupees only — decimals are not allowed."
           />
           <FormField
             id="daraz_cost"
@@ -204,7 +220,7 @@ export function DarazProductFormFields({
 }
 
 export const EMPTY_DARAZ_FIELDS = {
-  brand: "",
+  brand: "No Brand",
   seller_sku: "",
   short_description: "",
   quantity: "0",

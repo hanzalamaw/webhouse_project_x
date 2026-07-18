@@ -4,6 +4,9 @@ import {
   unwrapDarazResponse,
   darazCredentialsForStore,
   apiBaseFromStore,
+  formatDarazPrice,
+  formatDarazDetail,
+  darazPriceDecimals,
 } from "./darazClient.js";
 import { addSyncLog } from "../../repositories/ecommerceRepository.js";
 
@@ -12,10 +15,41 @@ export function formatDarazError(error) {
   if (data) {
     const code = data.code != null ? String(data.code) : "";
     const msg = data.message || data.msg || (code ? `Daraz API error ${code}` : "Daraz API error");
-    if (code && code !== "0" && !String(msg).includes(code)) return `${code}: ${msg}`;
-    return msg;
+    const detailText = formatDarazDetail(data.detail ?? data.details ?? data.error_detail)
+      || error?.darazDetail
+      || "";
+    let full = code && code !== "0" && !String(msg).includes(code) ? `${code}: ${msg}` : msg;
+    if (detailText && !full.includes(detailText)) {
+      full = `${full} (${detailText})`;
+    }
+    return humanizeDarazError(full, code);
   }
-  return error?.message || "Daraz request failed";
+  if (error?.message) return humanizeDarazError(error.message, error?.darazCode);
+  return "Daraz request failed";
+}
+
+/** Map known Daraz codes to clearer copy while keeping API detail. */
+export function humanizeDarazError(message, code = "") {
+  const text = String(message || "").trim();
+  const c = String(code || "");
+  const lower = text.toLowerCase();
+  if (c === "4104" || /4104|price.?precision|biz_check_price_precision/i.test(text)) {
+    return `${text}. Use a whole-number price for Daraz Pakistan (e.g. 1500), with no decimals.`;
+  }
+  if (/e500|create product failed|system_exception/i.test(lower)) {
+    return (
+      `${text}. Common fixes: use brand "No Brand" (or an exact Daraz brand name), `
+      + "a unique Seller SKU, a whole-number price, and a valid leaf category. "
+      + "If you already have this SKU on Daraz, edit that product instead of creating a new one."
+    );
+  }
+  if (/campaign|locked|tag/i.test(lower) && /501|e501|update product failed/i.test(lower)) {
+    return `${text}. This product may be locked by a Daraz campaign — wait until the campaign ends or update stock/price in Seller Center.`;
+  }
+  if (/sku.?not.?found|seller.?sku|could not match/i.test(lower)) {
+    return text;
+  }
+  return text || "Daraz request failed";
 }
 
 function escapeXml(value) {
@@ -72,6 +106,18 @@ export function extractDarazPrimaryCategory(raw) {
   return id != null && String(id).trim() ? String(id).trim() : null;
 }
 
+export function extractDarazBrand(raw) {
+  if (!raw) return null;
+  const attrs = raw.attributes || raw.Attributes || {};
+  const brand =
+    attrs.brand
+    || attrs.Brand
+    || raw.brand
+    || raw.Brand
+    || null;
+  return brand != null && String(brand).trim() ? String(brand).trim() : null;
+}
+
 /**
  * Match ERP variants to Daraz SKUs by SellerSku, then single-SKU fallback.
  */
@@ -99,6 +145,33 @@ export function matchDarazSkusToErpVariants(erpVariants = [], darazSkus = []) {
   return matched;
 }
 
+function warehouseQtySignature(rows = []) {
+  return (rows || [])
+    .map((w) => `${w.warehouseCode || ""}:${Math.max(0, Math.floor(Number(w.quantity) || 0))}`)
+    .sort()
+    .join("|");
+}
+
+function priceQtyNeedsPush(matched, stockByVariantId, warehouseQtyByVariantId, beforeProduct, forceFullPush) {
+  if (forceFullPush || !beforeProduct) return true;
+  for (const { erpVariant, darazSku } of matched) {
+    const erpPrice = Number(erpVariant.selling_price) || 0;
+    const darazPrice = Number(darazSku.price) || 0;
+    if (Math.abs(erpPrice - darazPrice) > 0.0001) return true;
+
+    const warehouseQuantities = warehouseQtyByVariantId[erpVariant.id] || [];
+    if (warehouseQuantities.length) {
+      // Always push mapped warehouse stock when provided — Daraz multi-WH is source of truth for ERP stock push.
+      return true;
+    }
+    const qty = stockByVariantId[erpVariant.id];
+    if (qty != null && Math.max(0, Math.floor(Number(qty) || 0)) !== darazSku.quantity) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function buildCreateProductXml({
   primaryCategory,
   product,
@@ -108,6 +181,7 @@ function buildCreateProductXml({
   packageDims = {},
   brand = "",
   shortDescription = "",
+  apiBase,
 }) {
   const variants = Array.isArray(erpVariants) && erpVariants.length
     ? erpVariants
@@ -126,25 +200,34 @@ function buildCreateProductXml({
     const qty = stockByVariantId[v.id] != null
       ? Math.max(0, Math.floor(Number(stockByVariantId[v.id]) || 0))
       : 0;
-    const price = Number(v.selling_price) || 0;
-    const whRows = warehouseQtyByVariantId[v.id] || [];
-    const warehouseParts = whRows
-      .filter((w) => w.warehouseCode)
-      .map((w) => [
-        "<MultiWarehouseInventory>",
-        xmlTag("WarehouseCode", w.warehouseCode),
-        xmlTag("Quantity", Math.max(0, Math.floor(Number(w.quantity) || 0))),
-        "</MultiWarehouseInventory>",
-      ].join(""))
-      .join("");
+    const price = formatDarazPrice(v.selling_price, apiBase);
+    // Single-warehouse / most PK sellers: use aggregate Quantity only.
+    // MultiWarehouseInventories on create often triggers E500 SYSTEM_EXCEPTION.
+    const whRows = (warehouseQtyByVariantId[v.id] || []).filter((w) => w.warehouseCode);
+    const useMultiWh = whRows.length > 1;
+    const warehouseParts = useMultiWh
+      ? whRows
+        .map((w) => [
+          "<MultiWarehouseInventory>",
+          xmlTag("WarehouseCode", w.warehouseCode),
+          xmlTag("Quantity", Math.max(0, Math.floor(Number(w.quantity) || 0))),
+          "</MultiWarehouseInventory>",
+        ].join(""))
+        .join("")
+      : "";
+    const qtyValue = useMultiWh
+      ? null
+      : (whRows.length === 1
+        ? Math.max(0, Math.floor(Number(whRows[0].quantity) || 0))
+        : qty);
 
     return [
       "<Sku>",
       xmlTag("SellerSku", v.sku),
       warehouseParts
         ? `<MultiWarehouseInventories>${warehouseParts}</MultiWarehouseInventories>`
-        : xmlTag("quantity", qty),
-      xmlTag("price", price.toFixed(2)),
+        : xmlTag("quantity", qtyValue ?? 0),
+      xmlTag("price", price),
       xmlTag("package_length", length),
       xmlTag("package_width", width),
       xmlTag("package_height", height),
@@ -155,15 +238,14 @@ function buildCreateProductXml({
 
   const description = product.description || product.product_name || "";
   const shortDesc = shortDescription || description.slice(0, 250);
+  const brandName = String(brand || "").trim() || "No Brand";
   const attrParts = [
     xmlTag("name", product.product_name),
     xmlTag("description", description),
     xmlTag("short_description", shortDesc),
+    // Brand name only — brand_id must be a numeric Daraz brand id, not the name string.
+    xmlTag("brand", brandName),
   ];
-  if (brand) {
-    attrParts.push(xmlTag("brand", brand));
-    attrParts.push(xmlTag("brand_id", brand));
-  }
 
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
@@ -175,12 +257,12 @@ function buildCreateProductXml({
   ].join("");
 }
 
+/** Attributes + SKU identity only — never send price here (use price_quantity). */
 function buildUpdateProductXml({ itemId, product, matchedSkus }) {
   const skuXml = matchedSkus.map(({ erpVariant, darazSku }) => [
     "<Sku>",
-    xmlTag("SkuId", darazSku.skuId),
+    darazSku.skuId ? xmlTag("SkuId", darazSku.skuId) : "",
     xmlTag("SellerSku", erpVariant.sku || darazSku.sellerSku),
-    xmlTag("price", (Number(erpVariant.selling_price) || 0).toFixed(2)),
     "</Sku>",
   ].join("")).join("");
 
@@ -200,28 +282,37 @@ function buildUpdateProductXml({ itemId, product, matchedSkus }) {
   return parts.join("");
 }
 
-function buildPriceQuantityXml({ itemId, rows }) {
+function buildPriceQuantityXml({ itemId, rows, apiBase }) {
   const skuXml = rows.map((row) => {
-    const warehouseParts = (row.warehouseQuantities || [])
-      .filter((w) => w.warehouseCode)
-      .map((w) => [
-        "<MultiWarehouseInventory>",
-        xmlTag("WarehouseCode", w.warehouseCode),
-        xmlTag("Quantity", Math.max(0, Math.floor(Number(w.quantity) || 0))),
-        "</MultiWarehouseInventory>",
-      ].join(""))
-      .join("");
+    const whRows = (row.warehouseQuantities || []).filter((w) => w.warehouseCode);
+    // Only use multi-warehouse XML when there are 2+ warehouses; otherwise Quantity is safer.
+    const useMultiWh = whRows.length > 1;
+    const warehouseParts = useMultiWh
+      ? whRows
+        .map((w) => [
+          "<MultiWarehouseInventory>",
+          xmlTag("WarehouseCode", w.warehouseCode),
+          xmlTag("Quantity", Math.max(0, Math.floor(Number(w.quantity) || 0))),
+          "</MultiWarehouseInventory>",
+        ].join(""))
+        .join("")
+      : "";
+    const qty = useMultiWh
+      ? null
+      : (whRows.length === 1
+        ? Math.max(0, Math.floor(Number(whRows[0].quantity) || 0))
+        : (row.quantity != null ? Math.max(0, Math.floor(Number(row.quantity) || 0)) : null));
 
     return [
       "<Sku>",
       xmlTag("ItemId", itemId),
       row.skuId ? xmlTag("SkuId", row.skuId) : "",
       xmlTag("SellerSku", row.sellerSku),
-      row.price != null ? xmlTag("Price", Number(row.price).toFixed(2)) : "",
+      row.price != null ? xmlTag("Price", formatDarazPrice(row.price, apiBase)) : "",
       warehouseParts
         ? `<MultiWarehouseInventories>${warehouseParts}</MultiWarehouseInventories>`
-        : row.quantity != null
-          ? xmlTag("Quantity", Math.max(0, Math.floor(Number(row.quantity) || 0)))
+        : qty != null
+          ? xmlTag("Quantity", qty)
           : "",
       "</Sku>",
     ].join("");
@@ -303,6 +394,7 @@ export async function fetchDarazProductRaw(store, itemId) {
 
 export async function createProductInDaraz(store, product, erpVariants = [], options = {}) {
   try {
+    const apiBase = apiBaseFromStore(store);
     let primaryCategory = options.primaryCategoryId
       ? String(options.primaryCategoryId)
       : null;
@@ -328,8 +420,9 @@ export async function createProductInDaraz(store, product, erpVariants = [], opt
       stockByVariantId,
       warehouseQtyByVariantId,
       packageDims: options.packageDims || {},
-      brand: options.brand || "",
+      brand: options.brand || "No Brand",
       shortDescription: options.shortDescription || "",
+      apiBase,
     });
     const result = await postDarazPayload(store, "/product/create", payload);
     const itemId =
@@ -359,27 +452,56 @@ export async function pushProductToDaraz(
   externalId,
   product,
   erpVariants = [],
-  { beforeProduct = null, stockByVariantId = {}, warehouseQtyByVariantId = {}, darazRaw = null } = {},
+  {
+    beforeProduct = null,
+    stockByVariantId = {},
+    warehouseQtyByVariantId = {},
+    darazRaw = null,
+    forceFullPush = false,
+  } = {},
 ) {
   try {
+    const apiBase = apiBaseFromStore(store);
     let raw = darazRaw;
     if (!raw) {
       try {
         raw = await fetchDarazProductRaw(store, externalId);
-      } catch {
-        raw = null;
+      } catch (fetchErr) {
+        return {
+          ok: false,
+          error: `Could not load Daraz product ${externalId}: ${formatDarazError(fetchErr)}`,
+        };
       }
+    }
+    if (!raw) {
+      return {
+        ok: false,
+        error: `Daraz product ${externalId} was not found. Re-link the product or import it from Daraz again.`,
+      };
     }
 
     const darazSkus = extractDarazSkus(raw);
     const matched = matchDarazSkusToErpVariants(erpVariants, darazSkus);
 
+    if (!matched.length && erpVariants.length) {
+      const erpSkus = erpVariants.map((v) => v.sku).filter(Boolean).join(", ") || "(none)";
+      const darazSkuList = darazSkus.map((s) => s.sellerSku).filter(Boolean).join(", ") || "(none)";
+      return {
+        ok: false,
+        error:
+          `Could not match ERP Seller SKUs [${erpSkus}] to Daraz SKUs [${darazSkuList}]. `
+          + "Use the same Seller SKU as on Daraz, then save again.",
+      };
+    }
+
     const productChanged = !beforeProduct
+      || forceFullPush
       || erpFieldChanged(beforeProduct, product, "product_name")
       || erpFieldChanged(beforeProduct, product, "description")
       || erpFieldChanged(beforeProduct, product, "status");
 
-    if (productChanged || matched.length) {
+    // Attributes only — price goes through price_quantity to avoid 4104 on /product/update.
+    if (productChanged) {
       const payload = buildUpdateProductXml({
         itemId: externalId,
         product,
@@ -388,29 +510,35 @@ export async function pushProductToDaraz(
       await postDarazPayload(store, "/product/update", payload);
     }
 
-    const priceQtyRows = [];
-    for (const { erpVariant, darazSku } of matched.length
-      ? matched
-      : erpVariants.map((erpVariant) => ({
-          erpVariant,
-          darazSku: { sellerSku: erpVariant.sku, skuId: null },
-        }))) {
-      const qty = stockByVariantId[erpVariant.id] != null
-        ? Math.max(0, Math.floor(Number(stockByVariantId[erpVariant.id]) || 0))
-        : null;
-      const warehouseQuantities = warehouseQtyByVariantId[erpVariant.id] || [];
-      priceQtyRows.push({
-        skuId: darazSku.skuId,
-        sellerSku: erpVariant.sku || darazSku.sellerSku,
-        price: Number(erpVariant.selling_price) || 0,
-        quantity: warehouseQuantities.length ? undefined : qty,
-        warehouseQuantities,
-      });
-    }
+    const needPriceQty = matched.length > 0 && priceQtyNeedsPush(
+      matched,
+      stockByVariantId,
+      warehouseQtyByVariantId,
+      beforeProduct,
+      forceFullPush,
+    );
 
-    if (priceQtyRows.length) {
-      const pqPayload = buildPriceQuantityXml({ itemId: externalId, rows: priceQtyRows });
-      await postDarazPayload(store, "/product/price_quantity/update", pqPayload);
+    if (needPriceQty) {
+      const priceQtyRows = matched.map(({ erpVariant, darazSku }) => {
+        const qty = stockByVariantId[erpVariant.id] != null
+          ? Math.max(0, Math.floor(Number(stockByVariantId[erpVariant.id]) || 0))
+          : null;
+        const warehouseQuantities = warehouseQtyByVariantId[erpVariant.id] || [];
+        return {
+          skuId: darazSku.skuId,
+          sellerSku: erpVariant.sku || darazSku.sellerSku,
+          price: Number(erpVariant.selling_price) || 0,
+          quantity: warehouseQuantities.length ? undefined : qty,
+          warehouseQuantities,
+        };
+      });
+
+      try {
+        const pqPayload = buildPriceQuantityXml({ itemId: externalId, rows: priceQtyRows, apiBase });
+        await postDarazPayload(store, "/product/price_quantity/update", pqPayload);
+      } catch (pqError) {
+        return { ok: false, error: formatDarazError(pqError) };
+      }
     }
 
     if (product.status === "inactive") {
@@ -436,7 +564,8 @@ export async function pushProductPriceQuantityToDaraz(store, { itemId, rows }) {
     if (!itemId || !rows?.length) {
       return { ok: false, skipped: true, reason: "no_skus" };
     }
-    const payload = buildPriceQuantityXml({ itemId, rows });
+    const apiBase = apiBaseFromStore(store);
+    const payload = buildPriceQuantityXml({ itemId, rows, apiBase });
     await postDarazPayload(store, "/product/price_quantity/update", payload);
     return { ok: true, externalId: String(itemId), action: "updated" };
   } catch (error) {
@@ -457,4 +586,10 @@ export async function deactivateProductInDaraz(store, externalId) {
   }
 }
 
-export { extractDarazSkus, totalAvailableQty };
+export {
+  extractDarazSkus,
+  totalAvailableQty,
+  formatDarazPrice,
+  darazPriceDecimals,
+  warehouseQtySignature,
+};

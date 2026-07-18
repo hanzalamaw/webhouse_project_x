@@ -1,15 +1,17 @@
+import { humanizeDarazError } from "./darazWrite.js";
+
 const SKIP_REASON_MESSAGES = {
   no_store: "No Daraz store is connected. Connect Daraz in Integrations first.",
   not_linked: "This record is not linked to Daraz.",
   store_disconnected: "The Daraz store is disconnected.",
   unsupported_entity: "This record type cannot be synced to Daraz yet.",
-  daraz_variant_not_found: "Could not match variants in Daraz.",
+  daraz_variant_not_found: "Could not match variants in Daraz. Use the same Seller SKU as on Daraz.",
   variant_not_found: "Variant not found in ERP.",
   no_skus: "No Daraz SKUs found to update.",
 };
 
 export function formatDarazSyncError(detail, label = "record") {
-  const text = String(detail || "").trim();
+  const text = humanizeDarazError(String(detail || "").trim());
   if (!text) {
     return `Changes were not saved. Daraz did not accept the ${label.toLowerCase()} change.`;
   }

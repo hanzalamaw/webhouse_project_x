@@ -168,9 +168,13 @@ export const crmController = {
       if (!id) return res.status(400).json({ message: "Invalid customer id" });
       const result = await crmService.deleteCustomer(req.tenantId, id);
       if (!result?.ok) return res.status(404).json({ message: "Customer not found" });
-      res.json({ ok: true });
+      res.json({
+        ok: true,
+        message: result.message || "Customer deleted.",
+        shopifySync: result.shopifySync || null,
+      });
     } catch (e) {
-      res.status(400).json({ message: e.message });
+      res.status(e.status || 400).json({ message: e.message });
     }
   },
 

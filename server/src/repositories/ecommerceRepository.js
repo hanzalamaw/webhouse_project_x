@@ -287,6 +287,83 @@ export async function softDeleteEntityLinkByInternalId(tenantId, entityType, int
   return result.affectedRows || 0;
 }
 
+export async function schedulePendingShopifyDelete({
+  tenantId,
+  storeId,
+  entityType,
+  externalId,
+  internalId,
+  deleteAfter,
+  phase1Action = null,
+  note = null,
+}) {
+  await writeDb.query(
+    `UPDATE ecom_pending_shopify_deletes
+     SET deleted_at = NOW(), status = 'cancelled'
+     WHERE store_id = ? AND entity_type = ? AND external_id = ?
+       AND status IN ('pending', 'processing') AND deleted_at IS NULL`,
+    [storeId, entityType, String(externalId)],
+  );
+  const [result] = await writeDb.query(
+    `INSERT INTO ecom_pending_shopify_deletes
+       (tenant_id, store_id, entity_type, external_id, internal_id, delete_after, status, phase1_action, note)
+     VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+    [
+      tenantId,
+      storeId,
+      entityType,
+      String(externalId),
+      internalId,
+      deleteAfter,
+      phase1Action,
+      note,
+    ],
+  );
+  return result.insertId;
+}
+
+export async function listDuePendingShopifyDeletes(limit = 50) {
+  const [rows] = await readDb.query(
+    `SELECT id, tenant_id, store_id, entity_type, external_id, internal_id,
+            delete_after, status, phase1_action, note
+     FROM ecom_pending_shopify_deletes
+     WHERE status = 'pending'
+       AND delete_after <= NOW()
+       AND deleted_at IS NULL
+     ORDER BY delete_after ASC
+     LIMIT ?`,
+    [limit],
+  );
+  return rows;
+}
+
+export async function markPendingShopifyDeleteStatus(id, status, { lastError = null, completed = false } = {}) {
+  if (completed) {
+    await writeDb.query(
+      `UPDATE ecom_pending_shopify_deletes
+       SET status = ?, last_error = ?, completed_at = NOW()
+       WHERE id = ?`,
+      [status, lastError, id],
+    );
+    return;
+  }
+  if (status === "cancelled") {
+    await writeDb.query(
+      `UPDATE ecom_pending_shopify_deletes
+       SET status = ?, last_error = ?, deleted_at = NOW()
+       WHERE id = ?`,
+      [status, lastError, id],
+    );
+    return;
+  }
+  await writeDb.query(
+    `UPDATE ecom_pending_shopify_deletes
+     SET status = ?, last_error = ?
+     WHERE id = ?`,
+    [status, lastError, id],
+  );
+}
+
 export async function softDeleteLocationLinkByWarehouse(tenantId, warehouseId) {
   const [result] = await writeDb.query(
     `UPDATE ecom_location_links SET deleted_at = NOW(), active = 0
@@ -635,7 +712,32 @@ export async function getEntityCounts(storeId, tenantId) {
      GROUP BY entity_type`,
     [storeId, tenantId],
   );
-  return Object.fromEntries(rows.map((r) => [r.entity_type, r.count]));
+  const counts = {
+    order: 0,
+    product: 0,
+    customer: 0,
+    location: 0,
+    inventory: 0,
+  };
+  for (const row of rows) {
+    const key = String(row.entity_type || "").trim();
+    if (!key) continue;
+    counts[key] = Number(row.count) || 0;
+  }
+  return counts;
+}
+
+/** Staged locations that are not yet mapped to an ERP warehouse. */
+export async function countUnmappedLocationLinks(storeId) {
+  const [[row]] = await readDb.query(
+    `SELECT COUNT(*) AS count
+     FROM ecom_location_links
+     WHERE store_id = ? AND deleted_at IS NULL
+       AND (warehouse_id IS NULL OR warehouse_id = 0)
+       AND (active = 1 OR active IS NULL)`,
+    [storeId],
+  );
+  return Number(row?.count) || 0;
 }
 
 export async function getSyncLogs(storeId, limit = 100) {
@@ -678,6 +780,8 @@ export async function dashboardStats(tenantId) {
          WHERE tenant_id = ? AND deleted_at IS NULL AND entity_type = 'product') AS synced_products,
        (SELECT COUNT(*) FROM ecom_synced_records
          WHERE tenant_id = ? AND deleted_at IS NULL AND entity_type = 'customer') AS synced_customers,
+       (SELECT COUNT(*) FROM ecom_synced_records
+         WHERE tenant_id = ? AND deleted_at IS NULL AND entity_type = 'location') AS synced_locations,
        (SELECT COUNT(*) FROM ecom_external_orders
          WHERE tenant_id = ? AND deleted_at IS NULL) AS external_orders,
        (SELECT COUNT(*) FROM ecom_sync_logs
@@ -700,13 +804,15 @@ export async function dashboardStats(tenantId) {
 export async function dashboardStores(tenantId) {
   const [rows] = await readDb.query(
     `SELECT c.id, c.store_name, c.platform, c.store_url, c.status, c.initial_sync_status,
-            c.webhooks_registered, c.last_synced_at, c.created_at,
+            c.erp_import_status, c.webhooks_registered, c.last_synced_at, c.created_at,
             (SELECT COUNT(*) FROM ecom_synced_records r
               WHERE r.store_id = c.id AND r.tenant_id = c.tenant_id AND r.entity_type = 'order' AND r.deleted_at IS NULL) AS order_count,
             (SELECT COUNT(*) FROM ecom_synced_records r
               WHERE r.store_id = c.id AND r.tenant_id = c.tenant_id AND r.entity_type = 'product' AND r.deleted_at IS NULL) AS product_count,
             (SELECT COUNT(*) FROM ecom_synced_records r
-              WHERE r.store_id = c.id AND r.tenant_id = c.tenant_id AND r.entity_type = 'customer' AND r.deleted_at IS NULL) AS customer_count
+              WHERE r.store_id = c.id AND r.tenant_id = c.tenant_id AND r.entity_type = 'customer' AND r.deleted_at IS NULL) AS customer_count,
+            (SELECT COUNT(*) FROM ecom_synced_records r
+              WHERE r.store_id = c.id AND r.tenant_id = c.tenant_id AND r.entity_type = 'location' AND r.deleted_at IS NULL) AS location_count
      FROM ecom_store_connections c
      WHERE c.tenant_id = ? AND c.deleted_at IS NULL
      ORDER BY c.created_at DESC`,
@@ -746,7 +852,8 @@ export async function dashboardEntityByPlatform(tenantId) {
     `SELECT c.platform,
             SUM(CASE WHEN r.entity_type = 'order' THEN 1 ELSE 0 END) AS orders,
             SUM(CASE WHEN r.entity_type = 'product' THEN 1 ELSE 0 END) AS products,
-            SUM(CASE WHEN r.entity_type = 'customer' THEN 1 ELSE 0 END) AS customers
+            SUM(CASE WHEN r.entity_type = 'customer' THEN 1 ELSE 0 END) AS customers,
+            SUM(CASE WHEN r.entity_type = 'location' THEN 1 ELSE 0 END) AS locations
      FROM ecom_synced_records r
      JOIN ecom_store_connections c ON c.id = r.store_id
      WHERE r.tenant_id = ? AND r.deleted_at IS NULL AND c.deleted_at IS NULL

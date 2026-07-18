@@ -71,14 +71,23 @@ export default function DarazTab() {
     if (status === "completed" || status === "failed") {
       setSyncing(false);
       if (prev === "running" || prev === "pending") {
+        const counts = connection?.counts || {};
+        const parts = [
+          counts.location != null ? `${counts.location} warehouse(s)` : null,
+          counts.order != null ? `${counts.order} order(s)` : null,
+          counts.product != null ? `${counts.product} product(s)` : null,
+          counts.customer != null ? `${counts.customer} customer(s)` : null,
+        ].filter(Boolean);
         setNotice(
           status === "completed"
-            ? "Re-sync finished — warehouses, orders, products, and customers are up to date."
+            ? parts.length
+              ? `Re-sync finished — staged ${parts.join(", ")}. Review import below before adding to ERP.`
+              : "Re-sync finished — warehouses, orders, products, and customers are up to date."
             : "Re-sync failed. Check sync status and try again.",
         );
       }
     }
-  }, [connection?.initialSyncStatus, syncing]);
+  }, [connection?.initialSyncStatus, connection?.counts, syncing]);
 
   const handleConnect = async () => {
     setNotice("");
@@ -162,6 +171,7 @@ export default function DarazTab() {
           counts={counts}
           pendingImportCount={connection.pendingImportCount}
           pendingConflictCount={connection.pendingConflictCount}
+          unmappedLocationCount={connection.unmappedLocationCount}
           connection={connection}
           authFetch={authFetch}
           onDisconnect={handleDisconnect}
@@ -182,7 +192,7 @@ export default function DarazTab() {
     <Card>
       <h3 className="wh-card__title">Connect your Daraz store</h3>
       <p className="wh-muted" style={{ margin: "0.35rem 0 1.25rem" }}>
-        Link your Daraz seller account to fetch orders, products, and customers. You review and approve what gets added to your ERP.
+        Link your Daraz seller account to fetch warehouses, orders, products, and customers (from orders). You review and approve what gets added to your ERP. Product create/update and stock can push back to Daraz; customers and warehouses are pull/map only.
       </p>
 
       {notice && <p className="wh-form-message" style={{ marginBottom: "1rem" }}>{notice}</p>}

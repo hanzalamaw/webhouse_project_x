@@ -17,9 +17,10 @@ export default function ConnectedStoreSummary({
   syncStatus,
   erpImportStatus,
   lastSyncedAt,
-  counts,
+  counts = {},
   pendingImportCount,
   pendingConflictCount,
+  unmappedLocationCount,
   apiAccess,
   connection,
   authFetch,
@@ -36,6 +37,10 @@ export default function ConnectedStoreSummary({
   const [disconnectOpen, setDisconnectOpen] = useState(false);
   const syncLabel = SYNC_STATUS_USER[syncStatus] || syncStatus || "—";
   const importLabel = ERP_IMPORT_STATUS_USER[erpImportStatus] || erpImportStatus || "—";
+  const placeNoun = platform === "daraz" ? "Warehouses" : "Locations";
+  const unmapped = Number(
+    unmappedLocationCount ?? connection?.unmappedLocationCount ?? 0,
+  );
 
   const granted = new Set(
     String(connection?.grantedScopes || "")
@@ -51,6 +56,14 @@ export default function ConnectedStoreSummary({
     setDisconnectOpen(false);
     onDisconnect?.();
   };
+
+  const autoSyncHint = platform === "daraz"
+    ? (autoSyncEnabled
+      ? "New Daraz data imports into your ERP automatically after fetch. Map warehouses below so stock lands correctly."
+      : "New store data is fetched but stays in staging until you import manually.")
+    : (autoSyncEnabled
+      ? "Shopify changes import automatically (webhooks + every 5 min). No need to open this page."
+      : "New store data is fetched but stays in staging until you import manually.");
 
   return (
     <>
@@ -104,9 +117,7 @@ export default function ConnectedStoreSummary({
             <span>
               <strong>Auto-sync to ERP</strong>
               <span className="wh-muted" style={{ display: "block", marginTop: "0.2rem", fontWeight: 400 }}>
-                {autoSyncEnabled
-                  ? "Shopify changes import automatically (webhooks + every 5 min). No need to open this page."
-                  : "New store data is fetched but stays in staging until you import manually."}
+                {autoSyncHint}
               </span>
             </span>
           </label>
@@ -121,6 +132,14 @@ export default function ConnectedStoreSummary({
           </div>
           <div className="wh-dash-col-3">
             <Kpi label="Customers fetched" value={counts.customer ?? 0} />
+          </div>
+          <div className="wh-dash-col-3">
+            <Kpi
+              label={`${placeNoun} fetched`}
+              value={counts.location ?? 0}
+              hint={unmapped > 0 ? `${unmapped} need mapping` : undefined}
+              tone={unmapped > 0 ? "warning" : "default"}
+            />
           </div>
           <div className="wh-dash-col-3">
             <Kpi

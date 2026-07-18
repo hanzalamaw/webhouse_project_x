@@ -529,6 +529,23 @@ export const crmRepository = {
         [tenantId, p]
       );
       if (rows[0]) return rows[0];
+      // Match when formatting differs (+92… vs 03…) by comparing digit suffixes.
+      const digits = p.replace(/\D/g, "");
+      if (digits.length >= 7) {
+        const suffix = digits.slice(-10);
+        const [fuzzy] = await readDb.query(
+          `SELECT id FROM crm_customers
+           WHERE tenant_id = ? AND deleted_at IS NULL
+             AND phone IS NOT NULL AND phone != ''
+             AND RIGHT(
+               REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(phone, '+', ''), '-', ''), ' ', ''), '(', ''), ')', ''),
+               10
+             ) = ?
+           LIMIT 1`,
+          [tenantId, suffix]
+        );
+        if (fuzzy[0]) return fuzzy[0];
+      }
     }
     if (e) {
       const [rows] = await readDb.query(

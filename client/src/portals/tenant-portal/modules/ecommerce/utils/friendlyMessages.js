@@ -21,6 +21,30 @@ export function friendlyConnectError(message) {
   return "We could not complete the connection. Please try again.";
 }
 
+/** Map Daraz push/sync errors to clearer copy for product forms. */
+export function friendlyDarazSyncError(message) {
+  const raw = String(message || "").trim();
+  if (!raw) return "Daraz sync failed. Please try again.";
+  const lower = raw.toLowerCase();
+  if (/4104|price.?precision|biz_check_price_precision/.test(lower)) {
+    return raw.includes("whole-number")
+      ? raw
+      : `${raw} Use a whole-number price for Daraz Pakistan (e.g. 1500).`;
+  }
+  if (/e500|create product failed|system_exception/.test(lower)) {
+    return raw.length > 80
+      ? raw
+      : `${raw} Try brand "No Brand", a unique Seller SKU, and a whole-number price.`;
+  }
+  if (/could not match.*sku|seller skus/.test(lower)) {
+    return raw;
+  }
+  if (/campaign|locked/.test(lower) && /501|e501|update product failed/.test(lower)) {
+    return `${raw} This listing may be locked by a Daraz campaign.`;
+  }
+  return raw.length < 400 ? raw : "Daraz sync failed. Check Integrations → Push log for details.";
+}
+
 export const SYNC_STATUS_USER = {
   pending: "Waiting to sync",
   running: "Syncing your store…",

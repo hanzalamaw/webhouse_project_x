@@ -8,9 +8,11 @@ import {
   getSyncedRecordByExternalId,
   listLocationLinks,
   upsertEntityLink,
+  upsertSyncedRecord,
   softDeleteEntityLinkByInternalId,
   softDeleteLocationLinkByWarehouse,
   upsertLocationLink,
+  schedulePendingShopifyDelete,
 } from "../../repositories/ecommerceRepository.js";
 import { orderRepository } from "../../repositories/orderRepository.js";
 import { crmRepository } from "../../repositories/crmRepository.js";
@@ -29,9 +31,9 @@ import {
   createOrderInShopify,
   createLocationInShopify,
   pushLocationToShopify,
-  deleteCustomerFromShopify,
-  cancelOrderInShopify,
-  deleteProductFromShopify,
+  markCustomerPendingDeleteInShopify,
+  markOrderPendingDeleteInShopify,
+  markProductPendingDeleteInShopify,
   deactivateLocationInShopify,
   recordPaymentInShopify,
   createRefundInShopify,
@@ -51,6 +53,51 @@ import {
   matchDarazSkusToErpVariants,
   totalAvailableQty,
 } from "./darazWrite.js";
+import {
+  SHOPIFY_HARD_DELETE_DELAY_MS,
+  shopifyHardDeleteDelayLabel,
+  shopifyPendingDeleteNote,
+} from "../../utils/shopifyDeferredDelete.js";
+
+function mysqlDateTimeFromMs(msFromNow) {
+  return new Date(Date.now() + msFromNow).toISOString().slice(0, 19).replace("T", " ");
+}
+
+function logDeferredDeleteScheduled(entityType, internalId, externalId) {
+  console.log(
+    `[shopify-deferred-delete] delete request made for ${entityType}:${internalId} `
+    + `(shopify:${externalId}) — will delete after ${shopifyHardDeleteDelayLabel()}`,
+  );
+}
+
+async function scheduleShopifyHardDelete({
+  tenantId,
+  store,
+  entityType,
+  externalId,
+  internalId,
+  phase1Action,
+  note,
+}) {
+  const deleteAfter = mysqlDateTimeFromMs(SHOPIFY_HARD_DELETE_DELAY_MS);
+  await schedulePendingShopifyDelete({
+    tenantId,
+    storeId: store.id,
+    entityType,
+    externalId,
+    internalId,
+    deleteAfter,
+    phase1Action,
+    note,
+  });
+  logDeferredDeleteScheduled(entityType, internalId, externalId);
+  return {
+    scheduled: true,
+    deleteAfter,
+    delayMs: SHOPIFY_HARD_DELETE_DELAY_MS,
+    delayLabel: shopifyHardDeleteDelayLabel(),
+  };
+}
 
 async function loadStoreForLink(tenantId, link) {
   return getStoreById(link.store_id, tenantId);
@@ -103,7 +150,10 @@ async function buildStockByVariantId(tenantId, erpVariants = []) {
  */
 async function buildDarazStockMaps(tenantId, storeId, erpVariants = []) {
   const locationLinks = await listLocationLinks(storeId);
-  const hasMappedWarehouses = locationLinks.some((ll) => ll.warehouse_id && ll.shopify_location_id);
+  const mappedLinks = locationLinks.filter((ll) => ll.warehouse_id && ll.shopify_location_id);
+  // Single mapped warehouse (typical Daraz PK account): push aggregate Quantity only.
+  // Multi-warehouse XML is only needed when 2+ Daraz warehouses are mapped.
+  const useMultiWarehouse = mappedLinks.length > 1;
   const stockByVariantId = {};
   const warehouseQtyByVariantId = {};
 
@@ -112,8 +162,7 @@ async function buildDarazStockMaps(tenantId, storeId, erpVariants = []) {
     const levels = await inventoryRepository.getVariantStockLevels(tenantId, erpV.id);
     stockByVariantId[erpV.id] = totalAvailableQty(levels);
 
-    // Single-warehouse / unmapped sellers: push aggregate Quantity only.
-    if (!hasMappedWarehouses) {
+    if (!useMultiWarehouse) {
       warehouseQtyByVariantId[erpV.id] = [];
       continue;
     }
@@ -150,6 +199,14 @@ async function resolveDarazRawForProduct(tenantId, storeId, externalId) {
 
 async function resolveDarazCategoryForCreate(tenantId, store, options = {}) {
   if (options.primaryCategoryId) return String(options.primaryCategoryId);
+
+  // Prefer category from the product we are linking/updating when known.
+  if (options.externalId) {
+    const staged = await getSyncedRecordByExternalId(store.id, tenantId, "product", options.externalId);
+    const cat = extractDarazPrimaryCategory(staged?.raw) || staged?.normalized?.primaryCategory;
+    if (cat) return String(cat);
+  }
+
   const staged = await getSyncedRecords(store.id, tenantId, "product", 20);
   for (const row of staged) {
     const cat = extractDarazPrimaryCategory(row.raw) || row.normalized?.primaryCategory;
@@ -637,7 +694,7 @@ export async function syncEntityToShopify(tenantId, entityType, internalId, opti
   return result;
 }
 
-/** Delete a linked customer from Shopify and remove the entity link. */
+/** Stage Shopify customer delete: note + tag now, hard-delete later. ERP deletes only if this succeeds. */
 export async function deleteLinkedCustomerFromShopify(tenantId, customerId) {
   const link = await getEntityLinkByInternalId(tenantId, "customer", customerId, "shopify");
   if (!link) return { ok: true, skipped: true, reason: "not_linked" };
@@ -645,15 +702,24 @@ export async function deleteLinkedCustomerFromShopify(tenantId, customerId) {
   const store = await loadStoreForLink(tenantId, link);
   if (!store) return { ok: false, skipped: true, reason: "store_disconnected" };
 
-  const result = await deleteCustomerFromShopify(store, link.external_id);
-  if (result.ok) {
-    await softDeleteEntityLinkByInternalId(tenantId, "customer", customerId, "shopify");
-    await logPushResult(store.id, tenantId, "customer", link.external_id, result);
-  }
-  return result;
+  const note = shopifyPendingDeleteNote("customer");
+  const result = await markCustomerPendingDeleteInShopify(store, link.external_id, note);
+  await logPushResult(store.id, tenantId, "customer", link.external_id, result);
+  if (!result.ok) return result;
+
+  const schedule = await scheduleShopifyHardDelete({
+    tenantId,
+    store,
+    entityType: "customer",
+    externalId: link.external_id,
+    internalId: customerId,
+    phase1Action: result.action,
+    note,
+  });
+  return { ...result, ...schedule, shopifyNote: note };
 }
 
-/** Cancel a linked order in Shopify and remove the entity link. */
+/** Stage Shopify order delete: cancel + note now, hard-delete later. ERP deletes only if cancel succeeds. */
 export async function deleteLinkedOrderFromShopify(tenantId, orderId) {
   const link = await getEntityLinkByInternalId(tenantId, "order", orderId, "shopify");
   if (!link) return { ok: true, skipped: true, reason: "not_linked" };
@@ -661,7 +727,8 @@ export async function deleteLinkedOrderFromShopify(tenantId, orderId) {
   const store = await loadStoreForLink(tenantId, link);
   if (!store) return { ok: false, skipped: true, reason: "store_disconnected" };
 
-  const result = await cancelOrderInShopify(store, link.external_id);
+  const note = shopifyPendingDeleteNote("order");
+  const result = await markOrderPendingDeleteInShopify(store, link.external_id, note);
   await logPushResult(store.id, tenantId, "order", link.external_id, result);
 
   if (!result.ok) {
@@ -669,11 +736,20 @@ export async function deleteLinkedOrderFromShopify(tenantId, orderId) {
     return result;
   }
 
-  await softDeleteEntityLinkByInternalId(tenantId, "order", orderId, "shopify");
-  return result;
+  // Keep entity link until hard-delete job finishes (needed to map Shopify id).
+  const schedule = await scheduleShopifyHardDelete({
+    tenantId,
+    store,
+    entityType: "order",
+    externalId: link.external_id,
+    internalId: orderId,
+    phase1Action: result.action,
+    note,
+  });
+  return { ...result, ...schedule, shopifyNote: note };
 }
 
-/** Delete a linked product from Shopify and remove the entity link. */
+/** Stage Shopify product delete: draft + note now, hard-delete later. ERP deletes only if this succeeds. */
 export async function deleteLinkedProductFromShopify(tenantId, productId) {
   const link = await getEntityLinkByInternalId(tenantId, "product", productId, "shopify");
   if (!link) return { ok: true, skipped: true, reason: "not_linked" };
@@ -681,12 +757,21 @@ export async function deleteLinkedProductFromShopify(tenantId, productId) {
   const store = await loadStoreForLink(tenantId, link);
   if (!store) return { ok: false, skipped: true, reason: "store_disconnected" };
 
-  const result = await deleteProductFromShopify(store, link.external_id);
-  if (result.ok) {
-    await softDeleteEntityLinkByInternalId(tenantId, "product", productId, "shopify");
-    await logPushResult(store.id, tenantId, "product", link.external_id, result);
-  }
-  return result;
+  const note = shopifyPendingDeleteNote("product");
+  const result = await markProductPendingDeleteInShopify(store, link.external_id, note);
+  await logPushResult(store.id, tenantId, "product", link.external_id, result);
+  if (!result.ok) return result;
+
+  const schedule = await scheduleShopifyHardDelete({
+    tenantId,
+    store,
+    entityType: "product",
+    externalId: link.external_id,
+    internalId: productId,
+    phase1Action: result.action,
+    note,
+  });
+  return { ...result, ...schedule, shopifyNote: note };
 }
 
 /** Deactivate a linked Shopify location and remove the warehouse location link. */
@@ -782,12 +867,19 @@ export async function pushEntityToDaraz(tenantId, entityType, internalId, option
     if (stockMaps.error) {
       return { ok: false, skipped: true, reason: "no_mapped_warehouse_locations", error: stockMaps.error };
     }
-    const darazRaw = await resolveDarazRawForProduct(tenantId, store.id, link.external_id);
+    // Always prefer live item/get; staged raw is fallback only.
+    let darazRaw = null;
+    try {
+      darazRaw = await fetchDarazProductRaw(store, link.external_id);
+    } catch {
+      darazRaw = await resolveDarazRawForProduct(tenantId, store.id, link.external_id);
+    }
     result = await pushProductToDaraz(store, link.external_id, product, erpVariants, {
       beforeProduct: options.beforeProduct || null,
       stockByVariantId: stockMaps.stockByVariantId,
       warehouseQtyByVariantId: stockMaps.warehouseQtyByVariantId,
       darazRaw,
+      forceFullPush: Boolean(options.forceFullPush),
     });
   } else {
     return { ok: false, skipped: true, reason: "unsupported_entity" };
@@ -841,6 +933,31 @@ export async function syncEntityToDaraz(tenantId, entityType, internalId, option
       externalId: result.externalId,
       internalId,
     });
+    // Persist category/brand so later updates do not re-guess from unrelated staged products.
+    const normalizedStub = {
+      externalId: String(result.externalId),
+      platform: "daraz",
+      primaryCategory: result.primaryCategory || primaryCategoryId || null,
+      brand: options.brand || null,
+      name: product.product_name,
+    };
+    await upsertSyncedRecord(
+      store.id,
+      tenantId,
+      "product",
+      result.externalId,
+      {
+        item_id: result.externalId,
+        primary_category: result.primaryCategory || primaryCategoryId || null,
+        attributes: {
+          name: product.product_name,
+          brand: options.brand || undefined,
+        },
+      },
+      normalizedStub,
+      "erp_push",
+      "daraz",
+    );
     await logDarazPushResult(store.id, tenantId, entityType, result.externalId, result);
   } else {
     await logDarazPushResult(store.id, tenantId, entityType, result.externalId || "new", result);

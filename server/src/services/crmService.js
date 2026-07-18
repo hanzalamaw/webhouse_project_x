@@ -290,10 +290,22 @@ export const crmService = {
   async deleteCustomer(tenantId, id) {
     await assertCustomerCanDelete(tenantId, id);
     const shopifySync = await deleteLinkedCustomerFromShopify(tenantId, id);
-    requireShopifySyncIfLinked(shopifySync, "Customer");
+    try {
+      requireShopifySyncIfLinked(shopifySync, "Customer");
+    } catch (err) {
+      const detail = shopifySync?.error || err.message || shopifySync?.reason;
+      const error = new Error(
+        `Customer was not deleted in ERP. Shopify blocked the delete: ${detail}`,
+      );
+      error.status = 409;
+      throw error;
+    }
     const deleted = await cascadeSoftDeleteCrmCustomer(id, tenantId);
     if (!deleted) return { ok: false };
-    return { ok: true, shopifySync };
+    const message = shopifySync?.skipped
+      ? "Customer deleted."
+      : `Customer deleted from ERP. Shopify was noted — permanent Shopify delete in ${shopifySync.delayLabel || "7 days"}.`;
+    return { ok: true, shopifySync, message };
   },
 
   exportCustomers(tenantId) {

@@ -26,6 +26,7 @@ import { ecomApiGet } from "../../../ecommerce/api/ecommerceClient";
 import { IntegrationDestinationField } from "../../../ecommerce/components/IntegrationDestinationField";
 import { INTEGRATION_DESTINATIONS } from "../../../ecommerce/constants";
 import { resolveIntegrationSave, resolveLinkedEditSave } from "../../../ecommerce/utils/integrationDestination";
+import { friendlyDarazSyncError } from "../../../ecommerce/utils/friendlyMessages";
 import {
   validateProductForShopifyOrErp,
   validateProductForDaraz,
@@ -155,14 +156,16 @@ function serializeProductState(form, options, variantRows, daraz, saveDestinatio
 
 function buildDarazVariantPayload(form, daraz) {
   const sku = String(daraz.seller_sku || "").trim();
-  const qty = Math.max(0, Number(daraz.quantity) || 0);
+  const qty = Math.max(0, Math.floor(Number(daraz.quantity) || 0));
   const warehouseId = daraz.warehouse_id ? Number(daraz.warehouse_id) : null;
+  // Daraz Pakistan: whole rupees only.
+  const sellingPrice = Math.round(Number(daraz.price) || 0);
   return {
     combo_key: "default",
     sku,
     variant_name: form.product_name.trim() || sku,
-    cost_price: Number(daraz.cost_price) || 0,
-    selling_price: Number(daraz.price) || 0,
+    cost_price: Math.round(Number(daraz.cost_price) || 0),
+    selling_price: sellingPrice,
     status: form.status || "active",
     attributes: [],
     warehouse_stocks: warehouseId
@@ -466,7 +469,7 @@ export default function CreateProduct() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     const errors = isDarazFlow
-      ? validateProductForDaraz({ form, daraz, warehouseOptions })
+      ? validateProductForDaraz({ form, daraz, warehouseOptions, priceDecimals: 0 })
       : validateProductForShopifyOrErp({ form, options, variantRows });
     if (Object.keys(errors).length) {
       setFieldErrors(errors);
@@ -489,11 +492,11 @@ export default function CreateProduct() {
         delivery_charges: Number(form.delivery_charges) || 0,
         discount: Number(form.discount) || 0,
         tax: Number(form.tax) || 0,
-        default_cost_price: daraz.cost_price !== "" ? Number(daraz.cost_price) : undefined,
-        default_selling_price: daraz.price !== "" ? Number(daraz.price) : undefined,
+        default_cost_price: daraz.cost_price !== "" ? Math.round(Number(daraz.cost_price) || 0) : undefined,
+        default_selling_price: daraz.price !== "" ? Math.round(Number(daraz.price) || 0) : undefined,
         options: [],
         variants: [variant],
-        daraz_brand: daraz.brand.trim(),
+        daraz_brand: (daraz.brand.trim() || "No Brand"),
         daraz_short_description: (daraz.short_description || form.description).trim().slice(0, 250),
         daraz_package: {
           length: String(daraz.package?.length || "10"),
@@ -554,7 +557,8 @@ export default function CreateProduct() {
         info: resolved.info,
       });
     } catch (saveErr) {
-      setError(saveErr.message);
+      const raw = saveErr.message || "Save failed";
+      setError(/daraz/i.test(raw) ? friendlyDarazSyncError(raw) : raw);
     } finally {
       setSubmitting(false);
     }

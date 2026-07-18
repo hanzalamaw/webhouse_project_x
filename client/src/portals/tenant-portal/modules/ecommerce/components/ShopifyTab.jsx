@@ -85,7 +85,7 @@ export default function ShopifyTab() {
       setSyncing(false);
       const c = connection?.counts || {};
       setNotice(
-        `Re-sync complete — ${c.order ?? 0} orders, ${c.product ?? 0} products, ${c.customer ?? 0} customers fetched.`,
+        `Re-sync complete — ${c.order ?? 0} orders, ${c.product ?? 0} products, ${c.customer ?? 0} customers, ${c.location ?? 0} locations fetched.`,
       );
     } else if (status === "failed") {
       setSyncing(false);
@@ -200,6 +200,7 @@ export default function ShopifyTab() {
           counts={counts}
           pendingImportCount={connection.pendingImportCount}
           pendingConflictCount={connection.pendingConflictCount}
+          unmappedLocationCount={connection.unmappedLocationCount}
           apiAccess={connection.apiAccess}
           connection={connection}
           authFetch={authFetch}
@@ -221,7 +222,7 @@ export default function ShopifyTab() {
     <Card>
       <h3 className="wh-card__title">Connect your Shopify store</h3>
       <p className="wh-muted" style={{ margin: "0.35rem 0 1.25rem" }}>
-        Link your store to fetch orders, products, and customers. You review and approve what gets added to your ERP.
+        Link your store to fetch orders, products, customers, and locations. You review and approve what gets added to your ERP.
       </p>
 
       {notice && <p className="wh-form-message" style={{ marginBottom: "1rem" }}>{notice}</p>}

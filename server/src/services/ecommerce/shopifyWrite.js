@@ -316,6 +316,34 @@ export async function deleteCustomerFromShopify(store, externalId) {
   }
 }
 
+/**
+ * Phase 1 of deferred delete: keep the customer, append ERP deletion note + tag.
+ * Hard DELETE happens later via the pending-deletes job.
+ */
+export async function markCustomerPendingDeleteInShopify(store, externalId, noteLine) {
+  const client = shopifyClient({ storeUrl: store.store_url, accessToken: store.access_token });
+  try {
+    const { data } = await client.get(`/customers/${externalId}.json`);
+    const customer = data?.customer;
+    if (!customer) return { ok: false, error: "Shopify customer not found" };
+
+    const existingNote = String(customer.note || "").trim();
+    const note = existingNote ? `${existingNote}\n${noteLine}` : noteLine;
+    const existingTags = String(customer.tags || "")
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean);
+    const tags = [...new Set([...existingTags, "erp-pending-delete"])].join(", ");
+
+    await client.put(`/customers/${externalId}.json`, {
+      customer: { id: Number(externalId), note, tags },
+    });
+    return { ok: true, action: "noted_pending_delete", shopifyNote: noteLine };
+  } catch (error) {
+    return { ok: false, error: formatShopifyError(error) };
+  }
+}
+
 function shopifyVariantOptionKey(variant = {}) {
   return [variant.option1, variant.option2, variant.option3]
     .map((value) => String(value || "").trim().toLowerCase())
@@ -1115,11 +1143,97 @@ export async function cancelOrderInShopify(store, externalId) {
   }
 }
 
+/**
+ * Phase 1 of deferred order delete: cancel on Shopify and append ERP deletion note.
+ * Hard DELETE of the Shopify order happens later via the pending-deletes job.
+ */
+export async function markOrderPendingDeleteInShopify(store, externalId, noteLine) {
+  const cancel = await cancelOrderInShopify(store, externalId);
+  if (!cancel.ok) return cancel;
+
+  const client = shopifyClient({ storeUrl: store.store_url, accessToken: store.access_token });
+  try {
+    await appendShopifyOrderTags(client, externalId, ["erp-pending-delete"]);
+    const { data } = await client.get(`/orders/${externalId}.json`);
+    const existingNote = String(data?.order?.note || "").trim();
+    const note = existingNote ? `${existingNote}\n${noteLine}` : noteLine;
+    await client.put(`/orders/${externalId}.json`, {
+      order: { id: Number(externalId), note },
+    });
+    return {
+      ok: true,
+      action: cancel.action === "already_cancelled" ? "already_cancelled_noted" : "cancelled_pending_delete",
+      shopifyNote: noteLine,
+    };
+  } catch (error) {
+    // Cancel already succeeded — still schedule hard delete, but report note failure clearly.
+    return {
+      ok: true,
+      action: "cancelled_note_failed",
+      shopifyNote: noteLine,
+      warning: formatShopifyError(error),
+    };
+  }
+}
+
+export async function deleteOrderFromShopify(store, externalId) {
+  const client = shopifyClient({ storeUrl: store.store_url, accessToken: store.access_token });
+  try {
+    await client.delete(`/orders/${externalId}.json`);
+    return { ok: true, action: "deleted" };
+  } catch (error) {
+    const msg = formatShopifyError(error);
+    if (/not found|404|does not exist/i.test(msg)) {
+      return { ok: true, action: "already_deleted" };
+    }
+    return { ok: false, error: msg };
+  }
+}
+
 export async function deleteProductFromShopify(store, externalId) {
   const client = shopifyClient({ storeUrl: store.store_url, accessToken: store.access_token });
   try {
     await client.delete(`/products/${externalId}.json`);
     return { ok: true, action: "deleted" };
+  } catch (error) {
+    const msg = formatShopifyError(error);
+    if (/not found|404|does not exist/i.test(msg)) {
+      return { ok: true, action: "already_deleted" };
+    }
+    return { ok: false, error: msg };
+  }
+}
+
+/**
+ * Phase 1 of deferred product delete: set Shopify product to draft and tag it.
+ * Hard DELETE happens later via the pending-deletes job.
+ */
+export async function markProductPendingDeleteInShopify(store, externalId, noteLine) {
+  const client = shopifyClient({ storeUrl: store.store_url, accessToken: store.access_token });
+  try {
+    const { data } = await client.get(`/products/${externalId}.json`);
+    const product = data?.product;
+    if (!product) return { ok: false, error: "Shopify product not found" };
+
+    const existingTags = String(product.tags || "")
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean);
+    const tags = [...new Set([...existingTags, "erp-pending-delete"])].join(", ");
+    const bodyHtml = String(product.body_html || "");
+    const stamped = bodyHtml.includes("[ERP] This product was deleted from the ERP")
+      ? bodyHtml
+      : `${bodyHtml}<p><em>${noteLine}</em></p>`;
+
+    await client.put(`/products/${externalId}.json`, {
+      product: {
+        id: Number(externalId),
+        status: "draft",
+        tags,
+        body_html: stamped,
+      },
+    });
+    return { ok: true, action: "drafted_pending_delete", shopifyNote: noteLine };
   } catch (error) {
     return { ok: false, error: formatShopifyError(error) };
   }

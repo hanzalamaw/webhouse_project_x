@@ -52,7 +52,8 @@ export function ConfirmDeleteModal({
     >
       <p className="wh-modal__text">
         Deleting <strong>{recordName}</strong> will also delete everything related to this{" "}
-        <strong>{categoryLabel}</strong> (soft delete). Related records are permanently removed after 7 days.
+        <strong>{categoryLabel}</strong> (soft delete). Related ERP records are permanently removed after 7 days.
+        {" "}Linked Shopify records are cancelled or drafted with a note first; if Shopify blocks the delete, nothing is removed in the ERP.
       </p>
       {items.length > 0 && (
         <ul className="wh-delete-cascade">

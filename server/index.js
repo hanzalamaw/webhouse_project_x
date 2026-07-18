@@ -18,6 +18,9 @@ import { registerFinanceRoutes } from "./src/routes/finance.js";
 import { shopifyWebhookHandler } from "./src/routes/shopifyWebhooks.js";
 import { purgeSoftDeleted } from "./src/jobs/purgeSoftDeleted.js";
 import { runShopifyBackgroundSync } from "./src/jobs/shopifyBackgroundSync.js";
+import { processPendingShopifyDeletes } from "./src/jobs/processPendingShopifyDeletes.js";
+import { PURGE_AFTER_DAYS } from "./src/utils/softDeletePolicy.js";
+import { SHOPIFY_PENDING_DELETE_DAYS } from "./src/utils/shopifyDeferredDelete.js";
 
 dotenv.config();
 
@@ -36,8 +39,33 @@ app.post(
 app.use(cookieParser());
 app.use(express.json({ limit: JSON_BODY_LIMIT }));
 
-const PURGE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const SHOPIFY_POLL_INTERVAL_MS = Number(process.env.SHOPIFY_POLL_INTERVAL_MS) || 5 * 60 * 1000;
+
+/** ms until next local midnight (start of day). */
+function msUntilNextLocalMidnight() {
+  const now = new Date();
+  const next = new Date(now);
+  next.setHours(24, 0, 0, 0);
+  return Math.max(1000, next.getTime() - now.getTime());
+}
+
+/** Run retention once per day at local midnight — no short poll loop. */
+function scheduleDailyRetention(run) {
+  const arm = () => {
+    const delay = msUntilNextLocalMidnight();
+    const when = new Date(Date.now() + delay).toLocaleString();
+    console.log(`[retention] next daily purge at ${when} (ERP ${PURGE_AFTER_DAYS}d / Shopify ${SHOPIFY_PENDING_DELETE_DAYS}d)`);
+    setTimeout(async () => {
+      try {
+        await run();
+      } catch (err) {
+        console.error("[retention] daily job failed:", err?.message || err);
+      }
+      arm();
+    }, delay);
+  };
+  arm();
+}
 
 const startServer = async () => {
   const db = await createPool();
@@ -69,19 +97,31 @@ const startServer = async () => {
     res.status(204).end();
   });
 
-  const runPurge = async () => {
+  const runDailyRetention = async () => {
+    console.log("[retention] starting daily delete purge…");
     try {
       const { total, tables, errors } = await purgeSoftDeleted();
       if (total > 0) {
-        console.log(`Purged ${total} soft-deleted row(s) older than 7 days`, tables);
+        console.log(`Purged ${total} soft-deleted ERP row(s) older than ${PURGE_AFTER_DAYS} days`, tables);
       }
       const errKeys = Object.keys(errors || {});
       if (errKeys.length) {
-        console.warn("Purge completed with errors on some tables:", errors);
+        console.warn("ERP purge completed with errors on some tables:", errors);
       }
     } catch (err) {
-      console.error("Purge job failed:", err?.message || err);
+      console.error("ERP soft-delete purge failed:", err?.message || err);
       if (err?.stack) console.error(err.stack);
+    }
+
+    try {
+      const result = await processPendingShopifyDeletes();
+      if (result.processed > 0) {
+        console.log(
+          `[shopify-deferred-delete] processed=${result.processed} succeeded=${result.succeeded} failed=${result.failed}`,
+        );
+      }
+    } catch (err) {
+      console.error("[shopify-deferred-delete] failed:", err?.message || err);
     }
   };
 
@@ -92,8 +132,7 @@ const startServer = async () => {
 
   // Run after server is listening so DB is fully ready
   server.on("listening", () => {
-    setTimeout(runPurge, 5000);
-    setInterval(runPurge, PURGE_INTERVAL_MS);
+    scheduleDailyRetention(runDailyRetention);
     // Pull Shopify changes into the ERP without opening the ecommerce module.
     setTimeout(() => runShopifyBackgroundSync().catch(() => {}), 15000);
     setInterval(() => runShopifyBackgroundSync().catch(() => {}), SHOPIFY_POLL_INTERVAL_MS);

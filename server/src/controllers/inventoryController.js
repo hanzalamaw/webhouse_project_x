@@ -116,11 +116,15 @@ export const inventoryController = {
     try {
       const id = tryParseEntityId(req.params.id);
       if (!id) return res.status(400).json({ message: "Invalid product id" });
-      const ok = await inventoryService.removeProduct(req.tenantId, id);
-      if (!ok) return res.status(404).json({ message: "Product not found" });
-      res.json({ success: true });
+      const result = await inventoryService.removeProduct(req.tenantId, id);
+      if (!result?.ok) return res.status(404).json({ message: "Product not found" });
+      res.json({
+        success: true,
+        message: result.message || "Product deleted.",
+        shopifySync: result.shopifySync || null,
+      });
     } catch (e) {
-      res.status(400).json({ message: e.message });
+      res.status(e.status || 400).json({ message: e.message });
     }
   },
 

@@ -194,15 +194,31 @@ export function validateProductForShopifyOrErp({ form, options = [], variantRows
   return errors;
 }
 
-export function validateProductForDaraz({ form, daraz = {}, warehouseOptions = [] }) {
+export function validateProductForDaraz({ form, daraz = {}, warehouseOptions = [], priceDecimals = 0 } = {}) {
   const errors = {};
   if (!trim(form?.product_name)) errors.product_name = "Product name is required";
   if (!trim(form?.description)) errors.description = "Description is required for Daraz";
-  if (!trim(daraz.brand)) errors.daraz_brand = "Brand is required for Daraz";
+  const brand = trim(daraz.brand) || "No Brand";
+  if (!brand) errors.daraz_brand = "Brand is required for Daraz";
   if (!trim(daraz.seller_sku)) errors.daraz_seller_sku = "Seller SKU is required for Daraz";
   if (!form?.category_id) errors.category_id = "Category is required";
-  if (daraz.price === "" || Number(daraz.price) < 0) {
+  if (daraz.price === "" || Number(daraz.price) < 0 || Number.isNaN(Number(daraz.price))) {
     errors.daraz_price = "Valid selling price is required for Daraz";
+  } else {
+    const price = Number(daraz.price);
+    const decimals = Number.isFinite(Number(priceDecimals)) ? Number(priceDecimals) : 0;
+    if (decimals === 0) {
+      if (!Number.isInteger(price) && Math.round(price) !== price) {
+        errors.daraz_price = "Use a whole-number price only (e.g. 1500) — no decimals";
+      } else if (String(daraz.price).includes(".")) {
+        errors.daraz_price = "Use a whole-number price only (e.g. 1500) — no decimals";
+      }
+    } else if (decimals > 0) {
+      const factor = 10 ** decimals;
+      if (Math.round(price * factor) / factor !== price) {
+        errors.daraz_price = `Price may have at most ${decimals} decimal place${decimals === 1 ? "" : "s"} for Daraz`;
+      }
+    }
   }
   const pkg = daraz.package || {};
   if (!pkg.length || Number(pkg.length) <= 0) {
@@ -217,10 +233,10 @@ export function validateProductForDaraz({ form, daraz = {}, warehouseOptions = [
   if (!pkg.weight || Number(pkg.weight) <= 0) {
     errors.daraz_pkg_weight = "Package weight is required for Daraz";
   }
-  if (!warehouseOptions.length) {
-    errors.daraz_warehouse_id = "Create a warehouse first to set stock";
-  } else if (!daraz.warehouse_id) {
-    errors.daraz_warehouse_id = "Warehouse is required for Daraz";
+  // Warehouse is optional when the tenant has none yet; if options exist, prefer one selected.
+  // Single-warehouse Daraz accounts do not need multi-warehouse mapping to create.
+  if (warehouseOptions.length > 1 && !daraz.warehouse_id) {
+    errors.daraz_warehouse_id = "Select the ERP warehouse that holds this stock";
   }
   return errors;
 }

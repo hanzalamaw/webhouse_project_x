@@ -4,6 +4,14 @@ function erpId(platform, externalId) {
 
 export function normalizeDarazOrder(order) {
   const address = order.address_billing || order.address_shipping || {};
+  const buyerExternalId = String(
+    order.buyer_id
+    || order.customer_id
+    || address.customer_id
+    || order.order_id
+    || order.order_number
+    || "",
+  ).trim();
 
   return {
     erpOrderId: erpId("daraz", String(order.order_id || order.order_number)),
@@ -11,6 +19,7 @@ export function normalizeDarazOrder(order) {
     platform: "daraz",
     status: order.statuses?.[0] || order.status || "unknown",
     customer: {
+      externalId: buyerExternalId || null,
       name: address.first_name
         ? [address.first_name, address.last_name].filter(Boolean).join(" ")
         : order.customer_first_name
@@ -74,20 +83,23 @@ export function normalizeDarazProduct(product) {
   const skusList = Array.isArray(skusRaw) ? skusRaw : skusRaw ? [skusRaw] : [];
   const firstSku = skusList[0] || {};
   const inventoryLevels = extractMultiWarehouseInventories(firstSku);
+  const attrs = product.attributes || product.Attributes || {};
+  const brand = attrs.brand || attrs.Brand || product.brand || product.Brand || null;
 
   return {
     erpProductId: erpId("daraz", String(product.item_id || product.product_id)),
     externalId: String(product.item_id || product.product_id || ""),
     platform: "daraz",
     sku: firstSku.SellerSku || firstSku.seller_sku || product.seller_sku || product.shop_sku || String(product.item_id || ""),
-    name: product.name || product.attributes?.name || "",
-    description: product.attributes?.description || product.description || "",
+    name: product.name || attrs.name || "",
+    description: attrs.description || product.description || "",
+    brand: brand != null && String(brand).trim() ? String(brand).trim() : null,
     price: parseFloat(firstSku.price ?? product.price ?? product.special_price ?? 0),
     currency: "PKR",
     status: product.status || firstSku.Status || "unknown",
     stock: firstSku.quantity ?? product.quantity ?? product.available ?? null,
     inventoryLevels,
-    primaryCategory: product.primary_category || product.PrimaryCategory || null,
+    primaryCategory: product.primary_category || product.PrimaryCategory || attrs.primary_category || null,
     skus: skusList.map((sku) => ({
       skuId: String(sku.SkuId ?? sku.sku_id ?? "").trim() || null,
       sellerSku: String(sku.SellerSku ?? sku.seller_sku ?? "").trim(),
@@ -101,13 +113,16 @@ export function normalizeDarazProduct(product) {
 }
 
 export function normalizeDarazCustomer(buyer) {
+  const externalId = String(
+    buyer.buyer_id || buyer.customer_id || buyer.id || buyer.phone || buyer.buyer_email || "",
+  ).trim();
   return {
-    erpCustomerId: erpId("daraz", String(buyer.buyer_id || buyer.customer_id || buyer.id)),
-    externalId: String(buyer.buyer_id || buyer.customer_id || buyer.id || ""),
+    erpCustomerId: erpId("daraz", externalId || "unknown"),
+    externalId: externalId || "",
     platform: "daraz",
     name: buyer.name || buyer.buyer_name || buyer.first_name || "Unknown",
     email: buyer.email || buyer.buyer_email || "",
-    phone: buyer.phone || buyer.phone_number || "",
+    phone: buyer.phone || buyer.phone_number || buyer.buyer_phone || "",
     ordersCount: buyer.order_count ?? null,
     totalSpent: null,
     createdAt: buyer.created_at || null,

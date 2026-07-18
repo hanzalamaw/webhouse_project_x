@@ -643,10 +643,27 @@ export const inventoryService = {
   async removeProduct(tenantId, id) {
     await assertProductCanDelete(tenantId, id);
     const shopifySync = await deleteLinkedProductFromShopify(tenantId, id);
-    requireShopifySyncIfLinked(shopifySync, "Product");
+    try {
+      requireShopifySyncIfLinked(shopifySync, "Product");
+    } catch (err) {
+      const detail = shopifySync?.error || err.message || shopifySync?.reason;
+      const error = new Error(
+        `Product was not deleted in ERP. Shopify blocked the delete: ${detail}`,
+      );
+      error.status = 409;
+      throw error;
+    }
     const darazSync = await deleteLinkedProductFromDaraz(tenantId, id);
     requireDarazSyncIfLinked(darazSync, "Product");
-    return inventoryRepository.softDeleteProduct(tenantId, id);
+    const deleted = await inventoryRepository.softDeleteProduct(tenantId, id);
+    return {
+      ok: Boolean(deleted),
+      shopifySync,
+      darazSync,
+      message: shopifySync?.skipped
+        ? "Product deleted."
+        : `Product deleted from ERP. Shopify was set to draft with a note — permanent Shopify delete in ${shopifySync.delayLabel || "7 days"}.`,
+    };
   },
 
   async exportProducts(tenantId) {
