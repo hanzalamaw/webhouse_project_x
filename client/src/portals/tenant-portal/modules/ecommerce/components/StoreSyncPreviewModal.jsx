@@ -4,19 +4,30 @@ import { Button } from "../../../../../components/Button";
 import { formatPKR } from "../../../../../utils/currency";
 import { ecomApiGet, ecomApiPost } from "../api/ecommerceClient";
 import { Kpi } from "./DashboardWidgets";
-import { parseImportIssueMessage } from "../utils/importIssueMessages";
 
 const PREVIEW_LIMIT = 200;
 
-function flattenSamples(data) {
+function flattenSamples(data, actions = ["create", "update", "skip", "already_imported", "conflict"]) {
   if (!data?.samples) return [];
-  return ["create", "update", "skip", "already_imported"].flatMap((action) =>
+  return actions.flatMap((action) =>
     (data.samples[action] || []).map((row) => ({ ...row, action })),
   );
 }
 
-function EntityTable({ title, data, columns }) {
-  const allRows = useMemo(() => flattenSamples(data), [data]);
+function ActionBadge({ action }) {
+  const tone =
+    action === "skip" || action === "already_imported"
+      ? "warning"
+      : action === "update"
+        ? "accent"
+        : action === "conflict"
+          ? "danger"
+          : "success";
+  return <span className={`wh-badge wh-badge--${tone}`}>{action === "conflict" ? "match" : action}</span>;
+}
+
+function EntityTable({ title, data, columns, actions }) {
+  const allRows = useMemo(() => flattenSamples(data, actions), [data, actions]);
   const rows = allRows.slice(0, PREVIEW_LIMIT);
   const summary = data?.summary || {};
 
@@ -25,7 +36,7 @@ function EntityTable({ title, data, columns }) {
       <div style={{ display: "flex", justifyContent: "space-between", gap: "0.75rem", marginBottom: "0.5rem", flexWrap: "wrap" }}>
         <strong>{title}</strong>
         <span className="wh-muted" style={{ fontSize: "0.9rem" }}>
-          {(data?.total ?? 0)} staged · {summary.create || 0} new · {summary.update || 0} update ·{" "}
+          {(data?.total ?? 0)} staged · {summary.create || 0} new · {summary.conflict || 0} need review ·{" "}
           {summary.skip || 0} skip
           {(summary.already_imported || 0) > 0 ? ` · ${summary.already_imported} already in ERP` : ""}
         </span>
@@ -55,7 +66,7 @@ function EntityTable({ title, data, columns }) {
             </tbody>
           </table>
           {allRows.length > PREVIEW_LIMIT && (
-            <p className="wh-muted" style={{ margin: "0.5rem 0 0", fontSize: "0.85rem" }}>
+            <p className="wh-muted" style={{ fontSize: "0.85rem", margin: "0.5rem 0 0" }}>
               Showing first {PREVIEW_LIMIT} of {allRows.length} rows.
             </p>
           )}
@@ -65,19 +76,104 @@ function EntityTable({ title, data, columns }) {
   );
 }
 
-function ActionBadge({ action }) {
-  const tone =
-    action === "skip" || action === "already_imported"
-      ? "warning"
-      : action === "update"
-        ? "accent"
-        : "success";
-  return <span className={`wh-badge wh-badge--${tone}`}>{action}</span>;
+function DuplicateTable({
+  title,
+  rows,
+  decisions,
+  onDecision,
+  onBulk,
+  platformLabel,
+}) {
+  if (!rows.length) return null;
+  const pending = rows.filter((row) => !decisions[String(row.externalId)]).length;
+
+  return (
+    <section style={{ marginBottom: "1.5rem" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: "0.75rem", marginBottom: "0.5rem", flexWrap: "wrap", alignItems: "center" }}>
+        <strong>Duplicates — {title} ({rows.length})</strong>
+        <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+          <Button type="button" variant="secondary" className="wh-btn--sm" onClick={() => onBulk("rely")}>
+            Keep all ERP
+          </Button>
+          <Button type="button" variant="secondary" className="wh-btn--sm" onClick={() => onBulk("update")}>
+            Keep all {platformLabel}
+          </Button>
+        </div>
+      </div>
+      <p className="wh-muted" style={{ fontSize: "0.85rem", marginTop: 0 }}>
+        Same record found in ERP and {platformLabel}. Click which side’s data to keep.
+        {pending > 0 ? ` ${pending} still need a choice.` : ""}
+      </p>
+      <div className="wh-tx-payments-wrap" style={{ maxHeight: 360, overflow: "auto" }}>
+        <table className="wh-tx-payments-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>ERP</th>
+              <th>{platformLabel}</th>
+              <th>Keep</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.slice(0, PREVIEW_LIMIT).map((row, i) => {
+              const id = String(row.externalId);
+              const choice = decisions[id] || "";
+              const storeLabel = row.name || row.orderNo || row.sku || row.externalId || "—";
+              const erpLabel = row.conflictWith || "Existing ERP record";
+              return (
+                <tr key={`dup-${id}-${i}`} style={choice ? undefined : { background: "rgba(220, 160, 40, 0.08)" }}>
+                  <td>{i + 1}</td>
+                  <td>
+                    <div>{erpLabel}</div>
+                    {row.conflictSource ? (
+                      <div className="wh-muted" style={{ fontSize: "0.8rem" }}>source: {row.conflictSource}</div>
+                    ) : null}
+                    {row.sku ? <div className="wh-muted" style={{ fontSize: "0.8rem" }}>SKU {row.sku}</div> : null}
+                  </td>
+                  <td>
+                    <div>{storeLabel}</div>
+                    {row.sku ? <div className="wh-muted" style={{ fontSize: "0.8rem" }}>SKU {row.sku}</div> : null}
+                    {row.email || row.phone ? (
+                      <div className="wh-muted" style={{ fontSize: "0.8rem" }}>
+                        {[row.email, row.phone].filter(Boolean).join(" · ")}
+                      </div>
+                    ) : null}
+                    {row.price != null ? (
+                      <div className="wh-muted" style={{ fontSize: "0.8rem" }}>{formatPKR(row.price)}</div>
+                    ) : null}
+                  </td>
+                  <td>
+                    <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
+                      <Button
+                        type="button"
+                        variant={choice === "rely" ? "primary" : "secondary"}
+                        className="wh-btn--sm"
+                        onClick={() => onDecision(id, "rely")}
+                      >
+                        ERP
+                      </Button>
+                      <Button
+                        type="button"
+                        variant={choice === "update" ? "primary" : "secondary"}
+                        className="wh-btn--sm"
+                        onClick={() => onDecision(id, "update")}
+                      >
+                        {platformLabel}
+                      </Button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
 }
 
 /**
- * CSV-style review modal opened after a store sync finishes.
- * Shows fetched counts + staged product/customer/order details.
+ * Sync review modal: new records import directly; duplicates use ERP vs store keep buttons.
  */
 export default function StoreSyncPreviewModal({
   open,
@@ -93,11 +189,44 @@ export default function StoreSyncPreviewModal({
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [entities, setEntities] = useState({ product: true, customer: true, order: true });
+  const [conflictDecisions, setConflictDecisions] = useState({
+    product: {},
+    customer: {},
+    order: {},
+  });
 
   const shopQuery = connection?.shop ? `?shop=${encodeURIComponent(connection.shop)}&full=1` : "?full=1";
   const counts = connection?.counts || {};
   const placeNoun = platform === "daraz" ? "warehouses" : "locations";
   const platformLabel = platform === "daraz" ? "Daraz" : "Shopify";
+
+  const productMatches = useMemo(
+    () => flattenSamples(preview?.products, ["conflict"]),
+    [preview],
+  );
+  const customerMatches = useMemo(
+    () => flattenSamples(preview?.customers, ["conflict"]),
+    [preview],
+  );
+  const orderMatches = useMemo(
+    () => flattenSamples(preview?.orders, ["conflict"]),
+    [preview],
+  );
+
+  const unresolvedMatches = useMemo(() => {
+    const missing = (rows, map) => rows.some((row) => !map[String(row.externalId)]);
+    return (
+      (entities.product && missing(productMatches, conflictDecisions.product || {}))
+      || (entities.customer && missing(customerMatches, conflictDecisions.customer || {}))
+      || (entities.order && missing(orderMatches, conflictDecisions.order || {}))
+    );
+  }, [
+    entities,
+    productMatches,
+    customerMatches,
+    orderMatches,
+    conflictDecisions,
+  ]);
 
   const loadPreview = useCallback(async () => {
     if (!open || !connection?.connected) return;
@@ -107,6 +236,8 @@ export default function StoreSyncPreviewModal({
     try {
       const data = await ecomApiGet(platform, `sync/import-preview${shopQuery}`, authFetch);
       setPreview(data);
+      // No default — user must pick ERP or store for each duplicate.
+      setConflictDecisions({ product: {}, customer: {}, order: {} });
     } catch (err) {
       setError(err.message || "Could not load sync details");
       setPreview(null);
@@ -119,12 +250,32 @@ export default function StoreSyncPreviewModal({
     loadPreview();
   }, [loadPreview]);
 
+  const setDecision = (entityType, externalId, value) => {
+    setConflictDecisions((prev) => ({
+      ...prev,
+      [entityType]: { ...prev[entityType], [externalId]: value },
+    }));
+  };
+
+  const setBulk = (entityType, rows, value) => {
+    const map = {};
+    for (const row of rows) map[String(row.externalId)] = value;
+    setConflictDecisions((prev) => ({
+      ...prev,
+      [entityType]: { ...prev[entityType], ...map },
+    }));
+  };
+
   const handleImport = async () => {
     const selected = Object.entries(entities)
       .filter(([, on]) => on)
       .map(([key]) => key);
     if (!selected.length) {
       setError("Select at least one data type to import");
+      return;
+    }
+    if (unresolvedMatches) {
+      setError(`Choose ERP or ${platformLabel} for every duplicate before importing.`);
       return;
     }
     setImporting(true);
@@ -135,6 +286,8 @@ export default function StoreSyncPreviewModal({
       const result = await ecomApiPost(platform, `sync/import${importQs}`, authFetch, {
         entities: selected,
         updateExisting: true,
+        conflictDecisions,
+        defaultConflictAction: null,
       });
       setPreview(result.preview || preview);
       const parts = selected
@@ -142,7 +295,8 @@ export default function StoreSyncPreviewModal({
           const r = result.results?.[t];
           if (!r) return null;
           const failed = r.failed ? `, ${r.failed} failed` : "";
-          return `${t}: ${r.created} new, ${r.updated} updated, ${r.skipped} skipped${failed}`;
+          const relied = r.relied ? `, ${r.relied} kept ERP` : "";
+          return `${t}: ${r.created} new, ${r.updated} from store${relied}, ${r.skipped} skipped${failed}`;
         })
         .filter(Boolean);
       setMessage(parts.length ? `Import complete — ${parts.join(" · ")}` : "Import complete");
@@ -154,7 +308,7 @@ export default function StoreSyncPreviewModal({
         const sample = issues.slice(0, 3).map((i) => i.reason).filter(Boolean);
         setError(
           `${issues.length} record(s) were not imported. `
-          + (sample.length ? sample.join(" ") : "See “Why some records weren’t imported” below."),
+          + (sample.length ? sample.join(" ") : "See details below."),
         );
       }
       onImported?.(result);
@@ -164,6 +318,8 @@ export default function StoreSyncPreviewModal({
       setImporting(false);
     }
   };
+
+  const readyActions = ["create", "already_imported", "skip"];
 
   const productCols = [
     { key: "action", label: "Action", render: (r) => <ActionBadge action={r.action} /> },
@@ -175,20 +331,6 @@ export default function StoreSyncPreviewModal({
       render: (r) => (r.price != null ? formatPKR(r.price) : "—"),
     },
     { key: "stock", label: "Stock", render: (r) => (r.stock != null ? r.stock : "—") },
-    {
-      key: "reason",
-      label: "Why / how to fix",
-      render: (r) => {
-        if (!r.reason) return "—";
-        const { why, fix } = parseImportIssueMessage(r.reason);
-        return (
-          <div style={{ maxWidth: 320, fontSize: "0.85rem" }}>
-            <div>{why}</div>
-            {fix ? <div className="wh-muted" style={{ marginTop: "0.25rem" }}><strong>Fix:</strong> {fix}</div> : null}
-          </div>
-        );
-      },
-    },
   ];
 
   const customerCols = [
@@ -196,20 +338,6 @@ export default function StoreSyncPreviewModal({
     { key: "name", label: "Customer", render: (r) => r.name || r.externalId || "—" },
     { key: "email", label: "Email", render: (r) => r.email || "—" },
     { key: "phone", label: "Phone", render: (r) => r.phone || "—" },
-    {
-      key: "reason",
-      label: "Why / how to fix",
-      render: (r) => {
-        if (!r.reason) return "—";
-        const { why, fix } = parseImportIssueMessage(r.reason);
-        return (
-          <div style={{ maxWidth: 320, fontSize: "0.85rem" }}>
-            <div>{why}</div>
-            {fix ? <div className="wh-muted" style={{ marginTop: "0.25rem" }}><strong>Fix:</strong> {fix}</div> : null}
-          </div>
-        );
-      },
-    },
   ];
 
   const orderCols = [
@@ -223,21 +351,9 @@ export default function StoreSyncPreviewModal({
     },
     { key: "status", label: "Status", render: (r) => r.status || "—" },
     { key: "items", label: "Items", render: (r) => r.itemCount ?? "—" },
-    {
-      key: "reason",
-      label: "Why / how to fix",
-      render: (r) => {
-        if (!r.reason) return "—";
-        const { why, fix } = parseImportIssueMessage(r.reason);
-        return (
-          <div style={{ maxWidth: 320, fontSize: "0.85rem" }}>
-            <div>{why}</div>
-            {fix ? <div className="wh-muted" style={{ marginTop: "0.25rem" }}><strong>Fix:</strong> {fix}</div> : null}
-          </div>
-        );
-      },
-    },
   ];
+
+  const matchCount = productMatches.length + customerMatches.length + orderMatches.length;
 
   return (
     <Modal
@@ -251,25 +367,37 @@ export default function StoreSyncPreviewModal({
             Close
           </Button>
           {preview?.hasPendingImport ? (
-            <Button modalPrimary onClick={handleImport} disabled={importing || loading}>
-              {importing ? "Importing…" : "Import selected to ERP"}
+            <Button modalPrimary onClick={handleImport} disabled={importing || loading || unresolvedMatches}>
+              {importing
+                ? "Importing…"
+                : unresolvedMatches
+                  ? "Choose ERP or store for duplicates"
+                  : matchCount
+                    ? "Import (with your choices)"
+                    : "Import selected to ERP"}
             </Button>
           ) : null}
         </>
       }
     >
       <p className="wh-modal__text">
-        Sync finished. Review everything fetched from the store
+        Sync finished
         {connection?.storeName || connection?.shop
-          ? ` (${connection.storeName || connection.shop})`
+          ? ` from ${connection.storeName || connection.shop}`
           : ""}
-        . Nothing new is written to your ERP until you import.
+        . New records import normally. Duplicates are listed below — pick <strong>ERP</strong> or{" "}
+        <strong>{platformLabel}</strong> for each one.
       </p>
-      <p className="wh-muted" style={{ fontSize: "0.85rem", marginTop: "-0.5rem", marginBottom: "1rem" }}>
-        “Customers fetched” is Shopify’s customer list (accounts). CRM may show more because guest
-        checkout buyers are created from orders. “Orders fetched” is staging — Order Management only
-        lists orders successfully imported into the ERP.
-      </p>
+      {platform === "daraz" ? (
+        <p className="wh-muted" style={{ fontSize: "0.85rem", marginTop: "-0.5rem", marginBottom: "1rem" }}>
+          Daraz customers usually come from orders. Map warehouses under Locations so stock imports land correctly.
+        </p>
+      ) : (
+        <p className="wh-muted" style={{ fontSize: "0.85rem", marginTop: "-0.5rem", marginBottom: "1rem" }}>
+          “Customers fetched” is Shopify’s customer list. CRM may show more because guest checkout buyers
+          are created from orders.
+        </p>
+      )}
 
       <div className="wh-dash-grid" style={{ marginBottom: "1.25rem" }}>
         <div className="wh-dash-col-3">
@@ -313,13 +441,44 @@ export default function StoreSyncPreviewModal({
           </div>
 
           {entities.product && (
-            <EntityTable title="Products" data={preview.products} columns={productCols} />
+            <DuplicateTable
+              title="Products"
+              rows={productMatches}
+              decisions={conflictDecisions.product}
+              onDecision={(id, value) => setDecision("product", id, value)}
+              onBulk={(value) => setBulk("product", productMatches, value)}
+              platformLabel={platformLabel}
+            />
           )}
           {entities.customer && (
-            <EntityTable title="Customers" data={preview.customers} columns={customerCols} />
+            <DuplicateTable
+              title="Customers"
+              rows={customerMatches}
+              decisions={conflictDecisions.customer}
+              onDecision={(id, value) => setDecision("customer", id, value)}
+              onBulk={(value) => setBulk("customer", customerMatches, value)}
+              platformLabel={platformLabel}
+            />
           )}
           {entities.order && (
-            <EntityTable title="Orders" data={preview.orders} columns={orderCols} />
+            <DuplicateTable
+              title="Orders"
+              rows={orderMatches}
+              decisions={conflictDecisions.order}
+              onDecision={(id, value) => setDecision("order", id, value)}
+              onBulk={(value) => setBulk("order", orderMatches, value)}
+              platformLabel={platformLabel}
+            />
+          )}
+
+          {entities.product && (
+            <EntityTable title="Products (new / already linked)" data={preview.products} columns={productCols} actions={readyActions} />
+          )}
+          {entities.customer && (
+            <EntityTable title="Customers (new / already linked)" data={preview.customers} columns={customerCols} actions={readyActions} />
+          )}
+          {entities.order && (
+            <EntityTable title="Orders (new / already linked)" data={preview.orders} columns={orderCols} actions={readyActions} />
           )}
 
           {!preview.hasPendingImport && (

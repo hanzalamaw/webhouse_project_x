@@ -279,11 +279,139 @@ export const tenantPortalService = {
   async listAlerts(tenantId, query) {
     const { page, limit, offset } = parsePagination(query);
     const { rows, total } = await activityAlertRepository.findByTenant(tenantId, { limit, offset });
-    return paginatedResponse(rows, total, page, limit);
+    const mapped = rows.map((row) => {
+      let meta = null;
+      if (row.meta_json) {
+        try {
+          meta = typeof row.meta_json === "string" ? JSON.parse(row.meta_json) : row.meta_json;
+        } catch {
+          meta = null;
+        }
+      }
+      return { ...row, meta };
+    });
+    return paginatedResponse(mapped, total, page, limit);
   },
 
   async markAlertRead(tenantId, alertId) {
     return activityAlertRepository.markRead(tenantId, alertId);
+  },
+
+  async getAlert(tenantId, alertId) {
+    const row = await activityAlertRepository.findById(tenantId, alertId);
+    if (!row) return null;
+    let meta = null;
+    if (row.meta_json) {
+      try {
+        meta = typeof row.meta_json === "string" ? JSON.parse(row.meta_json) : row.meta_json;
+      } catch {
+        meta = null;
+      }
+    }
+    return { ...row, meta };
+  },
+
+  /**
+   * Resolve an ecom_duplicate alert: keep ERP (rely) or keep store (update).
+   */
+  async resolveEcomDuplicateAlert(tenantId, alertId, action) {
+    const choice = action === "update" || action === "replace" ? "update" : "rely";
+    const alert = await this.getAlert(tenantId, alertId);
+    if (!alert) {
+      const err = new Error("Alert not found");
+      err.status = 404;
+      throw err;
+    }
+    if (alert.alert_type !== "ecom_duplicate" || alert.meta?.kind !== "ecom_duplicate") {
+      const err = new Error("This alert is not a sync duplicate");
+      err.status = 400;
+      throw err;
+    }
+    const meta = alert.meta;
+    const storeId = Number(meta.storeId);
+    const entityType = meta.entityType;
+    const externalId = String(meta.externalId || "");
+    const platform = meta.platform || "shopify";
+    if (!storeId || !entityType || !externalId) {
+      const err = new Error("Alert is missing sync details");
+      err.status = 400;
+      throw err;
+    }
+
+    const {
+      importNormalizedProduct,
+      importNormalizedCustomer,
+      importNormalizedOrder,
+    } = await import("./ecommerce/ecomImport.js");
+    const { getSyncedRecordByExternalId, getStoreById } = await import("../repositories/ecommerceRepository.js");
+
+    const store = await getStoreById(storeId, tenantId);
+    if (!store?.access_token) {
+      const err = new Error("Store is disconnected — reconnect before resolving this duplicate");
+      err.status = 409;
+      throw err;
+    }
+
+    const staged = await getSyncedRecordByExternalId(storeId, tenantId, entityType, externalId);
+    let normalized = staged?.normalized || null;
+    if (!normalized && staged?.normalized_json) {
+      try {
+        normalized = JSON.parse(staged.normalized_json);
+      } catch {
+        normalized = null;
+      }
+    }
+    if (!normalized) {
+      const err = new Error("Staged store record not found — re-sync the store, then try again");
+      err.status = 404;
+      throw err;
+    }
+
+    const decisions = { [entityType]: { [externalId]: choice } };
+    let result;
+    if (entityType === "product") {
+      result = await importNormalizedProduct(tenantId, normalized, {
+        storeId,
+        platform,
+        allowUpdate: true,
+        conflictDecisions: decisions,
+        defaultConflictAction: choice,
+      });
+    } else if (entityType === "customer") {
+      result = await importNormalizedCustomer(tenantId, normalized, {
+        storeId,
+        platform,
+        conflictDecisions: decisions,
+        defaultConflictAction: choice,
+      });
+    } else if (entityType === "order") {
+      result = await importNormalizedOrder(tenantId, normalized, {
+        storeId,
+        platform,
+        conflictDecisions: decisions,
+        defaultConflictAction: choice,
+      });
+    } else {
+      const err = new Error(`Unsupported entity type: ${entityType}`);
+      err.status = 400;
+      throw err;
+    }
+
+    if (!result?.ok) {
+      const err = new Error(result?.reason || result?.why || "Could not apply your choice");
+      err.status = 400;
+      throw err;
+    }
+
+    await activityAlertRepository.markRead(tenantId, alertId);
+    return {
+      ok: true,
+      choice,
+      platformLabel: platform === "daraz" ? "Daraz" : "Shopify",
+      action: result.action,
+      entityType,
+      externalId,
+    };
   },
 
   async getSubscriptionBilling(tenantId) {

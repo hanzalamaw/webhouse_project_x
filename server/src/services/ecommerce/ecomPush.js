@@ -58,19 +58,20 @@ import {
   shopifyHardDeleteDelayLabel,
   shopifyPendingDeleteNote,
 } from "../../utils/shopifyDeferredDelete.js";
+import { darazPendingDeleteNote } from "../../utils/marketplaceDeferredDelete.js";
 
 function mysqlDateTimeFromMs(msFromNow) {
   return new Date(Date.now() + msFromNow).toISOString().slice(0, 19).replace("T", " ");
 }
 
-function logDeferredDeleteScheduled(entityType, internalId, externalId) {
+function logDeferredDeleteScheduled(entityType, internalId, externalId, platform = "shopify") {
   console.log(
-    `[shopify-deferred-delete] delete request made for ${entityType}:${internalId} `
-    + `(shopify:${externalId}) — will delete after ${shopifyHardDeleteDelayLabel()}`,
+    `[${platform}-deferred-delete] delete request made for ${entityType}:${internalId} `
+    + `(${platform}:${externalId}) — will delete after ${shopifyHardDeleteDelayLabel()}`,
   );
 }
 
-async function scheduleShopifyHardDelete({
+async function scheduleMarketplaceHardDelete({
   tenantId,
   store,
   entityType,
@@ -78,6 +79,7 @@ async function scheduleShopifyHardDelete({
   internalId,
   phase1Action,
   note,
+  platform = "shopify",
 }) {
   const deleteAfter = mysqlDateTimeFromMs(SHOPIFY_HARD_DELETE_DELAY_MS);
   await schedulePendingShopifyDelete({
@@ -89,14 +91,20 @@ async function scheduleShopifyHardDelete({
     deleteAfter,
     phase1Action,
     note,
+    platform,
   });
-  logDeferredDeleteScheduled(entityType, internalId, externalId);
+  logDeferredDeleteScheduled(entityType, internalId, externalId, platform);
   return {
     scheduled: true,
     deleteAfter,
     delayMs: SHOPIFY_HARD_DELETE_DELAY_MS,
     delayLabel: shopifyHardDeleteDelayLabel(),
   };
+}
+
+/** @deprecated Use scheduleMarketplaceHardDelete — kept name for Shopify call sites. */
+async function scheduleShopifyHardDelete(args) {
+  return scheduleMarketplaceHardDelete({ ...args, platform: args.platform || "shopify" });
 }
 
 async function loadStoreForLink(tenantId, link) {
@@ -1046,7 +1054,7 @@ export async function syncVariantInventoryToDaraz(tenantId, variantId) {
   return result;
 }
 
-/** Deactivate a linked product on Daraz and remove the entity link. */
+/** Phase 1: deactivate on Daraz now; schedule hard-remove in 7 days. Keep entity link until then. */
 export async function deleteLinkedProductFromDaraz(tenantId, productId) {
   const link = await getEntityLinkByInternalId(tenantId, "product", productId, "daraz");
   if (!link) return { ok: true, skipped: true, reason: "not_linked" };
@@ -1054,10 +1062,23 @@ export async function deleteLinkedProductFromDaraz(tenantId, productId) {
   const store = await loadStoreForLink(tenantId, link);
   if (!store) return { ok: false, skipped: true, reason: "store_disconnected" };
 
+  const note = darazPendingDeleteNote("product");
   const result = await deactivateProductInDaraz(store, link.external_id);
-  if (result.ok) {
-    await softDeleteEntityLinkByInternalId(tenantId, "product", productId, "daraz");
-    await logDarazPushResult(store.id, tenantId, "product", link.external_id, result);
-  }
-  return result;
+  await logDarazPushResult(store.id, tenantId, "product", link.external_id, {
+    ...result,
+    darazNote: note,
+  });
+  if (!result.ok) return result;
+
+  const schedule = await scheduleMarketplaceHardDelete({
+    tenantId,
+    store,
+    entityType: "product",
+    externalId: link.external_id,
+    internalId: productId,
+    phase1Action: result.action,
+    note,
+    platform: "daraz",
+  });
+  return { ...result, ...schedule, darazNote: note };
 }

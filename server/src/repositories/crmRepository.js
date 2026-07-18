@@ -532,9 +532,10 @@ export const crmRepository = {
   async findCustomerByPhoneOrEmail(tenantId, phone, email) {
     const p = String(phone || "").trim();
     const e = String(email || "").trim().toLowerCase();
+    const select = `SELECT id, source, customer_name, phone, email FROM crm_customers`;
     if (p) {
       const [rows] = await readDb.query(
-        `SELECT id FROM crm_customers
+        `${select}
          WHERE tenant_id = ? AND deleted_at IS NULL AND phone = ? LIMIT 1`,
         [tenantId, p]
       );
@@ -544,7 +545,7 @@ export const crmRepository = {
       if (digits.length >= 7) {
         const suffix = digits.slice(-10);
         const [fuzzy] = await readDb.query(
-          `SELECT id FROM crm_customers
+          `${select}
            WHERE tenant_id = ? AND deleted_at IS NULL
              AND phone IS NOT NULL AND phone != ''
              AND RIGHT(
@@ -559,7 +560,7 @@ export const crmRepository = {
     }
     if (e) {
       const [rows] = await readDb.query(
-        `SELECT id FROM crm_customers
+        `${select}
          WHERE tenant_id = ? AND deleted_at IS NULL AND LOWER(email) = ? LIMIT 1`,
         [tenantId, e]
       );

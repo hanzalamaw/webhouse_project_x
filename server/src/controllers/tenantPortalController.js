@@ -174,6 +174,30 @@ export const tenantPortalController = {
     }
   },
 
+  async alertGet(req, res) {
+    try {
+      const alert = await tenantPortalService.getAlert(req.tenantId, Number(req.params.id));
+      if (!alert) return res.status(404).json({ message: "Alert not found" });
+      res.json({ data: alert });
+    } catch (e) {
+      res.status(500).json({ message: e.message });
+    }
+  },
+
+  async alertResolveDuplicate(req, res) {
+    try {
+      const action = req.body?.action === "update" || req.body?.action === "replace" ? "update" : "rely";
+      const result = await tenantPortalService.resolveEcomDuplicateAlert(
+        req.tenantId,
+        Number(req.params.id),
+        action,
+      );
+      res.json({ success: true, ...result });
+    } catch (e) {
+      res.status(e.status || 500).json({ message: e.message });
+    }
+  },
+
   async subscriptionBilling(req, res) {
     try {
       res.json({ data: await tenantPortalService.getSubscriptionBilling(req.tenantId) });

@@ -8,7 +8,7 @@
  * - ecom_oauth_pending_states, ecom_oauth_sessions (TTL cleanup in oauthState.js)
  * - inventory_variant_attributes, inventory_variant_attribute_values (replaced on variant save)
  *
- * Shopify remote hard-delete uses the same 7-day policy via ecom_pending_shopify_deletes
+ * Shopify/Daraz remote hard-delete uses the same 7-day policy via ecom_pending_shopify_deletes
  * (processed once daily with this purge — not a separate poll loop).
  */
 

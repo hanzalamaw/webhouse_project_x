@@ -54,7 +54,7 @@ function scheduleDailyRetention(run) {
   const arm = () => {
     const delay = msUntilNextLocalMidnight();
     const when = new Date(Date.now() + delay).toLocaleString();
-    console.log(`[retention] next daily purge at ${when} (ERP ${PURGE_AFTER_DAYS}d / Shopify ${SHOPIFY_PENDING_DELETE_DAYS}d)`);
+    console.log(`[retention] next daily purge at ${when} (ERP ${PURGE_AFTER_DAYS}d / marketplace ${SHOPIFY_PENDING_DELETE_DAYS}d)`);
     setTimeout(async () => {
       try {
         await run();
@@ -117,11 +117,11 @@ const startServer = async () => {
       const result = await processPendingShopifyDeletes();
       if (result.processed > 0) {
         console.log(
-          `[shopify-deferred-delete] processed=${result.processed} succeeded=${result.succeeded} failed=${result.failed}`,
+          `[marketplace-deferred-delete] processed=${result.processed} succeeded=${result.succeeded} failed=${result.failed}`,
         );
       }
     } catch (err) {
-      console.error("[shopify-deferred-delete] failed:", err?.message || err);
+      console.error("[marketplace-deferred-delete] failed:", err?.message || err);
     }
   };
 

@@ -122,6 +122,7 @@ export const inventoryController = {
         success: true,
         message: result.message || "Product deleted.",
         shopifySync: result.shopifySync || null,
+        darazSync: result.darazSync || null,
       });
     } catch (e) {
       res.status(e.status || 400).json({ message: e.message });

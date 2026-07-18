@@ -85,18 +85,26 @@ export function normalizeDarazProduct(product) {
   const inventoryLevels = extractMultiWarehouseInventories(firstSku);
   const attrs = product.attributes || product.Attributes || {};
   const brand = attrs.brand || attrs.Brand || product.brand || product.Brand || null;
+  const rawStatus = String(product.status || firstSku.Status || firstSku.status || "").toLowerCase();
+  const inactiveStatuses = new Set(["inactive", "deleted", "suspended", "rejected", "delisted"]);
+  const skusInactive = skusList.length > 0 && skusList.every((sku) => {
+    const st = String(sku.Status || sku.status || "").toLowerCase();
+    return st && inactiveStatuses.has(st);
+  });
+  const status = inactiveStatuses.has(rawStatus) || skusInactive ? "inactive" : (rawStatus || "active");
 
   return {
     erpProductId: erpId("daraz", String(product.item_id || product.product_id)),
     externalId: String(product.item_id || product.product_id || ""),
     platform: "daraz",
     sku: firstSku.SellerSku || firstSku.seller_sku || product.seller_sku || product.shop_sku || String(product.item_id || ""),
-    name: product.name || attrs.name || "",
-    description: attrs.description || product.description || "",
+    // PK: name_en is primary Product Name; `name` is often secondary/locale (e.g. Urdu).
+    name: attrs.name_en || product.name || attrs.name || "",
+    description: attrs.description_en || attrs.description || product.description || "",
     brand: brand != null && String(brand).trim() ? String(brand).trim() : null,
     price: parseFloat(firstSku.price ?? product.price ?? product.special_price ?? 0),
     currency: "PKR",
-    status: product.status || firstSku.Status || "unknown",
+    status,
     stock: firstSku.quantity ?? product.quantity ?? product.available ?? null,
     inventoryLevels,
     primaryCategory: product.primary_category || product.PrimaryCategory || attrs.primary_category || null,

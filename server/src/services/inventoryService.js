@@ -661,15 +661,33 @@ export const inventoryService = {
       throw error;
     }
     const darazSync = await deleteLinkedProductFromDaraz(tenantId, id);
-    requireDarazSyncIfLinked(darazSync, "Product");
+    try {
+      requireDarazSyncIfLinked(darazSync, "Product");
+    } catch (err) {
+      const detail = darazSync?.error || err.message || darazSync?.reason;
+      const error = new Error(
+        `Product was not deleted in ERP. Daraz blocked the delete: ${detail}`,
+      );
+      error.status = 409;
+      throw error;
+    }
     const deleted = await inventoryRepository.softDeleteProduct(tenantId, id);
+    const parts = ["Product deleted from ERP."];
+    if (!shopifySync?.skipped) {
+      parts.push(
+        `Shopify was set to draft with a note — permanent Shopify delete in ${shopifySync.delayLabel || "7 days"}.`,
+      );
+    }
+    if (!darazSync?.skipped) {
+      parts.push(
+        `Daraz was set to inactive — permanent Daraz delete in ${darazSync.delayLabel || "7 days"}.`,
+      );
+    }
     return {
       ok: Boolean(deleted),
       shopifySync,
       darazSync,
-      message: shopifySync?.skipped
-        ? "Product deleted."
-        : `Product deleted from ERP. Shopify was set to draft with a note — permanent Shopify delete in ${shopifySync.delayLabel || "7 days"}.`,
+      message: parts.join(" "),
     };
   },
 

@@ -239,8 +239,11 @@ function buildCreateProductXml({
   const description = product.description || product.product_name || "";
   const shortDesc = shortDescription || description.slice(0, 250);
   const brandName = String(brand || "").trim() || "No Brand";
+  // PK Seller Center: name_en = primary Product Name; name = secondary (e.g. Urdu).
+  const title = String(product.product_name || "").trim();
   const attrParts = [
-    xmlTag("name", product.product_name),
+    xmlTag("name_en", title),
+    xmlTag("name", title),
     xmlTag("description", description),
     xmlTag("short_description", shortDesc),
     // Brand name only — brand_id must be a numeric Daraz brand id, not the name string.
@@ -258,20 +261,22 @@ function buildCreateProductXml({
 }
 
 /** Attributes + SKU identity only — never send price here (use price_quantity). */
-function buildUpdateProductXml({ itemId, product, matchedSkus }) {
+function buildUpdateProductXml({ itemId, product, matchedSkus, skuStatus = null }) {
   const skuXml = matchedSkus.map(({ erpVariant, darazSku }) => [
     "<Sku>",
     darazSku.skuId ? xmlTag("SkuId", darazSku.skuId) : "",
     xmlTag("SellerSku", erpVariant.sku || darazSku.sellerSku),
+    skuStatus ? xmlTag("Status", skuStatus) : "",
     "</Sku>",
   ].join("")).join("");
 
+  // PK Seller Center: name_en is the primary Product Name field; `name` is secondary/locale.
   const parts = [
     '<?xml version="1.0" encoding="UTF-8"?>',
     "<Request><Product>",
     xmlTag("ItemId", itemId),
     "<Attributes>",
-    xmlTag("name", product.product_name),
+    xmlTag("name_en", product.product_name),
   ];
   if (product.description != null) {
     parts.push(xmlTag("description", product.description || product.product_name || ""));
@@ -280,6 +285,40 @@ function buildUpdateProductXml({ itemId, product, matchedSkus }) {
   if (skuXml) parts.push(`<Skus>${skuXml}</Skus>`);
   parts.push("</Product></Request>");
   return parts.join("");
+}
+
+function buildActivateSkuStatusBody(itemId, skus = [], status = "active") {
+  const skuRows = (skus || [])
+    .filter((s) => s.skuId || s.sellerSku)
+    .map((s) => {
+      const row = { Status: status };
+      if (s.skuId) row.SkuId = Number(s.skuId) || s.skuId;
+      if (s.sellerSku) row.SellerSku = s.sellerSku;
+      return row;
+    });
+  const product = { ItemId: Number(itemId) || String(itemId) };
+  if (skuRows.length) product.Skus = { Sku: skuRows };
+  return JSON.stringify({ Request: { Product: product } });
+}
+
+function buildActivateSkuStatusXml(itemId, skus = [], status = "active") {
+  const skuXml = (skus || [])
+    .filter((s) => s.skuId || s.sellerSku)
+    .map((s) => [
+      "<Sku>",
+      s.skuId ? xmlTag("SkuId", s.skuId) : "",
+      s.sellerSku ? xmlTag("SellerSku", s.sellerSku) : "",
+      xmlTag("Status", status),
+      "</Sku>",
+    ].join(""))
+    .join("");
+  return [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    "<Request><Product>",
+    xmlTag("ItemId", itemId),
+    skuXml ? `<Skus>${skuXml}</Skus>` : "",
+    "</Product></Request>",
+  ].join("");
 }
 
 function buildPriceQuantityXml({ itemId, rows, apiBase }) {
@@ -436,6 +475,23 @@ export async function createProductInDaraz(store, product, erpVariants = [], opt
       return { ok: false, error: "Daraz did not return a product item id" };
     }
 
+    if (String(product.status || "").toLowerCase() === "inactive") {
+      const deactivated = await deactivateProductInDaraz(store, itemId);
+      if (!deactivated.ok) {
+        return {
+          ok: false,
+          error: `Product created on Daraz but could not be set inactive: ${deactivated.error}`,
+          externalId: String(itemId),
+        };
+      }
+      return {
+        ok: true,
+        externalId: String(itemId),
+        action: "created_inactive",
+        primaryCategory,
+      };
+    }
+
     return {
       ok: true,
       externalId: String(itemId),
@@ -494,14 +550,37 @@ export async function pushProductToDaraz(
       };
     }
 
-    const productChanged = !beforeProduct
+    const statusChanged = !beforeProduct
+      || forceFullPush
+      || erpFieldChanged(beforeProduct, product, "status");
+    const erpInactive = String(product.status || "").toLowerCase() === "inactive";
+    const attrsChanged = !beforeProduct
       || forceFullPush
       || erpFieldChanged(beforeProduct, product, "product_name")
-      || erpFieldChanged(beforeProduct, product, "description")
-      || erpFieldChanged(beforeProduct, product, "status");
+      || erpFieldChanged(beforeProduct, product, "description");
+
+    // Status first — Daraz rejects most updates while inactive, and activate is a separate path.
+    if (statusChanged || erpInactive) {
+      if (erpInactive) {
+        const deactivated = await deactivateProductInDaraz(store, externalId);
+        if (!deactivated.ok) {
+          return { ok: false, error: `Could not set Daraz product inactive: ${deactivated.error}` };
+        }
+        // Skip attribute/price pushes while inactive — Seller Center keeps the last active data.
+        if (!attrsChanged && !forceFullPush) {
+          return { ok: true, externalId: String(externalId), action: "deactivated" };
+        }
+      } else if (statusChanged) {
+        const activated = await activateProductInDaraz(store, externalId, { skus: darazSkus });
+        if (!activated.ok) {
+          return { ok: false, error: `Could not set Daraz product active: ${activated.error}` };
+        }
+      }
+    }
 
     // Attributes only — price goes through price_quantity to avoid 4104 on /product/update.
-    if (productChanged) {
+    // Prefer updating while active; if still inactive after failed activate, skip.
+    if (!erpInactive && attrsChanged) {
       const payload = buildUpdateProductXml({
         itemId: externalId,
         product,
@@ -510,13 +589,15 @@ export async function pushProductToDaraz(
       await postDarazPayload(store, "/product/update", payload);
     }
 
-    const needPriceQty = matched.length > 0 && priceQtyNeedsPush(
-      matched,
-      stockByVariantId,
-      warehouseQtyByVariantId,
-      beforeProduct,
-      forceFullPush,
-    );
+    const needPriceQty = !erpInactive
+      && matched.length > 0
+      && priceQtyNeedsPush(
+        matched,
+        stockByVariantId,
+        warehouseQtyByVariantId,
+        beforeProduct,
+        forceFullPush,
+      );
 
     if (needPriceQty) {
       const priceQtyRows = matched.map(({ erpVariant, darazSku }) => {
@@ -541,19 +622,11 @@ export async function pushProductToDaraz(
       }
     }
 
-    if (product.status === "inactive") {
-      try {
-        await postDarazPayload(
-          store,
-          "/product/deactivate",
-          `<?xml version="1.0" encoding="UTF-8"?><Request><Product><ItemId>${escapeXml(externalId)}</ItemId></Product></Request>`,
-        );
-      } catch {
-        // Some marketplaces reject deactivate; update already pushed status fields when supported.
-      }
-    }
-
-    return { ok: true, externalId: String(externalId), action: "updated" };
+    return {
+      ok: true,
+      externalId: String(externalId),
+      action: erpInactive ? "deactivated" : (statusChanged ? "activated_updated" : "updated"),
+    };
   } catch (error) {
     return { ok: false, error: formatDarazError(error) };
   }
@@ -573,17 +646,210 @@ export async function pushProductPriceQuantityToDaraz(store, { itemId, rows }) {
   }
 }
 
-export async function deactivateProductInDaraz(store, externalId) {
-  try {
-    await postDarazPayload(
-      store,
-      "/product/deactivate",
-      `<?xml version="1.0" encoding="UTF-8"?><Request><Product><ItemId>${escapeXml(externalId)}</ItemId></Product></Request>`,
-    );
-    return { ok: true, externalId: String(externalId), action: "deactivated" };
-  } catch (error) {
-    return { ok: false, error: formatDarazError(error) };
+function isDarazAlreadyGone(error) {
+  const text = String(error?.message || formatDarazError(error) || "").toLowerCase();
+  const code = String(error?.darazCode || error?.response?.data?.code || "");
+  return (
+    /not\s*found|does\s*not\s*exist|already\s*(inactive|deactivated|deleted)|item.?id.?invalid|no\s*product/i.test(text)
+    || ["404", "NOT_FOUND", "E100", "100"].includes(code)
+  );
+}
+
+function buildDeactivateRequestBody(itemId, skuIds = []) {
+  const product = { ItemId: Number(itemId) || String(itemId) };
+  const ids = (skuIds || []).map((id) => Number(id) || String(id)).filter(Boolean);
+  if (ids.length) {
+    product.Skus = { SkuId: ids };
   }
+  return JSON.stringify({ Request: { Product: product } });
+}
+
+function buildDeactivateXml(itemId, skuIds = []) {
+  const skuXml = (skuIds || [])
+    .filter(Boolean)
+    .map((id) => xmlTag("SkuId", id))
+    .join("");
+  return [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    "<Request><Product>",
+    xmlTag("ItemId", itemId),
+    skuXml ? `<Skus>${skuXml}</Skus>` : "",
+    "</Product></Request>",
+  ].join("");
+}
+
+/**
+ * Deactivate a Daraz product. Open Platform expects `apiRequestBody` (JSON);
+ * older seller-center style used `payload` XML — try both.
+ */
+export async function deactivateProductInDaraz(store, externalId) {
+  const itemId = String(externalId || "").trim();
+  if (!itemId) return { ok: false, error: "Missing Daraz item id" };
+
+  let skuIds = [];
+  try {
+    const raw = await fetchDarazProductRaw(store, itemId);
+    const status = String(raw?.status || raw?.Status || "").toLowerCase();
+    const skus = extractDarazSkus(raw);
+    skuIds = skus.map((s) => s.skuId).filter(Boolean);
+    const allSkusInactive = skus.length > 0 && skus.every((s) => {
+      const st = String(s.status || "").toLowerCase();
+      return ["inactive", "deleted", "rejected", "suspended"].includes(st);
+    });
+    if (
+      ["inactive", "deleted", "rejected", "suspended"].includes(status)
+      || allSkusInactive
+    ) {
+      return { ok: true, externalId: itemId, action: "already_inactive" };
+    }
+  } catch (error) {
+    if (isDarazAlreadyGone(error)) {
+      return { ok: true, externalId: itemId, action: "already_gone" };
+    }
+    // Continue — deactivate may still succeed without a product fetch.
+  }
+
+  const creds = darazCredentialsForStore(store);
+  const apiBase = apiBaseFromStore(store);
+  const attempts = [
+    { apiRequestBody: buildDeactivateRequestBody(itemId, skuIds) },
+    { apiRequestBody: buildDeactivateRequestBody(itemId, []) },
+    { payload: buildDeactivateXml(itemId, skuIds) },
+    { payload: buildDeactivateXml(itemId, []) },
+  ];
+
+  let lastError = null;
+  for (const params of attempts) {
+    try {
+      const data = await darazApiPost(apiBase, "/product/deactivate", creds, params);
+      unwrapDarazResponse(data);
+      return { ok: true, externalId: itemId, action: "deactivated" };
+    } catch (error) {
+      lastError = error;
+      if (isDarazAlreadyGone(error)) {
+        return { ok: true, externalId: itemId, action: "already_gone" };
+      }
+    }
+  }
+
+  return { ok: false, error: formatDarazError(lastError) };
+}
+
+/**
+ * Reactivate a Daraz product/SKUs via /product/update Status=active.
+ * There is no dedicated ActivateProduct API on Daraz Open Platform.
+ */
+export async function activateProductInDaraz(store, externalId, { skus: skusHint = null } = {}) {
+  const itemId = String(externalId || "").trim();
+  if (!itemId) return { ok: false, error: "Missing Daraz item id" };
+
+  let skus = Array.isArray(skusHint) ? skusHint : [];
+  try {
+    const raw = await fetchDarazProductRaw(store, itemId);
+    const status = String(raw?.status || raw?.Status || "").toLowerCase();
+    const extracted = extractDarazSkus(raw);
+    if (extracted.length) skus = extracted;
+    const allActive = extracted.length
+      ? extracted.every((s) => String(s.status || "").toLowerCase() === "active")
+      : status === "active" || status === "live";
+    if (allActive && (status === "active" || status === "live" || !status || status === "unknown")) {
+      // Item may already be sellable; still push Status=active to clear SKU-level inactive.
+      const anyInactiveSku = extracted.some((s) => {
+        const st = String(s.status || "").toLowerCase();
+        return st && st !== "active";
+      });
+      if (!anyInactiveSku && (status === "active" || status === "live")) {
+        return { ok: true, externalId: itemId, action: "already_active" };
+      }
+    }
+  } catch (error) {
+    if (isDarazAlreadyGone(error)) {
+      return { ok: false, error: formatDarazError(error) };
+    }
+  }
+
+  if (!skus.length) {
+    return { ok: false, error: "No Daraz SKUs found to activate" };
+  }
+
+  const creds = darazCredentialsForStore(store);
+  const apiBase = apiBaseFromStore(store);
+  const attempts = [
+    { apiRequestBody: buildActivateSkuStatusBody(itemId, skus, "active") },
+    { apiRequestBody: buildActivateSkuStatusBody(itemId, skus, "Active") },
+    { payload: buildActivateSkuStatusXml(itemId, skus, "active") },
+    { payload: buildActivateSkuStatusXml(itemId, skus, "Active") },
+  ];
+
+  let lastError = null;
+  for (const params of attempts) {
+    try {
+      const data = await darazApiPost(apiBase, "/product/update", creds, params);
+      unwrapDarazResponse(data);
+      return { ok: true, externalId: itemId, action: "activated" };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  return { ok: false, error: formatDarazError(lastError) };
+}
+
+/**
+ * Permanently remove a Daraz product (or its SKUs) via /product/remove.
+ * Prefers sku_id_list (SkuId_{itemId}_{skuId}); falls back to seller_sku_list.
+ */
+export async function removeProductFromDaraz(store, externalId) {
+  const itemId = String(externalId || "").trim();
+  if (!itemId) return { ok: false, error: "Missing Daraz item id" };
+
+  let skuIds = [];
+  let sellerSkus = [];
+  try {
+    const raw = await fetchDarazProductRaw(store, itemId);
+    const skus = extractDarazSkus(raw);
+    skuIds = skus.map((s) => s.skuId).filter(Boolean);
+    sellerSkus = skus.map((s) => s.sellerSku).filter(Boolean);
+  } catch (error) {
+    if (isDarazAlreadyGone(error)) {
+      return { ok: true, externalId: itemId, action: "already_gone" };
+    }
+  }
+
+  const creds = darazCredentialsForStore(store);
+  const apiBase = apiBaseFromStore(store);
+  const skuIdList = skuIds.map((skuId) => `SkuId_${itemId}_${skuId}`);
+  const attempts = [];
+  if (skuIdList.length) {
+    attempts.push({ sku_id_list: JSON.stringify(skuIdList) });
+  }
+  if (sellerSkus.length) {
+    attempts.push({ seller_sku_list: JSON.stringify(sellerSkus) });
+  }
+  // Last resort: deactivate again if remove has nothing to target / already gone.
+  if (!attempts.length) {
+    const deactivated = await deactivateProductInDaraz(store, itemId);
+    if (deactivated.ok) {
+      return { ok: true, externalId: itemId, action: "deactivated_no_skus" };
+    }
+    return { ok: false, error: deactivated.error || "No Daraz SKUs found to remove" };
+  }
+
+  let lastError = null;
+  for (const params of attempts) {
+    try {
+      const data = await darazApiPost(apiBase, "/product/remove", creds, params);
+      unwrapDarazResponse(data);
+      return { ok: true, externalId: itemId, action: "removed" };
+    } catch (error) {
+      lastError = error;
+      if (isDarazAlreadyGone(error)) {
+        return { ok: true, externalId: itemId, action: "already_gone" };
+      }
+    }
+  }
+
+  return { ok: false, error: formatDarazError(lastError) };
 }
 
 export {

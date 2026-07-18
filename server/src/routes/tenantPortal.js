@@ -72,7 +72,16 @@ export function registerTenantPortalRoutes(app, verifyToken) {
 
   app.get("/api/tenant/activity-alerts", ...guard, view, tenantPortalController.alertsList);
 
+  app.get("/api/tenant/activity-alerts/:id", ...guard, view, tenantPortalController.alertGet);
+
   app.patch("/api/tenant/activity-alerts/:id/read", ...guard, edit, tenantPortalController.alertsMarkRead);
+
+  app.post(
+    "/api/tenant/activity-alerts/:id/resolve-duplicate",
+    ...guard,
+    edit,
+    tenantPortalController.alertResolveDuplicate,
+  );
 
 
 

@@ -266,6 +266,17 @@ function shopifyVariantsForImport(normalized) {
   if (Array.isArray(normalized.variants) && normalized.variants.length) {
     return normalized.variants;
   }
+  // Daraz (and similar) stage multi-SKU under `skus`, not `variants`.
+  if (Array.isArray(normalized.skus) && normalized.skus.length) {
+    return normalized.skus.map((s, idx) => ({
+      externalId: s.skuId || `${normalized.externalId}-${idx + 1}`,
+      sku: String(s.sellerSku || s.sku || "").trim() || resolveSku(normalized),
+      variant_name: s.sellerSku || normalized.name || "Default",
+      price: s.price ?? normalized.price ?? 0,
+      stock: s.quantity ?? normalized.stock ?? null,
+      attributes: [],
+    }));
+  }
   return [
     {
       externalId: normalized.externalId,
@@ -278,6 +289,30 @@ function shopifyVariantsForImport(normalized) {
       attributes: [],
     },
   ];
+}
+
+/** Make SKUs unique so "Create new" can coexist with an existing ERP product. */
+function uniquifyNormalizedProductSkus(normalized, platform, externalId) {
+  const suffix = `-${String(platform || "ecom").slice(0, 6)}-${String(externalId || "").slice(-8)}`;
+  const next = { ...normalized };
+  const rewrite = (sku) => {
+    const base = String(sku || "").trim();
+    if (!base) return resolveSku({ ...normalized, platform, externalId });
+    if (base.toLowerCase().endsWith(suffix.toLowerCase())) return base.slice(0, 100);
+    return `${base}${suffix}`.slice(0, 100);
+  };
+  if (next.sku) next.sku = rewrite(next.sku);
+  if (Array.isArray(next.variants)) {
+    next.variants = next.variants.map((v) => ({ ...v, sku: rewrite(v.sku) }));
+  }
+  if (Array.isArray(next.skus)) {
+    next.skus = next.skus.map((s) => ({
+      ...s,
+      sellerSku: rewrite(s.sellerSku || s.sku),
+      sku: rewrite(s.sku || s.sellerSku),
+    }));
+  }
+  return next;
 }
 
 function resolveCostPriceFromShopify(shopifyVariant, fallback = 0) {
@@ -679,22 +714,61 @@ async function classifyProduct(tenantId, storeId, normalized) {
     const productName = product?.product_name || existing.product_name || "an existing product";
 
     if (source === platform) {
-      return { action: "update", existingId: existing.product_id, variantId: existing.id };
+      const issue = formatImportIssue({
+        why: `SKU "${sku}" already matches "${productName}" in ERP (from ${platform}).`,
+        fixInErp:
+          "Choose Rely to link this store product to the existing ERP product without overwriting it, "
+          + "Update to overwrite ERP with store data, or Create new to import as a separate product (SKU will be uniquified).",
+        fixInStore: "Or change the store SKU if these are different products.",
+      });
+      return {
+        action: "conflict",
+        matchType: "sku_match",
+        reason: issue.reason,
+        why: issue.why,
+        fix: issue.fix,
+        existingId: existing.product_id,
+        variantId: existing.id,
+        conflictWith: productName,
+        conflictSource: source,
+      };
     }
     if (source === "manual" || !source) {
       const issue = formatImportIssue({
         why: `SKU "${sku}" is already used by "${productName}" in this tenant’s Inventory (manual product).`,
-        fixInErp: `Go to Inventory → Products, find "${productName}" (SKU ${sku}). Delete it, soft-delete it, or change its SKU — then import again. (Other tenants can still use the same SKU.)`,
+        fixInErp:
+          "Choose Rely to keep the ERP product and link it, Update to overwrite with store data, "
+          + "or Create new to import as a separate product.",
         fixInStore: `Or change this product’s SKU in the store to something unique for this tenant, then Re-sync and import.`,
       });
-      return { action: "skip", reason: issue.reason, why: issue.why, fix: issue.fix, existingId: existing.product_id };
+      return {
+        action: "conflict",
+        matchType: "sku_match",
+        reason: issue.reason,
+        why: issue.why,
+        fix: issue.fix,
+        existingId: existing.product_id,
+        conflictWith: productName,
+        conflictSource: source || "manual",
+      };
     }
     const issue = formatImportIssue({
-      why: `SKU "${sku}" already belongs to "${productName}" from ${source} in this tenant. The same SKU can’t be owned by two different sources here.`,
-      fixInErp: `In Inventory, open "${productName}" and change/remove that SKU, or delete that product if it shouldn’t stay.`,
+      why: `SKU "${sku}" already belongs to "${productName}" from ${source} in this tenant.`,
+      fixInErp:
+        "Choose Rely to keep the ERP product and link it, Update to overwrite with this store’s data, "
+        + "or Create new to import as a separate product.",
       fixInStore: `Or change this store product’s SKU to a new unique value for this tenant, then Re-sync and import.`,
     });
-    return { action: "skip", reason: issue.reason, why: issue.why, fix: issue.fix, existingId: existing.product_id };
+    return {
+      action: "conflict",
+      matchType: "sku_match",
+      reason: issue.reason,
+      why: issue.why,
+      fix: issue.fix,
+      existingId: existing.product_id,
+      conflictWith: productName,
+      conflictSource: source,
+    };
   }
 
   return { action: "create" };
@@ -737,22 +811,26 @@ async function classifyCustomer(tenantId, storeId, normalized) {
   );
   if (!match) return { action: "create" };
 
-  const source = match.source || "manual";
-  if (source === "manual" || source === platform) {
-    return { action: "update", existingId: match.id };
-  }
+  const source = String(match.source || "manual").toLowerCase().trim() || "manual";
   const name = match.customer_name || "A customer";
   const issue = formatImportIssue({
-    why: `"${name}" already exists from ${source} with the same phone/email, so we won’t overwrite them from the store.`,
-    fixInErp: `In CRM → Customers, open "${name}". If this is the same person, you can leave them as-is (store data won’t replace ${source}). If it’s a duplicate, merge/delete the extra record or clear the conflicting phone/email.`,
-    fixInStore: `Or update the store customer’s phone/email so it doesn’t clash, then Re-sync and import.`,
+    why: source === platform
+      ? `"${name}" already exists in CRM from ${platform} with the same phone/email.`
+      : `"${name}" already exists in CRM (${source || "manual"}) with the same phone/email.`,
+    fixInErp:
+      "Choose Rely to keep the ERP customer and link it, Update to overwrite with store data, "
+      + "or Create new to import as a separate customer.",
+    fixInStore: "Or update the store customer’s phone/email so it doesn’t clash, then Re-sync and import.",
   });
   return {
-    action: "skip",
+    action: "conflict",
+    matchType: "identity_match",
     reason: issue.reason,
     why: issue.why,
     fix: issue.fix,
     existingId: match.id,
+    conflictWith: name,
+    conflictSource: source || "manual",
   };
 }
 
@@ -773,7 +851,22 @@ async function classifyOrder(storeId, tenantId, normalized, platform = "shopify"
 
   const byNo = await orderRepository.findOrderByOrderNoIncludingDeleted(tenantId, orderNo);
   if (byNo && !byNo.deleted_at) {
-    return { action: "update", existingId: byNo.id };
+    const issue = formatImportIssue({
+      why: `Order ${orderNo} already exists in ERP (e.g. from a previous sync or reconnect).`,
+      fixInErp:
+        "Choose Rely to keep the ERP order and link it, Update to overwrite with store data, "
+        + "or Create new is not available for duplicate order numbers — use Rely or Update.",
+    });
+    return {
+      action: "conflict",
+      matchType: "order_match",
+      reason: issue.reason,
+      why: issue.why,
+      fix: issue.fix,
+      existingId: byNo.id,
+      conflictWith: orderNo,
+      conflictSource: source,
+    };
   }
   if (byNo?.deleted_at) {
     return { action: "revive", existingId: byNo.id };
@@ -857,8 +950,8 @@ async function buildEntityPreview(storeId, tenantId, entityType, sampleLimit = S
   const records = includeImported
     ? await getSyncedRecords(storeId, tenantId, entityType, 5000)
     : await getSyncedRecordsNeedingImport(storeId, tenantId, entityType, 5000);
-  const summary = { create: 0, update: 0, skip: 0, already_imported: 0 };
-  const samples = { create: [], update: [], skip: [], already_imported: [] };
+  const summary = { create: 0, update: 0, skip: 0, already_imported: 0, conflict: 0 };
+  const samples = { create: [], update: [], skip: [], already_imported: [], conflict: [] };
 
   for (const record of records) {
     const normalized = record.normalized;
@@ -878,6 +971,8 @@ async function buildEntityPreview(storeId, tenantId, entityType, sampleLimit = S
         ? "already_imported"
         : classification.action;
     if (action === "revive") action = "update";
+    if (!summary[action] && summary[action] !== 0) summary[action] = 0;
+    if (!samples[action]) samples[action] = [];
     summary[action] = (summary[action] || 0) + 1;
     if (samples[action]?.length < sampleLimit) {
       samples[action].push(
@@ -886,6 +981,9 @@ async function buildEntityPreview(storeId, tenantId, entityType, sampleLimit = S
           why: classification.why,
           fix: classification.fix,
           existingId: classification.existingId,
+          conflictWith: classification.conflictWith,
+          conflictSource: classification.conflictSource,
+          matchType: classification.matchType || null,
         }),
       );
     }
@@ -910,26 +1008,103 @@ export async function getImportPreview(storeId, tenantId, { full = false } = {})
     customers.summary.update +
     orders.summary.create +
     orders.summary.update;
+  const conflictTotal =
+    (products.summary.conflict || 0)
+    + (customers.summary.conflict || 0)
+    + (orders.summary.conflict || 0);
 
   return {
     products,
     customers,
     orders,
     pendingImportCount: pendingTotal,
-    hasPendingImport: pendingTotal > 0,
+    conflictCount: conflictTotal,
+    hasPendingImport: pendingTotal > 0 || conflictTotal > 0,
+  };
+}
+
+function applyConflictDecision(classification, entityType, externalId, options = {}) {
+  if (classification?.action !== "conflict") return classification;
+  const key = String(externalId || "");
+  const map = options.conflictDecisions?.[entityType] || {};
+  const rawDecision = map[key] ?? options.defaultConflictAction;
+  if (rawDecision == null || rawDecision === "") {
+    return {
+      action: "skip",
+      reason: "Matching ERP record — choose ERP or store data in Admin → Activity Alerts.",
+      why: "This store record matches something already in ERP. It was left for you to decide.",
+      fix: "Open Admin → Activity Alerts, open this duplicate alert, then keep ERP or Shopify/Daraz.",
+      existingId: classification.existingId,
+      needsDuplicateReview: true,
+    };
+  }
+  // Default aliases: keep→rely, replace→update
+  const decision = rawDecision === "keep" ? "rely" : rawDecision === "replace" ? "update" : rawDecision;
+
+  if ((decision === "update" || decision === "replace") && classification.existingId) {
+    return {
+      ...classification,
+      action: "update",
+      forceReplace: true,
+    };
+  }
+
+  if (decision === "create_new" || decision === "create") {
+    // Orders can't safely duplicate the same marketplace order number.
+    if (entityType === "order") {
+      return {
+        action: "skip",
+        reason: classification.reason || "Create new is not available for matching orders — choose Rely or Update.",
+        why: "Duplicate marketplace order numbers cannot be created as new ERP orders.",
+        fix: "Choose Rely to link the existing ERP order, or Update to overwrite it from the store.",
+        existingId: classification.existingId,
+      };
+    }
+    return {
+      ...classification,
+      action: "create",
+      forceCreate: true,
+    };
+  }
+
+  // rely / keep — link only, do not overwrite ERP fields
+  return {
+    ...classification,
+    action: "rely",
+    existingId: classification.existingId,
   };
 }
 
 export async function importNormalizedProduct(
   tenantId,
   normalized,
-  { storeId, platform, allowUpdate = true, _skuRetry = false } = {},
+  { storeId, platform, allowUpdate = true, conflictDecisions = null, defaultConflictAction = null, _skuRetry = false } = {},
 ) {
   if (!normalized?.externalId) return { ok: false, reason: "missing_external_id" };
 
-  const classification = storeId
+  let classification = storeId
     ? await classifyProduct(tenantId, storeId, normalized)
     : { action: "create" };
+  classification = applyConflictDecision(classification, "product", normalized.externalId, {
+    conflictDecisions,
+    defaultConflictAction,
+  });
+
+  if (classification.action === "rely" && classification.existingId) {
+    const source = platform || normalized.platform || "shopify";
+    if (storeId) {
+      await upsertEntityLink({
+        tenantId,
+        storeId,
+        platform: source,
+        entityType: "product",
+        externalId: normalized.externalId,
+        internalId: classification.existingId,
+      });
+      await markSyncedRecordImported(storeId, tenantId, "product", normalized.externalId);
+    }
+    return { ok: true, productId: classification.existingId, action: "rely" };
+  }
 
   if (classification.action === "already_imported" || classification.action === "revive") {
     if (classification.action === "revive") {
@@ -974,6 +1149,11 @@ export async function importNormalizedProduct(
       reason: classification.reason,
       why: classification.why,
       fix: classification.fix,
+      existingId: classification.existingId || null,
+      needsDuplicateReview: classification.needsDuplicateReview === true
+        || /Matching ERP|Activity Alerts|already exists/i.test(
+          String(classification.reason || classification.why || ""),
+        ),
     };
   }
   if (classification.action === "update" && !allowUpdate) {
@@ -986,11 +1166,14 @@ export async function importNormalizedProduct(
 
   try {
     const categoryId = await ensureMarketplaceCategory(tenantId);
-    const productName =
-      String(normalized.name || "").trim() ||
-      `${String(normalized.platform || "Marketplace")} product ${normalized.externalId}`;
-    const status = mapProductStatus(normalized.status);
     const source = platform || normalized.platform || "shopify";
+    const workingNormalized = classification.forceCreate
+      ? uniquifyNormalizedProductSkus(normalized, source, normalized.externalId)
+      : normalized;
+    const productName =
+      String(workingNormalized.name || "").trim() ||
+      `${String(source)} product ${workingNormalized.externalId}`;
+    const status = mapProductStatus(workingNormalized.status);
 
     let productId;
     let createdNewProduct = false;
@@ -999,7 +1182,7 @@ export async function importNormalizedProduct(
       const current = await inventoryRepository.getProductById(tenantId, classification.existingId);
       await inventoryRepository.updateProduct(tenantId, classification.existingId, {
         product_name: productName,
-        description: normalized.description || current?.description || null,
+        description: workingNormalized.description || current?.description || null,
         unit: current?.unit || "piece",
         delivery_charges: current?.delivery_charges ?? 0,
         discount: current?.discount ?? 0,
@@ -1009,16 +1192,16 @@ export async function importNormalizedProduct(
         source,
       });
       productId = classification.existingId;
-      await repairCreatedAt("inventory_products", productId, tenantId, normalized.createdAt);
+      await repairCreatedAt("inventory_products", productId, tenantId, workingNormalized.createdAt);
     } else {
       // Free any orphan/soft-deleted SKUs before create so variant insert can't leave an empty parent.
-      for (const sv of shopifyVariantsForImport(normalized)) {
-        const sku = String(sv.sku || "").trim() || resolveSku({ ...normalized, externalId: sv.externalId });
+      for (const sv of shopifyVariantsForImport(workingNormalized)) {
+        const sku = String(sv.sku || "").trim() || resolveSku({ ...workingNormalized, externalId: sv.externalId });
         if (sku) await inventoryRepository.releaseSoftDeletedSku(tenantId, sku);
       }
       productId = await inventoryRepository.createProduct(tenantId, {
         product_name: productName,
-        description: normalized.description || null,
+        description: workingNormalized.description || null,
         unit: "piece",
         delivery_charges: 0,
         discount: 0,
@@ -1026,13 +1209,13 @@ export async function importNormalizedProduct(
         status,
         category_id: categoryId,
         source,
-        created_at: toMysqlDateTime(normalized.createdAt),
+        created_at: toMysqlDateTime(workingNormalized.createdAt),
       });
       createdNewProduct = true;
     }
 
     try {
-      await syncShopifyProductVariants(tenantId, storeId, productId, normalized, { status });
+      await syncShopifyProductVariants(tenantId, storeId, productId, workingNormalized, { status });
     } catch (variantErr) {
       if (createdNewProduct) {
         try {
@@ -1120,13 +1303,38 @@ export async function importNormalizedProduct(
   }
 }
 
-export async function importNormalizedCustomer(tenantId, normalized, { storeId, platform } = {}) {
+export async function importNormalizedCustomer(tenantId, normalized, {
+  storeId,
+  platform,
+  conflictDecisions = null,
+  defaultConflictAction = null,
+} = {}) {
   if (!normalized?.externalId) return { ok: false, reason: "missing_external_id" };
 
   const actorId = await getImportActorId(tenantId);
-  const classification = storeId
+  let classification = storeId
     ? await classifyCustomer(tenantId, storeId, normalized)
     : { action: "create" };
+  classification = applyConflictDecision(classification, "customer", normalized.externalId, {
+    conflictDecisions,
+    defaultConflictAction,
+  });
+
+  if (classification.action === "rely" && classification.existingId) {
+    const source = platform || normalized.platform || "shopify";
+    if (storeId) {
+      await upsertEntityLink({
+        tenantId,
+        storeId,
+        platform: source,
+        entityType: "customer",
+        externalId: normalized.externalId,
+        internalId: classification.existingId,
+      });
+      await markSyncedRecordImported(storeId, tenantId, "customer", normalized.externalId);
+    }
+    return { ok: true, customerId: classification.existingId, action: "rely" };
+  }
 
   if (classification.action === "already_imported") {
     const source = platform || normalized.platform || "shopify";
@@ -1166,31 +1374,48 @@ export async function importNormalizedCustomer(tenantId, normalized, { storeId, 
       reason: classification.reason,
       why: classification.why,
       fix: classification.fix,
+      existingId: classification.existingId || null,
+      needsDuplicateReview: classification.needsDuplicateReview === true
+        || /Matching ERP|Activity Alerts|already exists/i.test(
+          String(classification.reason || classification.why || ""),
+        ),
     };
   }
 
   try {
     const source = platform || normalized.platform || "shopify";
+    let working = normalized;
+    if (classification.forceCreate) {
+      const tag = `${source}${String(normalized.externalId || "").slice(-4)}`;
+      working = { ...normalized };
+      if (working.email && String(working.email).includes("@")) {
+        const [user, domain] = String(working.email).split("@");
+        working.email = `${user}+${tag}@${domain}`.slice(0, 191);
+      }
+      if (working.phone) {
+        working.phone = `${String(working.phone).slice(0, 40)}-${tag}`.slice(0, 50);
+      }
+    }
     const payload = {
-      customer_name: normalized.name || "Unknown",
-      company_name: normalized.company_name || null,
-      phone: normalized.phone || null,
-      email: normalized.email || null,
+      customer_name: working.name || "Unknown",
+      company_name: working.company_name || null,
+      phone: working.phone || null,
+      email: working.email || null,
       status: "active",
       customer_type: "retailer",
-      note: normalized.note || null,
-      tags: normalized.tags
-        ? String(normalized.tags).split(",").map((t) => t.trim()).filter(Boolean)
+      note: working.note || null,
+      tags: working.tags
+        ? String(working.tags).split(",").map((t) => t.trim()).filter(Boolean)
         : [],
       source,
-      created_at: toMysqlDateTime(normalized.createdAt),
+      created_at: toMysqlDateTime(working.createdAt),
     };
 
     let customerId;
     if (classification.action === "update") {
       await crmRepository.updateCustomer(tenantId, actorId, classification.existingId, payload);
       customerId = classification.existingId;
-      await repairCreatedAt("crm_customers", customerId, tenantId, normalized.createdAt);
+      await repairCreatedAt("crm_customers", customerId, tenantId, working.createdAt);
     } else {
       const created = await crmRepository.createCustomer(tenantId, actorId, payload);
       customerId = created.id;
@@ -1208,7 +1433,7 @@ export async function importNormalizedCustomer(tenantId, normalized, { storeId, 
       await markSyncedRecordImported(storeId, tenantId, "customer", normalized.externalId);
     }
 
-    await syncCustomerAddressesFromShopify(tenantId, customerId, normalized.addresses);
+    await syncCustomerAddressesFromShopify(tenantId, customerId, working.addresses);
 
     return { ok: true, customerId, action: classification.action === "update" ? "update" : "create" };
   } catch (error) {
@@ -1227,13 +1452,54 @@ export async function importNormalizedCustomer(tenantId, normalized, { storeId, 
 export async function importNormalizedOrder(
   tenantId,
   normalized,
-  { storeId, platform, customerIdMap = {} } = {},
+  {
+    storeId,
+    platform,
+    customerIdMap = {},
+    conflictDecisions = null,
+    defaultConflictAction = null,
+  } = {},
 ) {
   if (!normalized?.externalId) return { ok: false, reason: "missing_external_id" };
 
-  const classification = storeId
+  let classification = storeId
     ? await classifyOrder(storeId, tenantId, normalized, platform)
     : { action: "create" };
+  classification = applyConflictDecision(classification, "order", normalized.externalId, {
+    conflictDecisions,
+    defaultConflictAction,
+  });
+
+  if (classification.action === "rely" && classification.existingId) {
+    const source = platform || normalized.platform || "shopify";
+    if (storeId) {
+      await upsertEntityLink({
+        tenantId,
+        storeId,
+        platform: source,
+        entityType: "order",
+        externalId: normalized.externalId,
+        internalId: classification.existingId,
+      });
+      await markSyncedRecordImported(storeId, tenantId, "order", normalized.externalId);
+    }
+    return { ok: true, orderId: classification.existingId, action: "rely" };
+  }
+
+  if (classification.action === "skip") {
+    return {
+      ok: false,
+      action: "skip",
+      reason: classification.reason,
+      why: classification.why,
+      fix: classification.fix,
+      existingId: classification.existingId || null,
+      needsDuplicateReview: classification.needsDuplicateReview === true
+        || /Matching ERP|Activity Alerts|already exists|Create new is not available/i.test(
+          String(classification.reason || classification.why || ""),
+        ),
+    };
+  }
 
   if (classification.action === "revive") {
     await orderRepository.reviveOrder(tenantId, classification.existingId);
@@ -1499,6 +1765,7 @@ async function importEntityType(storeId, tenantId, entityType, platform, options
     skipped: 0,
     failed: 0,
     already_imported: 0,
+    relied: 0,
     failures: [],
     skips: [],
   };
@@ -1509,7 +1776,12 @@ async function importEntityType(storeId, tenantId, entityType, platform, options
       ? await getSyncedRecordsNeedingImport(storeId, tenantId, "customer", 5000)
       : [];
     for (const rec of customerRecords) {
-      const imp = await importNormalizedCustomer(tenantId, rec.normalized, { storeId, platform });
+      const imp = await importNormalizedCustomer(tenantId, rec.normalized, {
+        storeId,
+        platform,
+        conflictDecisions: options.conflictDecisions || null,
+        defaultConflictAction: options.defaultConflictAction ?? null,
+      });
       if (imp.ok && rec.normalized.email) {
         customerIdMap[rec.normalized.email] = imp.customerId;
       }
@@ -1525,15 +1797,24 @@ async function importEntityType(storeId, tenantId, entityType, platform, options
         storeId,
         platform,
         allowUpdate: options.updateExisting !== false,
+        conflictDecisions: options.conflictDecisions || null,
+        defaultConflictAction: options.defaultConflictAction ?? null,
       });
     } else if (entityType === "customer") {
-      imp = await importNormalizedCustomer(tenantId, record.normalized, { storeId, platform });
+      imp = await importNormalizedCustomer(tenantId, record.normalized, {
+        storeId,
+        platform,
+        conflictDecisions: options.conflictDecisions || null,
+        defaultConflictAction: options.defaultConflictAction ?? null,
+      });
     } else {
       const normalized = resolveOrderNormalized(record.normalized, record.raw, platform);
       imp = await importNormalizedOrder(tenantId, normalized, {
         storeId,
         platform,
         customerIdMap,
+        conflictDecisions: options.conflictDecisions || null,
+        defaultConflictAction: options.defaultConflictAction ?? null,
       });
     }
 
@@ -1564,6 +1845,8 @@ async function importEntityType(storeId, tenantId, entityType, platform, options
             message: imp.reason,
           });
         }
+        // Duplicate Activity Alerts are only created by autoSyncEntityToErp (ongoing
+        // webhook/auto sync) — not on reconnect / manual Import review.
       } else {
         result.failed += 1;
         if (result.failures.length < 100) {
@@ -1580,6 +1863,7 @@ async function importEntityType(storeId, tenantId, entityType, platform, options
       continue;
     }
     if (imp.action === "already_imported") result.already_imported += 1;
+    else if (imp.action === "rely") result.relied += 1;
     else if (imp.action === "update") result.updated += 1;
     else result.created += 1;
   }

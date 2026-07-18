@@ -44,6 +44,12 @@ export function createEcomSharedHandlers(platform) {
       const entities = Array.isArray(req.body?.entities) ? req.body.entities : ["product", "customer", "order"];
       const result = await importEntitiesToErp(store.id, store.tenant_id, platform, entities, {
         updateExisting: req.body?.updateExisting !== false,
+        conflictDecisions: req.body?.conflictDecisions || null,
+        defaultConflictAction: ["rely", "keep", "update", "replace", "create_new"].includes(
+          req.body?.defaultConflictAction,
+        )
+          ? req.body.defaultConflictAction
+          : "rely",
       });
       if (!result.success) return res.status(400).json(result);
       res.json({

@@ -3,7 +3,7 @@ import { readDb, writeDb } from "../database/db.js";
 export const activityAlertRepository = {
   async findByTenant(tenantId, { limit, offset }) {
     const [rows] = await readDb.query(
-      `SELECT a.id, a.alert_type, a.title, a.message,
+      `SELECT a.id, a.alert_type, a.title, a.message, a.meta_json, a.dedupe_key,
               COALESCE(
                 a.ip_address,
                 (SELECT s.ip_address FROM sessions s
@@ -27,6 +27,18 @@ export const activityAlertRepository = {
       [tenantId]
     );
     return { rows, total };
+  },
+
+  async findById(tenantId, alertId) {
+    const [rows] = await readDb.query(
+      `SELECT id, alert_type, title, message, meta_json, dedupe_key,
+              ip_address, device_info, priority, is_read, user_id, created_at
+       FROM activity_alerts
+       WHERE id = ? AND tenant_id = ? AND deleted_at IS NULL
+       LIMIT 1`,
+      [alertId, tenantId],
+    );
+    return rows[0] || null;
   },
 
   async markRead(tenantId, alertId) {

@@ -311,6 +311,7 @@ export async function schedulePendingShopifyDelete({
   deleteAfter,
   phase1Action = null,
   note = null,
+  platform = "shopify",
 }) {
   await writeDb.query(
     `UPDATE ecom_pending_shopify_deletes
@@ -321,11 +322,12 @@ export async function schedulePendingShopifyDelete({
   );
   const [result] = await writeDb.query(
     `INSERT INTO ecom_pending_shopify_deletes
-       (tenant_id, store_id, entity_type, external_id, internal_id, delete_after, status, phase1_action, note)
-     VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+       (tenant_id, store_id, platform, entity_type, external_id, internal_id, delete_after, status, phase1_action, note)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
     [
       tenantId,
       storeId,
+      platform || "shopify",
       entityType,
       String(externalId),
       internalId,
@@ -339,7 +341,7 @@ export async function schedulePendingShopifyDelete({
 
 export async function listDuePendingShopifyDeletes(limit = 50) {
   const [rows] = await readDb.query(
-    `SELECT id, tenant_id, store_id, entity_type, external_id, internal_id,
+    `SELECT id, tenant_id, store_id, platform, entity_type, external_id, internal_id,
             delete_after, status, phase1_action, note
      FROM ecom_pending_shopify_deletes
      WHERE status = 'pending'
@@ -459,7 +461,8 @@ export async function resolveStoreErpIdsForDisconnect(storeId, tenantId, platfor
   );
   for (const row of linkedCustomers) {
     const source = String(row.source || "").toLowerCase().trim();
-    if (source === platform || source === "") {
+    // Store-linked customers: platform-sourced or blank source (legacy imports)
+    if (source === platform || source === "" || source === "null") {
       customerIds.add(Number(row.id));
     }
   }
@@ -522,6 +525,33 @@ export async function resolveStoreErpIdsForDisconnect(storeId, tenantId, platfor
     [prefix, platform, storeId, tenantId],
   );
   for (const row of orderRows) orderIds.add(Number(row.id));
+
+  // Customers on this store's platform orders (covers guest/unnamed buyers with no entity link)
+  const allOrderIds = [...orderIds].filter(Boolean);
+  if (allOrderIds.length) {
+    const ph = allOrderIds.map(() => "?").join(",");
+    const [orderCustomers] = await readDb.query(
+      `SELECT DISTINCT customer_id AS id
+       FROM orders
+       WHERE tenant_id = ? AND id IN (${ph}) AND deleted_at IS NULL
+         AND order_source = ? AND customer_id IS NOT NULL`,
+      [tenantId, ...allOrderIds, platform],
+    );
+    for (const row of orderCustomers) customerIds.add(Number(row.id));
+  }
+
+  // Also catch platform-sourced guests tied to this store's order_no pattern
+  const [prefixCustomers] = await readDb.query(
+    `SELECT DISTINCT o.customer_id AS id
+     FROM orders o
+     INNER JOIN crm_customers c ON c.id = o.customer_id AND c.tenant_id = o.tenant_id
+     WHERE o.tenant_id = ? AND o.deleted_at IS NULL AND o.order_source = ?
+       AND o.customer_id IS NOT NULL AND c.deleted_at IS NULL
+       AND (c.source = ? OR c.source IS NULL OR c.source = '')
+       AND o.order_no LIKE CONCAT(?, '-%')`,
+    [tenantId, platform, platform, prefix],
+  );
+  for (const row of prefixCustomers) customerIds.add(Number(row.id));
 
   // Warehouses / outlets mapped for this store — only when they hold no live non-marketplace products
   // and are not mapped to another connected store.
@@ -659,11 +689,12 @@ export async function disconnectStoreWithPolicy(storeId, tenantId, dataPolicy = 
     }
     if (customerIds.length) {
       const ph = customerIds.map(() => "?").join(",");
+      // IDs are already store-scoped (links / synced / order guests). Do not re-filter by source
+      // or unnamed guest buyers with odd/blank source can survive disconnect delete_all.
       const [r] = await writeDb.query(
         `UPDATE crm_customers SET deleted_at = NOW()
-         WHERE tenant_id = ? AND id IN (${ph}) AND deleted_at IS NULL
-           AND (source = ? OR source IS NULL OR source = '')`,
-        [tenantId, ...customerIds, platform],
+         WHERE tenant_id = ? AND id IN (${ph}) AND deleted_at IS NULL`,
+        [tenantId, ...customerIds],
       );
       deletedErp.customers = r.affectedRows || 0;
       try {
