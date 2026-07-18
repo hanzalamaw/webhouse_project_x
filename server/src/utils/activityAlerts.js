@@ -22,6 +22,8 @@ export async function createActivityAlert({
 }) {
   if (!IMPORTANT_TYPES.has(alertType)) return;
   const ctx = getAuditContext();
+  // Impersonation actions belong in WH logs only — never alert the tenant.
+  if (ctx?.impersonatedBy) return;
   const resolvedIp = ipAddress ?? ctx?.ipAddress ?? ctx?.ip ?? null;
   const resolvedDevice = deviceInfo ?? ctx?.deviceInfo ?? null;
   await writeDb.query(

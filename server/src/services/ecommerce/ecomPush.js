@@ -10,7 +10,6 @@ import {
   upsertEntityLink,
   upsertSyncedRecord,
   softDeleteEntityLinkByInternalId,
-  softDeleteLocationLinkByWarehouse,
   upsertLocationLink,
   schedulePendingShopifyDelete,
 } from "../../repositories/ecommerceRepository.js";
@@ -35,6 +34,7 @@ import {
   markOrderPendingDeleteInShopify,
   markProductPendingDeleteInShopify,
   deactivateLocationInShopify,
+  deleteLocationFromShopify,
   recordPaymentInShopify,
   createRefundInShopify,
   pushReturnNoteToShopify,
@@ -774,20 +774,33 @@ export async function deleteLinkedProductFromShopify(tenantId, productId) {
   return { ...result, ...schedule, shopifyNote: note };
 }
 
-/** Deactivate a linked Shopify location and remove the warehouse location link. */
+/** Stage Shopify location delete: deactivate now, hard-delete later. ERP deletes only if this succeeds. */
 export async function deleteLinkedWarehouseFromShopify(tenantId, warehouseId) {
   const locLink = await getWarehouseLocationLink(tenantId, warehouseId);
   if (!locLink?.shopify_location_id) return { ok: true, skipped: true, reason: "not_linked" };
 
-  const store = await getConnectedShopifyStore(tenantId);
-  if (!store) return { ok: false, skipped: true, reason: "store_disconnected" };
+  const store = await getStoreById(locLink.store_id, tenantId);
+  if (!store?.access_token) return { ok: false, skipped: true, reason: "store_disconnected" };
 
+  const note = shopifyPendingDeleteNote("location");
   const result = await deactivateLocationInShopify(store, locLink.shopify_location_id);
-  if (result.ok) {
-    await softDeleteLocationLinkByWarehouse(tenantId, warehouseId);
-    await logPushResult(store.id, tenantId, "warehouse", locLink.shopify_location_id, result);
-  }
-  return result;
+  await logPushResult(store.id, tenantId, "warehouse", locLink.shopify_location_id, {
+    ...result,
+    shopifyNote: note,
+  });
+  if (!result.ok) return result;
+
+  // Keep location link until hard-delete job finishes (needed to map Shopify id).
+  const schedule = await scheduleShopifyHardDelete({
+    tenantId,
+    store,
+    entityType: "warehouse",
+    externalId: locLink.shopify_location_id,
+    internalId: warehouseId,
+    phase1Action: result.action,
+    note,
+  });
+  return { ...result, ...schedule, shopifyNote: note };
 }
 
 async function pushToLinkedOrder(tenantId, orderId, fn) {

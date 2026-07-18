@@ -6,6 +6,11 @@ import {
   AUDITED_WRITE_TABLES,
 } from "../utils/tenantScope.js";
 import { logModuleWriteAudit } from "../utils/moduleWriteAudit.js";
+import {
+  fetchAuditRow,
+  isSoftDeleteSql,
+  resolveWriteRecordId,
+} from "../utils/auditRowSnapshot.js";
 
 /** @type {import("mysql2/promise").Pool | null} */
 let pool = null;
@@ -24,40 +29,82 @@ async function executeQuery(sql, params = [], options = {}) {
     assertTenantScopedQuery(sql, { enforced, operation: detectSqlOperation(sql) });
   }
 
+  const shouldAudit = !options.skipWriteAudit && enforced && ctx?.tenantId;
+  let preByTable = null;
+  if (shouldAudit) {
+    preByTable = await capturePreWriteSnapshots(sql, params, ctx).catch(() => null);
+  }
+
   const [result, fields] = await pool.execute(sql, params);
 
-  if (!options.skipWriteAudit && enforced && ctx?.tenantId) {
-    scheduleWriteAudit(sql, result, ctx).catch(() => {});
+  if (shouldAudit) {
+    scheduleWriteAudit(sql, params, result, ctx, preByTable).catch(() => {});
   }
 
   return [result, fields];
 }
 
 /**
+ * Snapshot rows before UPDATE/DELETE so audits can show previous values.
  * @param {string} sql
+ * @param {unknown[]} params
+ * @param {{ tenantId: number }} ctx
+ */
+async function capturePreWriteSnapshots(sql, params, ctx) {
+  const op = detectSqlOperation(sql);
+  if (op !== "UPDATE" && op !== "DELETE") return null;
+
+  const tables = [...extractTableNames(sql)].filter((t) => AUDITED_WRITE_TABLES.has(t));
+  if (!tables.length) return null;
+
+  const recordId = resolveWriteRecordId(sql, params, null);
+  if (!recordId) return null;
+
+  const preByTable = {};
+  for (const table of tables) {
+    const row = await fetchAuditRow(pool, table, ctx.tenantId, recordId);
+    if (row) preByTable[table] = row;
+  }
+  return preByTable;
+}
+
+/**
+ * @param {string} sql
+ * @param {unknown[]} params
  * @param {import("mysql2/promise").ResultSetHeader} result
  * @param {{ tenantId: number, userId: number | null }} ctx
+ * @param {Record<string, object> | null} preByTable
  */
-async function scheduleWriteAudit(sql, result, ctx) {
+async function scheduleWriteAudit(sql, params, result, ctx, preByTable) {
   const op = detectSqlOperation(sql);
   if (!op || op === "SELECT") return;
 
-  const tables = extractTableNames(sql);
-  const audited = [...tables].filter((t) => AUDITED_WRITE_TABLES.has(t));
-  if (!audited.length) return;
+  const tables = [...extractTableNames(sql)].filter((t) => AUDITED_WRITE_TABLES.has(t));
+  if (!tables.length) return;
 
-  let recordId = null;
-  if (op === "INSERT" && result.insertId) {
-    recordId = result.insertId;
-  }
+  const softDelete = isSoftDeleteSql(sql);
+  let action = op.toLowerCase();
+  if (softDelete) action = "delete";
 
-  for (const table of audited) {
+  const recordId = resolveWriteRecordId(sql, params, result);
+
+  for (const table of tables) {
+    const oldRow = preByTable?.[table] || null;
+    let newRow = null;
+    if (action === "insert" || action === "update") {
+      if (recordId) {
+        newRow = await fetchAuditRow(pool, table, ctx.tenantId, recordId);
+      }
+    }
+
     await logModuleWriteAudit({
       tenantId: ctx.tenantId,
       userId: ctx.userId,
-      action: op.toLowerCase(),
+      action,
       table,
       recordId,
+      oldRow,
+      newRow,
     });
   }
 }

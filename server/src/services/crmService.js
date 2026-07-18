@@ -25,6 +25,7 @@ import {
 import { syncEntityToShopify, deleteLinkedCustomerFromShopify } from "./ecommerce/ecomPush.js";
 import { requireShopifySync, requireShopifySyncIfLinked } from "./ecommerce/shopifySyncGuard.js";
 import { assertCustomerCanDelete, assertRequireShopifySyncOnSave } from "./ecommerce/shopifyPolicy.js";
+import { logCrmActivity } from "../utils/crmAudit.js";
 
 function assertOneOf(value, allowed, label) {
   if (!allowed.includes(value)) {
@@ -287,8 +288,9 @@ export const crmService = {
     }
   },
 
-  async deleteCustomer(tenantId, id) {
+  async deleteCustomer(tenantId, userId, id) {
     await assertCustomerCanDelete(tenantId, id);
+    const before = await crmRepository.getCustomer(tenantId, id);
     const shopifySync = await deleteLinkedCustomerFromShopify(tenantId, id);
     try {
       requireShopifySyncIfLinked(shopifySync, "Customer");
@@ -302,6 +304,20 @@ export const crmService = {
     }
     const deleted = await cascadeSoftDeleteCrmCustomer(id, tenantId);
     if (!deleted) return { ok: false };
+    if (before) {
+      await logCrmActivity(
+        tenantId,
+        userId,
+        "customer_deleted",
+        `Customer "${before.customer_name}" deleted`,
+        {
+          entity_type: "customer",
+          entity_id: id,
+          oldValue: before,
+          newValue: null,
+        },
+      );
+    }
     const message = shopifySync?.skipped
       ? "Customer deleted."
       : `Customer deleted from ERP. Shopify was noted — permanent Shopify delete in ${shopifySync.delayLabel || "7 days"}.`;

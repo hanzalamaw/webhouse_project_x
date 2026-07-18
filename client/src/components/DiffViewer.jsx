@@ -4,7 +4,7 @@ function isEmptyAuditValue(value) {
   if (value == null) return true;
   if (typeof value === "object" && !Array.isArray(value)) {
     const keys = Object.keys(value).filter(
-      (k) => !["summary", "entity_type", "entity_id", "tenant_id", "user_id"].includes(k)
+      (k) => !["summary", "entity_type", "entity_id", "tenant_id", "user_id", "table", "record_id", "action"].includes(k)
     );
     return keys.length === 0;
   }

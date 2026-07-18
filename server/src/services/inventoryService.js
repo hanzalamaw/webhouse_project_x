@@ -739,8 +739,21 @@ export const inventoryService = {
 
   async listWarehouses(tenantId, query) {
     const { page, limit, offset } = parsePagination(query);
-    const { rows, total } = await inventoryRepository.listWarehouses(tenantId, { limit, offset });
-    return paginatedResponse(rows, total, page, limit);
+    const [{ rows, total }, limits] = await Promise.all([
+      inventoryRepository.listWarehouses(tenantId, { limit, offset }),
+      this.getWarehouseLimits(tenantId),
+    ]);
+    return { ...paginatedResponse(rows, total, page, limit), limits };
+  },
+
+  async getWarehouseLimits(tenantId) {
+    const max_warehouses = await inventoryRepository.getTenantWarehouseLimit(tenantId);
+    const warehouse_count = await inventoryRepository.countWarehouses(tenantId);
+    return {
+      max_warehouses,
+      warehouse_count,
+      can_create: max_warehouses <= 0 || warehouse_count < max_warehouses,
+    };
   },
 
   async getWarehouse(tenantId, id) {
@@ -767,6 +780,13 @@ export const inventoryService = {
     const status = body.status || "active";
     assertStatus(status);
 
+    const limits = await this.getWarehouseLimits(tenantId);
+    if (!limits.can_create) {
+      throw new Error(
+        `Warehouse limit reached (${limits.warehouse_count}/${limits.max_warehouses}). Delete an unused warehouse or ask your administrator to raise the plan limit.`,
+      );
+    }
+
     const id = await inventoryRepository.createWarehouse(tenantId, {
       warehouse_name,
       location: body.location || null,
@@ -775,6 +795,7 @@ export const inventoryService = {
     });
     const warehouse = await inventoryRepository.getWarehouseById(tenantId, id);
     if (!body.syncToShopify) return warehouse;
+
     try {
       const push = await syncEntityToShopify(tenantId, "warehouse", id);
       requireShopifySync(push, "Warehouse");
@@ -823,8 +844,24 @@ export const inventoryService = {
 
   async removeWarehouse(tenantId, id) {
     const shopifySync = await deleteLinkedWarehouseFromShopify(tenantId, id);
-    requireShopifySyncIfLinked(shopifySync, "Warehouse");
-    return inventoryRepository.softDeleteWarehouse(tenantId, id);
+    try {
+      requireShopifySyncIfLinked(shopifySync, "Warehouse");
+    } catch (err) {
+      const detail = shopifySync?.error || err.message || shopifySync?.reason;
+      const error = new Error(
+        `Warehouse was not deleted in ERP. Shopify blocked the delete: ${detail}`,
+      );
+      error.status = 409;
+      throw error;
+    }
+    const deleted = await inventoryRepository.softDeleteWarehouse(tenantId, id);
+    return {
+      ok: Boolean(deleted),
+      shopifySync,
+      message: shopifySync?.skipped
+        ? "Warehouse deleted."
+        : `Warehouse deleted from ERP. Shopify location was deactivated with a pending-delete note — permanent Shopify delete in ${shopifySync.delayLabel || "7 days"}.`,
+    };
   },
 
   async listMovements(tenantId, query) {

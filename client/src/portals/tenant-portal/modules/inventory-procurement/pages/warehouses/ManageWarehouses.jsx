@@ -93,6 +93,7 @@ export default function ManageWarehouses() {
       {limits && !limits.can_create && (
         <p className="wh-field__error">
           Warehouse limit reached ({limits.warehouse_count}/{limits.max_warehouses}).
+          Delete an unused warehouse (including ones created from Shopify locations) or ask your administrator to raise the plan limit.
         </p>
       )}
 

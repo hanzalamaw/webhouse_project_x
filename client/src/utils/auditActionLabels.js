@@ -28,9 +28,22 @@ const TENANT_ACTION_LABELS = {
   crm_lead_converted: "Converted a lead to customer",
   crm_customer_created: "Created a customer",
   crm_customer_updated: "Updated a customer",
+  crm_customer_deleted: "Deleted a customer",
   crm_customer_note_added: "Added a customer note",
   crm_complaint_created: "Created a complaint",
   crm_complaint_updated: "Updated a complaint",
+  inventory_insert: "Created inventory data",
+  inventory_update: "Updated inventory data",
+  inventory_delete: "Deleted inventory data",
+  finance_insert: "Created finance data",
+  finance_update: "Updated finance data",
+  finance_delete: "Deleted finance data",
+  pos_insert: "Created POS data",
+  pos_update: "Updated POS data",
+  pos_delete: "Deleted POS data",
+  order_insert: "Created order data",
+  order_update: "Updated order data",
+  order_delete: "Deleted order data",
 };
 
 function titleCaseWords(text) {
@@ -71,5 +84,9 @@ export function formatTenantAuditAction(action) {
   if (!action) return "—";
   if (TENANT_ACTION_LABELS[action]) return TENANT_ACTION_LABELS[action];
   if (action.startsWith("crm_")) return titleCaseWords(action.replace(/^crm_/, ""));
+  if (action.startsWith("inventory_")) return titleCaseWords(action);
+  if (action.startsWith("finance_")) return titleCaseWords(action);
+  if (action.startsWith("pos_")) return titleCaseWords(action);
+  if (action.startsWith("order_")) return titleCaseWords(action);
   return titleCaseWords(action);
 }

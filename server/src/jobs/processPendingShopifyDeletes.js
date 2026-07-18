@@ -3,12 +3,14 @@ import {
   listDuePendingShopifyDeletes,
   markPendingShopifyDeleteStatus,
   softDeleteEntityLinkByInternalId,
+  softDeleteLocationLinkByWarehouse,
   addSyncLog,
 } from "../repositories/ecommerceRepository.js";
 import {
   deleteCustomerFromShopify,
   deleteOrderFromShopify,
   deleteProductFromShopify,
+  deleteLocationFromShopify,
   logPushResult,
 } from "../services/ecommerce/shopifyWrite.js";
 import { shopifyHardDeleteDelayLabel } from "../utils/shopifyDeferredDelete.js";
@@ -17,6 +19,7 @@ async function hardDeleteShopifyEntity(store, entityType, externalId) {
   if (entityType === "order") return deleteOrderFromShopify(store, externalId);
   if (entityType === "customer") return deleteCustomerFromShopify(store, externalId);
   if (entityType === "product") return deleteProductFromShopify(store, externalId);
+  if (entityType === "warehouse") return deleteLocationFromShopify(store, externalId);
   return { ok: false, error: `Unsupported entity type: ${entityType}` };
 }
 
@@ -87,6 +90,9 @@ export async function processPendingShopifyDeletes() {
         row.internal_id,
         "shopify",
       );
+      if (row.entity_type === "warehouse") {
+        await softDeleteLocationLinkByWarehouse(row.tenant_id, row.internal_id);
+      }
       await markPendingShopifyDeleteStatus(row.id, "completed", { completed: true });
       await addSyncLog(store.id, row.tenant_id, {
         syncType: `erp_deferred_delete:${row.entity_type}`,

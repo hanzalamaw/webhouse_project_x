@@ -1240,14 +1240,56 @@ export async function markProductPendingDeleteInShopify(store, externalId, noteL
 }
 
 export async function deactivateLocationInShopify(store, externalId) {
-  const client = shopifyClient({ storeUrl: store.store_url, accessToken: store.access_token });
   try {
-    await client.put(`/locations/${externalId}.json`, {
-      location: { id: Number(externalId), active: false },
-    });
+    const gid = locationGid(externalId);
+    if (!gid) return { ok: false, error: "Invalid Shopify location id" };
+    await runLocationGraphql(
+      store,
+      `mutation locationDeactivate($locationId: ID!) {
+        locationDeactivate(locationId: $locationId) {
+          location { id }
+          locationDeactivateUserErrors { field message }
+        }
+      }`,
+      { locationId: gid },
+      "locationDeactivate",
+    );
     return { ok: true, action: "deactivated" };
   } catch (error) {
-    return { ok: false, error: formatShopifyError(error) };
+    const msg = formatShopifyError(error) || error.message;
+    if (/already inactive|not active|deactivated/i.test(String(msg))) {
+      return { ok: true, action: "already_deactivated" };
+    }
+    return { ok: false, error: msg };
+  }
+}
+
+/** Hard-delete a deactivated Shopify location (phase 2 of deferred warehouse delete). */
+export async function deleteLocationFromShopify(store, externalId) {
+  try {
+    const gid = locationGid(externalId);
+    if (!gid) return { ok: false, error: "Invalid Shopify location id" };
+    const payload = await runLocationGraphql(
+      store,
+      `mutation locationDelete($locationId: ID!) {
+        locationDelete(locationId: $locationId) {
+          deletedLocationId
+          locationDeleteUserErrors { field message }
+        }
+      }`,
+      { locationId: gid },
+      "locationDelete",
+    );
+    if (!payload?.deletedLocationId) {
+      return { ok: false, error: "Shopify did not confirm location deletion" };
+    }
+    return { ok: true, action: "deleted" };
+  } catch (error) {
+    const msg = formatShopifyError(error) || error.message;
+    if (/not found|404|does not exist|already deleted/i.test(String(msg))) {
+      return { ok: true, action: "already_deleted" };
+    }
+    return { ok: false, error: msg };
   }
 }
 
@@ -2108,53 +2150,163 @@ export async function createOrderInShopify(store, order, { customerExternalId = 
   }
 }
 
-export async function createLocationInShopify(store, warehouse) {
+async function getShopCountryCode(store) {
   const client = shopifyClient({ storeUrl: store.store_url, accessToken: store.access_token });
   try {
-    const { data } = await client.post("/locations.json", {
-      location: {
-        name: warehouse.warehouse_name,
-        address1: warehouse.location || undefined,
-        city: warehouse.city || undefined,
-        active: warehouse.status !== "inactive",
+    const { data } = await client.get("/shop.json");
+    const code = String(data?.shop?.country_code || data?.shop?.country || "")
+      .trim()
+      .toUpperCase();
+    if (/^[A-Z]{2}$/.test(code)) return code;
+  } catch {
+    /* fall through */
+  }
+  return "PK";
+}
+
+function locationGid(externalId) {
+  const id = parseShopifyNumericId(externalId);
+  return id ? `gid://shopify/Location/${id}` : null;
+}
+
+async function runLocationGraphql(store, query, variables, payloadKey) {
+  const gql = shopifyGraphqlClient({ storeUrl: store.store_url, accessToken: store.access_token });
+  const { data } = await gql.post("", { query, variables });
+  if (data?.errors?.length) {
+    throw new Error(data.errors.map((e) => e.message).filter(Boolean).join("; "));
+  }
+  const payload = data?.data?.[payloadKey];
+  const userErrors = [
+    ...(payload?.userErrors || []),
+    ...(payload?.locationAddUserErrors || []),
+    ...(payload?.locationEditUserErrors || []),
+    ...(payload?.locationActivateUserErrors || []),
+    ...(payload?.locationDeactivateUserErrors || []),
+    ...(payload?.locationDeleteUserErrors || []),
+  ];
+  if (userErrors.length) {
+    throw new Error(userErrors.map((e) => e.message).filter(Boolean).join("; "));
+  }
+  return payload;
+}
+
+/** REST cannot create locations — use GraphQL locationAdd (requires write_locations). */
+export async function createLocationInShopify(store, warehouse) {
+  try {
+    const countryCode = await getShopCountryCode(store);
+    const address = {
+      countryCode,
+      address1: normalizeStr(warehouse.location) || undefined,
+      city: normalizeStr(warehouse.city) || undefined,
+    };
+    const payload = await runLocationGraphql(
+      store,
+      `mutation locationAdd($input: LocationAddInput!) {
+        locationAdd(input: $input) {
+          location { id name }
+          userErrors { field message }
+        }
+      }`,
+      {
+        input: {
+          name: normalizeStr(warehouse.warehouse_name),
+          address,
+          fulfillsOnlineOrders: warehouse.status !== "inactive",
+        },
       },
-    });
-    const externalId = data?.location?.id;
+      "locationAdd",
+    );
+    const externalId = parseShopifyNumericId(payload?.location?.id);
     if (!externalId) return { ok: false, error: "Shopify did not return a location id" };
+
+    if (warehouse.status === "inactive") {
+      const deactivated = await deactivateLocationInShopify(store, externalId);
+      if (!deactivated.ok) {
+        return {
+          ok: false,
+          error: `Location created but could not deactivate it: ${deactivated.error}`,
+          externalId: String(externalId),
+        };
+      }
+    }
+
     return { ok: true, externalId: String(externalId), action: "created" };
   } catch (error) {
-    return { ok: false, error: formatShopifyError(error) };
+    const msg = formatShopifyError(error) || error.message;
+    if (/access|scope|permission|forbidden|unauthorized/i.test(String(msg))) {
+      return {
+        ok: false,
+        error: `${msg}. Reconnect Shopify so the app has the write_locations permission.`,
+      };
+    }
+    return { ok: false, error: msg };
   }
 }
 
 export async function pushLocationToShopify(store, externalId, warehouse, { beforeWarehouse = null } = {}) {
-  const client = shopifyClient({ storeUrl: store.store_url, accessToken: store.access_token });
   try {
-    const locationPayload = { id: Number(externalId) };
-    let hasChanges = false;
-    if (!beforeWarehouse || erpFieldChanged(beforeWarehouse, warehouse, "warehouse_name")) {
-      locationPayload.name = warehouse.warehouse_name;
-      hasChanges = true;
-    }
-    if (!beforeWarehouse || erpFieldChanged(beforeWarehouse, warehouse, "location")) {
-      locationPayload.address1 = warehouse.location || undefined;
-      hasChanges = true;
-    }
-    if (!beforeWarehouse || erpFieldChanged(beforeWarehouse, warehouse, "city")) {
-      locationPayload.city = warehouse.city || undefined;
-      hasChanges = true;
-    }
+    const gid = locationGid(externalId);
+    if (!gid) return { ok: false, error: "Invalid Shopify location id" };
+
+    const nameChanged = !beforeWarehouse || erpFieldChanged(beforeWarehouse, warehouse, "warehouse_name");
+    const addressChanged =
+      !beforeWarehouse
+      || erpFieldChanged(beforeWarehouse, warehouse, "location")
+      || erpFieldChanged(beforeWarehouse, warehouse, "city");
     const active = warehouse.status !== "inactive";
     const beforeActive = beforeWarehouse ? beforeWarehouse.status !== "inactive" : null;
-    if (!beforeWarehouse || beforeActive !== active) {
-      locationPayload.active = active;
-      hasChanges = true;
+    const statusChanged = !beforeWarehouse || beforeActive !== active;
+
+    if (!nameChanged && !addressChanged && !statusChanged) {
+      return { ok: true, action: "unchanged" };
     }
-    if (!hasChanges) return { ok: true, action: "unchanged" };
-    await client.put(`/locations/${externalId}.json`, { location: locationPayload });
+
+    if (nameChanged || addressChanged) {
+      const input = {};
+      if (nameChanged) input.name = normalizeStr(warehouse.warehouse_name);
+      if (addressChanged) {
+        const countryCode = await getShopCountryCode(store);
+        input.address = {
+          countryCode,
+          address1: normalizeStr(warehouse.location) || undefined,
+          city: normalizeStr(warehouse.city) || undefined,
+        };
+      }
+      await runLocationGraphql(
+        store,
+        `mutation locationEdit($id: ID!, $input: LocationEditInput!) {
+          locationEdit(id: $id, input: $input) {
+            location { id name }
+            userErrors { field message }
+          }
+        }`,
+        { id: gid, input },
+        "locationEdit",
+      );
+    }
+
+    if (statusChanged) {
+      if (active) {
+        await runLocationGraphql(
+          store,
+          `mutation locationActivate($locationId: ID!) {
+            locationActivate(locationId: $locationId) {
+              location { id }
+              locationActivateUserErrors { field message }
+            }
+          }`,
+          { locationId: gid },
+          "locationActivate",
+        );
+      } else {
+        const deactivated = await deactivateLocationInShopify(store, externalId);
+        if (!deactivated.ok) return deactivated;
+      }
+    }
+
     return { ok: true, action: "updated" };
   } catch (error) {
-    return { ok: false, error: formatShopifyError(error) };
+    return { ok: false, error: formatShopifyError(error) || error.message };
   }
 }
 

@@ -96,6 +96,9 @@ const HIDDEN_KEYS = new Set([
   "entity_type",
   "entity_id",
   "summary",
+  "table",
+  "record_id",
+  "action",
   "password",
   "password_hash",
   "encrypted_password",
@@ -104,6 +107,8 @@ const HIDDEN_KEYS = new Set([
   "sessionId",
   "session_id",
   "assignable_modules",
+  "access_token",
+  "refresh_token",
 ]);
 
 function flattenObject(obj, prefix = "") {

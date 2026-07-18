@@ -1,5 +1,4 @@
 import { logService } from "../services/logService.js";
-import { getClientIp } from "../utils/whAudit.js";
 
 export const logController = {
   async listWh(req, res) {
@@ -12,9 +11,7 @@ export const logController = {
 
   async listTenant(req, res) {
     try {
-      res.json(
-        await logService.listTenant(req.query, req.userId, getClientIp(req))
-      );
+      res.json(await logService.listTenant(req.query));
     } catch (e) {
       res.status(500).json({ message: e.message });
     }

@@ -166,7 +166,7 @@ export const crmController = {
     try {
       const id = tryParseEntityId(req.params.id);
       if (!id) return res.status(400).json({ message: "Invalid customer id" });
-      const result = await crmService.deleteCustomer(req.tenantId, id);
+      const result = await crmService.deleteCustomer(req.tenantId, req.userId, id);
       if (!result?.ok) return res.status(404).json({ message: "Customer not found" });
       res.json({
         ok: true,

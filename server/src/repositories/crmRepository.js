@@ -201,14 +201,17 @@ export const crmRepository = {
       ]
     );
     const id = result.insertId;
+    const created = await this.getLead(tenantId, id);
     await logCrmActivity(tenantId, userId, "lead_created", `Lead "${data.lead_name}" created`, {
       entity_type: "lead",
       entity_id: id,
+      newValue: created,
     });
-    return this.getLead(tenantId, id);
+    return created;
   },
 
   async updateLead(tenantId, userId, id, data) {
+    const before = await this.getLead(tenantId, id);
     await writeDb.query(
       `UPDATE crm_leads SET
          lead_name = ?, phone = ?, email = ?, company_name = ?, source = ?,
@@ -227,11 +230,14 @@ export const crmRepository = {
         tenantId,
       ]
     );
+    const after = await this.getLead(tenantId, id);
     await logCrmActivity(tenantId, userId, "lead_updated", `Lead "${data.lead_name}" updated`, {
       entity_type: "lead",
       entity_id: id,
+      oldValue: before,
+      newValue: after,
     });
-    return this.getLead(tenantId, id);
+    return after;
   },
 
   async convertLead(tenantId, userId, leadId, customerData) {
@@ -257,6 +263,8 @@ export const crmRepository = {
     await logCrmActivity(tenantId, userId, "lead_converted", `Lead converted to customer "${customer.customer_name}"`, {
       entity_type: "lead",
       entity_id: leadId,
+      oldValue: lead,
+      newValue: { ...await this.getLead(tenantId, leadId), converted_customer: customer },
     });
     return { lead: await this.getLead(tenantId, leadId), customer };
   },
@@ -422,11 +430,13 @@ export const crmRepository = {
       ]
     );
     const id = result.insertId;
+    const created = await this.getCustomer(tenantId, id);
     await logCrmActivity(tenantId, userId, "customer_created", `Customer "${data.customer_name}" created`, {
       entity_type: "customer",
       entity_id: id,
+      newValue: created,
     });
-    return this.getCustomer(tenantId, id);
+    return created;
   },
 
   async updateCustomer(tenantId, userId, id, data) {
@@ -821,14 +831,17 @@ export const crmRepository = {
         tenantId,
       ]
     );
+    const created = await this.getComplaint(tenantId, result.insertId);
     await logCrmActivity(tenantId, userId, "complaint_created", `Complaint "${data.subject}" created`, {
       entity_type: "complaint",
       entity_id: result.insertId,
+      newValue: created,
     });
-    return this.getComplaint(tenantId, result.insertId);
+    return created;
   },
 
   async updateComplaint(tenantId, userId, id, data) {
+    const before = await this.getComplaint(tenantId, id);
     await writeDb.query(
       `UPDATE crm_customer_complaints SET
          subject = ?, description = ?, status = ?, priority = ?, issue_type = ?,
@@ -851,10 +864,13 @@ export const crmRepository = {
         tenantId,
       ]
     );
+    const after = await this.getComplaint(tenantId, id);
     await logCrmActivity(tenantId, userId, "complaint_updated", `Complaint "${data.subject}" updated`, {
       entity_type: "complaint",
       entity_id: id,
+      oldValue: before,
+      newValue: after,
     });
-    return this.getComplaint(tenantId, id);
+    return after;
   },
 };

@@ -228,7 +228,7 @@ CREATE TABLE IF NOT EXISTS `wh_support_tickets` (
 -- -----------------------------------------------------
 CREATE TABLE IF NOT EXISTS `wh_audit_logs` (
   `id` INT NOT NULL AUTO_INCREMENT,
-  `action` VARCHAR(45) NOT NULL,
+  `action` VARCHAR(191) NOT NULL,
   `old_value` JSON NULL DEFAULT NULL,
   `new_value` JSON NULL DEFAULT NULL,
   `ip_address` VARCHAR(45) NOT NULL,
@@ -339,7 +339,7 @@ CREATE TABLE IF NOT EXISTS `permissions` (
 -- -----------------------------------------------------
 CREATE TABLE IF NOT EXISTS `audit_logs` (
   `id` INT NOT NULL AUTO_INCREMENT,
-  `action` VARCHAR(45) NOT NULL,
+  `action` VARCHAR(191) NOT NULL,
   `old_value` JSON NULL DEFAULT NULL,
   `new_value` JSON NULL DEFAULT NULL,
   `ip_address` VARCHAR(45) NULL DEFAULT NULL,

@@ -96,6 +96,16 @@ export const AUDITED_WRITE_TABLES = new Set([
   "pos_stock_levels",
   "pos_stock_movements",
   "pos_stock_transfers",
+  "pos_outlets",
+  "pos_terminals",
+  "orders",
+  "order_items",
+  "order_payments",
+  "order_assignments",
+  "order_cancellations",
+  "order_returns",
+  "order_exchanges",
+  "order_refunds",
 ]);
 
 /**

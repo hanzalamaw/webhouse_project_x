@@ -1,6 +1,7 @@
 import { readDb } from "../database/db.js";
 import { logTenantAudit } from "./tenantAudit.js";
 import { getAuditContext } from "./auditContext.js";
+import { sanitizeAuditRow } from "./auditRowSnapshot.js";
 
 let cachedCrmModuleId = null;
 
@@ -13,18 +14,41 @@ export async function getCrmModuleId() {
   return cachedCrmModuleId;
 }
 
+/**
+ * CRM activity → tenant audit (redirects to WH when impersonating).
+ * Pass full entity snapshots via oldValue/newValue for useful DiffViewer output.
+ */
 export async function logCrmActivity(tenantId, userId, action, summary, extra = {}) {
   if (userId == null || userId === "") return;
   const moduleId = await getCrmModuleId();
   const ctx = getAuditContext();
-  const { oldValue, newValue, ...rest } = extra;
+  const { oldValue, newValue, entity_type, entity_id, ...rest } = extra;
+
+  const meta = {
+    summary,
+    ...(entity_type != null ? { entity_type } : {}),
+    ...(entity_id != null ? { entity_id } : {}),
+    ...rest,
+  };
+
+  const cleanOld = oldValue ? sanitizeAuditRow(oldValue) : null;
+  let resolvedNew;
+  if (newValue === null) {
+    // Explicit delete: keep summary only so DiffViewer shows "Values deleted"
+    resolvedNew = { summary, entity_type, entity_id };
+  } else if (newValue && typeof newValue === "object") {
+    resolvedNew = { ...meta, ...sanitizeAuditRow(newValue) };
+  } else {
+    resolvedNew = meta;
+  }
+
   await logTenantAudit({
     tenantId,
     userId,
     moduleId,
     action: `crm_${action}`,
-    oldValue: oldValue || null,
-    newValue: newValue || { summary, ...rest },
+    oldValue: cleanOld,
+    newValue: resolvedNew,
     skipIfImpersonated: true,
     impersonatedBy: ctx?.impersonatedBy ?? null,
     ipAddress: ctx?.ipAddress ?? ctx?.ip ?? null,

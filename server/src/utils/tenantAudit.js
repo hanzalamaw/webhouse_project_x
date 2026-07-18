@@ -29,12 +29,15 @@ export async function logTenantAudit({
   const resolvedImpersonatedBy = impersonatedBy ?? ctx?.impersonatedBy ?? null;
   const resolvedIp = ipAddress ?? ctx?.ipAddress ?? ctx?.ip ?? null;
   const resolvedDevice = deviceInfo ?? ctx?.deviceInfo ?? null;
+  const safeAction = String(action || "unknown").slice(0, 191);
 
   if (resolvedImpersonatedBy) {
     await logWhAudit({
       adminUserId: resolvedImpersonatedBy,
-      action: `tenant_impersonation:${action}`,
-      oldValue: oldValue ? { tenant_id: tenantId, user_id: userId, ...oldValue } : { tenant_id: tenantId, user_id: userId },
+      action: `tenant_impersonation:${safeAction}`.slice(0, 191),
+      oldValue: oldValue
+        ? { tenant_id: tenantId, user_id: userId, ...oldValue }
+        : { tenant_id: tenantId, user_id: userId },
       newValue: newValue ? { tenant_id: tenantId, user_id: userId, ...newValue } : null,
       ipAddress: resolvedIp,
     });
@@ -51,7 +54,7 @@ export async function logTenantAudit({
      (action, old_value, new_value, ip_address, device_info, tenant_id, module_id, user_id)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     [
-      action,
+      safeAction,
       oldValue ? JSON.stringify(oldValue) : null,
       newValue ? JSON.stringify(newValue) : null,
       resolvedIp,
