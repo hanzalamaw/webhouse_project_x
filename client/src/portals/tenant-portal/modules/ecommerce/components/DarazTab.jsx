@@ -21,12 +21,21 @@ export default function DarazTab() {
   const [statusLoading, setStatusLoading] = useState(true);
   const [connecting, setConnecting] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [syncPreviewOpen, setSyncPreviewOpen] = useState(false);
   const [notice, setNotice] = useState("");
   const [autoSyncSaving, setAutoSyncSaving] = useState(false);
   const pollRef = useRef(null);
   const prevSyncStatusRef = useRef(null);
+  const awaitSyncPreviewRef = useRef(false);
+  const serverSawRunningRef = useRef(false);
 
   const connected = connection?.connected;
+  const syncInProgress =
+    syncing
+    || connection?.initialSyncStatus === "running"
+    || connection?.initialSyncStatus === "pending";
+  const openSyncPreview = useCallback(() => setSyncPreviewOpen(true), []);
+  const closeSyncPreview = useCallback(() => setSyncPreviewOpen(false), []);
 
   const loadSyncStatus = useCallback(async () => {
     try {
@@ -34,6 +43,11 @@ export default function DarazTab() {
       if (data.connected) {
         setConnection(data);
         writeCachedConnection("daraz", data);
+        if (data.initialSyncStatus === "running" || data.initialSyncStatus === "pending") {
+          serverSawRunningRef.current = true;
+          setSyncing(true);
+          sessionStorage.setItem("ecom_daraz_syncing", "1");
+        }
       } else {
         setConnection(null);
         clearCachedConnection("daraz");
@@ -51,43 +65,83 @@ export default function DarazTab() {
       window.history.replaceState({}, "", window.location.pathname);
     }
     if (params.get("daraz_connected")) {
-      setNotice("Store connected. We are fetching your data — you will review before anything is added to your ERP.");
+      setNotice("Store connected. We are fetching your data — stay on this page until the review window opens.");
+      awaitSyncPreviewRef.current = true;
+      setSyncing(true);
+      sessionStorage.setItem("ecom_daraz_await_sync_preview", "1");
+      sessionStorage.setItem("ecom_daraz_syncing", "1");
       window.history.replaceState({}, "", window.location.pathname);
+    }
+    if (sessionStorage.getItem("ecom_daraz_syncing") === "1") {
+      setSyncing(true);
+      awaitSyncPreviewRef.current = true;
     }
     loadSyncStatus();
   }, [loadSyncStatus]);
 
   useEffect(() => {
     if (!connected) return undefined;
-    pollRef.current = setInterval(loadSyncStatus, 5000);
+    pollRef.current = setInterval(loadSyncStatus, syncInProgress ? 2500 : 5000);
     return () => clearInterval(pollRef.current);
-  }, [connected, loadSyncStatus]);
+  }, [connected, loadSyncStatus, syncInProgress]);
+
+  useEffect(() => {
+    if (!syncInProgress) return undefined;
+    const onBeforeUnload = (e) => {
+      e.preventDefault();
+      e.returnValue = "A store sync is still running. Stay on this page until it finishes.";
+      return e.returnValue;
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [syncInProgress]);
 
   useEffect(() => {
     const status = connection?.initialSyncStatus;
     const prev = prevSyncStatusRef.current;
     prevSyncStatusRef.current = status;
-    if (!syncing) return;
-    if (status === "completed" || status === "failed") {
-      setSyncing(false);
-      if (prev === "running" || prev === "pending") {
-        const counts = connection?.counts || {};
-        const parts = [
-          counts.location != null ? `${counts.location} warehouse(s)` : null,
-          counts.order != null ? `${counts.order} order(s)` : null,
-          counts.product != null ? `${counts.product} product(s)` : null,
-          counts.customer != null ? `${counts.customer} customer(s)` : null,
-        ].filter(Boolean);
-        setNotice(
-          status === "completed"
-            ? parts.length
-              ? `Re-sync finished — staged ${parts.join(", ")}. Review import below before adding to ERP.`
-              : "Re-sync finished — warehouses, orders, products, and customers are up to date."
-            : "Re-sync failed. Check sync status and try again.",
-        );
-      }
+
+    if (sessionStorage.getItem("ecom_daraz_await_sync_preview") === "1") {
+      awaitSyncPreviewRef.current = true;
     }
-  }, [connection?.initialSyncStatus, connection?.counts, syncing]);
+
+    const finishedOk =
+      status === "completed"
+      && serverSawRunningRef.current
+      && (prev === "running" || prev === "pending");
+    const finishedFail =
+      status === "failed"
+      && serverSawRunningRef.current
+      && (prev === "running" || prev === "pending");
+
+    if (finishedOk) {
+      setSyncing(false);
+      awaitSyncPreviewRef.current = false;
+      serverSawRunningRef.current = false;
+      sessionStorage.removeItem("ecom_daraz_await_sync_preview");
+      sessionStorage.removeItem("ecom_daraz_syncing");
+      const counts = connection?.counts || {};
+      const parts = [
+        counts.location != null ? `${counts.location} warehouse(s)` : null,
+        counts.order != null ? `${counts.order} order(s)` : null,
+        counts.product != null ? `${counts.product} product(s)` : null,
+        counts.customer != null ? `${counts.customer} customer(s)` : null,
+      ].filter(Boolean);
+      setNotice(
+        parts.length
+          ? `Sync finished — staged ${parts.join(", ")}. Review the details in the window.`
+          : "Sync finished. Review the details in the window.",
+      );
+      setSyncPreviewOpen(true);
+    } else if (finishedFail) {
+      setSyncing(false);
+      awaitSyncPreviewRef.current = false;
+      serverSawRunningRef.current = false;
+      sessionStorage.removeItem("ecom_daraz_await_sync_preview");
+      sessionStorage.removeItem("ecom_daraz_syncing");
+      setNotice("Re-sync failed. Check Import failures below.");
+    }
+  }, [connection?.initialSyncStatus, connection?.counts]);
 
   const handleConnect = async () => {
     setNotice("");
@@ -109,12 +163,23 @@ export default function DarazTab() {
 
   const handleRetrySync = async () => {
     setSyncing(true);
-    setNotice("Re-syncing from Daraz… fetching warehouses, orders, products, and customers.");
+    awaitSyncPreviewRef.current = true;
+    serverSawRunningRef.current = false;
+    sessionStorage.setItem("ecom_daraz_await_sync_preview", "1");
+    sessionStorage.setItem("ecom_daraz_syncing", "1");
+    setNotice(
+      "Re-syncing from Daraz… Stay on this page until it finishes. Leaving may interrupt progress updates.",
+    );
     setConnection((prev) => (prev ? { ...prev, initialSyncStatus: "running" } : prev));
+    prevSyncStatusRef.current = "running";
     try {
       await ecomApiPostEmpty("daraz", "sync/retry", authFetch);
+      serverSawRunningRef.current = true;
     } catch {
       setSyncing(false);
+      awaitSyncPreviewRef.current = false;
+      sessionStorage.removeItem("ecom_daraz_await_sync_preview");
+      sessionStorage.removeItem("ecom_daraz_syncing");
       setNotice("Could not start the re-sync. Please try again.");
       return;
     }
@@ -178,11 +243,15 @@ export default function DarazTab() {
           onRetrySync={handleRetrySync}
           onImported={handleImported}
           showRetry
-          retryBusy={syncing || connection.initialSyncStatus === "running"}
+          retryBusy={syncInProgress}
           retryLabel={connection.initialSyncStatus === "failed" ? "Retry sync" : "Re-sync from Daraz"}
+          syncStayWarning={syncInProgress}
           autoSyncEnabled={connection.autoSyncEnabled !== false}
           autoSyncSaving={autoSyncSaving}
           onAutoSyncChange={handleAutoSyncChange}
+          syncPreviewOpen={syncPreviewOpen}
+          onSyncPreviewClose={closeSyncPreview}
+          onOpenSyncPreview={openSyncPreview}
         />
       </>
     );

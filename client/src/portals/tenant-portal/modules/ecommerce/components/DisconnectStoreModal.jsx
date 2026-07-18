@@ -20,7 +20,7 @@ const POLICY_OPTIONS = [
     id: "delete_all",
     title: "Delete staged + imported ERP data",
     description:
-      "Remove staging data and soft-delete products, customers, and orders that were imported from this integration. Manual records are never deleted.",
+      "Remove staging data and soft-delete only Shopify/Daraz-sourced products, customers, orders, and mapped warehouses/outlets from this store. Manual ERP records are never deleted.",
   },
 ];
 
@@ -32,15 +32,17 @@ export default function DisconnectStoreModal({
   authFetch,
   onDisconnected,
 }) {
-  const [policy, setPolicy] = useState("keep");
+  const [policy, setPolicy] = useState("delete_all");
   const [preview, setPreview] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [resultNotice, setResultNotice] = useState("");
 
   useEffect(() => {
     if (!open) return;
-    setPolicy("keep");
+    setPolicy("delete_all");
     setError("");
+    setResultNotice("");
     ecomApiGet(platform, "oauth/disconnect-preview", authFetch)
       .then(setPreview)
       .catch(() => setPreview(null));
@@ -50,7 +52,13 @@ export default function DisconnectStoreModal({
     setLoading(true);
     setError("");
     try {
-      await ecomApiPost(platform, "oauth/disconnect", authFetch, { dataPolicy: policy });
+      const result = await ecomApiPost(platform, "oauth/disconnect", authFetch, { dataPolicy: policy });
+      const d = result?.deletedErp || {};
+      if (policy === "delete_all") {
+        setResultNotice(
+          `Removed from ERP: ${d.orders || 0} orders, ${d.customers || 0} customers, ${d.products || 0} products, ${d.warehouses || 0} warehouses.`,
+        );
+      }
       onDisconnected?.();
       onClose();
     } catch (err) {
@@ -85,12 +93,26 @@ export default function DisconnectStoreModal({
         <div className="wh-muted" style={{ marginBottom: "1rem", fontSize: "0.9rem" }}>
           Staged: {(preview.stagedRecords?.order || 0)} orders,{" "}
           {(preview.stagedRecords?.product || 0)} products,{" "}
-          {(preview.stagedRecords?.customer || 0)} customers · Imported to ERP:{" "}
-          {(preview.importedToErp?.product || 0)} products,{" "}
-          {(preview.importedToErp?.customer || 0)} customers,{" "}
-          {(preview.importedToErp?.order || 0)} orders
+          {(preview.stagedRecords?.customer || 0)} customers
+          {preview.willDeleteFromErp ? (
+            <>
+              {" "}· Will remove from ERP if you choose delete all:{" "}
+              {(preview.willDeleteFromErp?.order || 0)} orders,{" "}
+              {(preview.willDeleteFromErp?.customer || 0)} customers,{" "}
+              {(preview.willDeleteFromErp?.product || 0)} products,{" "}
+              {(preview.willDeleteFromErp?.warehouse || 0)} warehouses
+            </>
+          ) : (
+            <>
+              {" "}· Linked in ERP:{" "}
+              {(preview.importedToErp?.order || 0)} orders,{" "}
+              {(preview.importedToErp?.customer || 0)} customers,{" "}
+              {(preview.importedToErp?.product || 0)} products
+            </>
+          )}
         </div>
       )}
+      {resultNotice && <p className="wh-form-message" style={{ marginBottom: "0.75rem" }}>{resultNotice}</p>}
 
       <div className="wh-form" style={{ gap: "0.75rem" }}>
         {POLICY_OPTIONS.map((opt) => (

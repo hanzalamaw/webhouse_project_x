@@ -3,52 +3,69 @@ import { Card } from "../../../../../components/Card";
 import { Button } from "../../../../../components/Button";
 import { ecomApiGet, ecomApiPost } from "../api/ecommerceClient";
 import { formatPKR } from "../../../../../utils/currency";
+import { parseImportIssueMessage } from "../utils/importIssueMessages";
 
 function EntityPreviewSection({ title, data, selected, onToggle }) {
   if (!data) return null;
   const { summary, samples } = data;
   const pending = (summary?.create || 0) + (summary?.update || 0);
+  const skipCount = summary?.skip || 0;
 
   return (
     <div style={{ marginBottom: "1.25rem" }}>
       <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.5rem" }}>
-        <input type="checkbox" checked={selected} onChange={onToggle} disabled={!pending && !summary?.create} />
+        <input type="checkbox" checked={selected} onChange={onToggle} disabled={!pending && !summary?.create && !skipCount} />
         <strong>{title}</strong>
         <span className="wh-muted">
-          — {summary?.create || 0} new, {summary?.update || 0} updates, {summary?.skip || 0} skipped
+          — {summary?.create || 0} new, {summary?.update || 0} updates, {skipCount} skipped
           {(summary?.already_imported || 0) > 0 ? `, ${summary.already_imported} already in ERP` : ""}
         </span>
       </label>
 
-      {selected && pending > 0 && (
+      {selected && (pending > 0 || skipCount > 0) && (
         <div className="wh-table-wrap">
           <table className="wh-table wh-table--compact">
             <thead>
               <tr>
                 <th>Action</th>
                 <th>Name / ID</th>
-                <th>Details</th>
+                <th>Why / how to fix</th>
               </tr>
             </thead>
             <tbody>
               {["create", "update", "skip"].flatMap((action) =>
-                (samples?.[action] || []).map((row) => (
-                  <tr key={`${action}-${row.externalId}`}>
-                    <td>
-                      <span className={`wh-badge wh-badge--${action === "skip" ? "warning" : action === "update" ? "accent" : "success"}`}>
-                        {action}
-                      </span>
-                    </td>
-                    <td>{row.name || row.orderNo || row.externalId}</td>
-                    <td className="wh-muted" style={{ fontSize: "0.85rem" }}>
-                      {row.sku && <>SKU: {row.sku} · </>}
-                      {row.price != null && <>Price: {formatPKR(row.price)} · </>}
-                      {row.total != null && <>Total: {formatPKR(row.total)} · </>}
-                      {row.email && <>{row.email} · </>}
-                      {row.reason}
-                    </td>
-                  </tr>
-                )),
+                (samples?.[action] || []).map((row) => {
+                  const parsed = parseImportIssueMessage(row.reason);
+                  return (
+                    <tr key={`${action}-${row.externalId}`}>
+                      <td>
+                        <span className={`wh-badge wh-badge--${action === "skip" ? "warning" : action === "update" ? "accent" : "success"}`}>
+                          {action}
+                        </span>
+                      </td>
+                      <td>{row.name || row.orderNo || row.externalId}</td>
+                      <td className="wh-muted" style={{ fontSize: "0.85rem" }}>
+                        {row.sku && <>SKU: {row.sku}<br /></>}
+                        {row.price != null && <>Price: {formatPKR(row.price)}<br /></>}
+                        {row.total != null && <>Total: {formatPKR(row.total)}<br /></>}
+                        {row.email && <>{row.email}<br /></>}
+                        {action === "skip" && (parsed.why || row.reason) ? (
+                          <>
+                            <strong>Why:</strong> {parsed.why || row.reason}
+                            {parsed.fix ? (
+                              <>
+                                <br />
+                                <strong>How to fix:</strong> {parsed.fix}
+                              </>
+                            ) : null}
+                          </>
+                        ) : (
+                          row.reason || "—"
+                        )}
+                      </td>
+                    </tr>
+                  );
+                }),
               )}
             </tbody>
           </table>
@@ -110,9 +127,21 @@ export default function ImportPreviewPanel({ platform, authFetch, connection, on
       const parts = selected.map((t) => {
         const r = result.results?.[t];
         if (!r) return null;
-        return `${t}: ${r.created} new, ${r.updated} updated, ${r.skipped} skipped`;
+        const failed = r.failed ? `, ${r.failed} failed` : "";
+        return `${t}: ${r.created} new, ${r.updated} updated, ${r.skipped} skipped${failed}`;
       }).filter(Boolean);
       setMessage(parts.length ? `Import complete — ${parts.join(" · ")}` : "Import complete");
+      const issues = [
+        ...(Array.isArray(result.failures) ? result.failures : []),
+        ...(Array.isArray(result.skips) ? result.skips : []),
+      ];
+      if (issues.length) {
+        const sample = issues.slice(0, 3).map((i) => i.reason).filter(Boolean);
+        setError(
+          `${issues.length} record(s) were not imported. `
+          + (sample.length ? sample.join(" ") : "See “Why some records weren’t imported” below."),
+        );
+      }
       onImported?.(result);
     } catch (err) {
       setError(err.message || "Import failed");

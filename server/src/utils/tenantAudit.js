@@ -43,6 +43,9 @@ export async function logTenantAudit({
 
   const resolvedModuleId = moduleId || (await defaultModuleId(tenantId));
 
+  // System/import paths may have no acting user — never fail the write for audit alone.
+  if (userId == null || userId === "") return;
+
   await writeDb.query(
     `INSERT INTO audit_logs
      (action, old_value, new_value, ip_address, device_info, tenant_id, module_id, user_id)

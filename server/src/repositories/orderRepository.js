@@ -313,6 +313,57 @@ export const orderRepository = {
     return order;
   },
 
+  async getOrderByIdIncludingDeleted(tenantId, id) {
+    const [rows] = await readDb.query(
+      `SELECT id, order_no, order_source, order_status, payment_status, fulfillment_status,
+              total_amount, discount_amount, delivery_charges, payable_amount,
+              city, delivery_address, delivery_state, delivery_postal_code, delivery_country,
+              notes, tags, customer_id, tenant_id, created_at, deleted_at
+       FROM orders
+       WHERE id = ? AND tenant_id = ?
+       LIMIT 1`,
+      [id, tenantId],
+    );
+    return rows[0] || null;
+  },
+
+  async findOrderByOrderNoIncludingDeleted(tenantId, orderNo) {
+    const [rows] = await readDb.query(
+      `SELECT id, order_no, order_source, deleted_at
+       FROM orders
+       WHERE tenant_id = ? AND order_no = ?
+       LIMIT 1`,
+      [tenantId, orderNo],
+    );
+    return rows[0] || null;
+  },
+
+  async reviveOrder(tenantId, id) {
+    await writeDb.query(
+      `UPDATE orders SET deleted_at = NULL WHERE id = ? AND tenant_id = ?`,
+      [id, tenantId],
+    );
+    for (const table of [
+      "order_items",
+      "order_payments",
+      "order_assignments",
+      "order_cancellations",
+      "order_returns",
+      "order_exchanges",
+      "order_refunds",
+    ]) {
+      try {
+        await writeDb.query(
+          `UPDATE \`${table}\` SET deleted_at = NULL
+           WHERE tenant_id = ? AND order_id = ? AND deleted_at IS NOT NULL`,
+          [tenantId, id],
+        );
+      } catch {
+        // Table may not have deleted_at
+      }
+    }
+  },
+
   async generateOrderNo(tenantId) {
     const prefix = `ORD-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}`;
     const [rows] = await readDb.query(

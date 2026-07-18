@@ -14,6 +14,7 @@ export async function getCrmModuleId() {
 }
 
 export async function logCrmActivity(tenantId, userId, action, summary, extra = {}) {
+  if (userId == null || userId === "") return;
   const moduleId = await getCrmModuleId();
   const ctx = getAuditContext();
   const { oldValue, newValue, ...rest } = extra;

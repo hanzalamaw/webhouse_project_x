@@ -401,6 +401,13 @@ export const inventoryService = {
   STATUS_VALUES,
 
   async dashboard(tenantId) {
+    // Drop empty Shopify/Daraz product shells left by failed imports so KPI matches Manage Products / warehouses.
+    try {
+      const { purgeOrphanMarketplaceProducts } = await import("./ecommerce/ecomImport.js");
+      await purgeOrphanMarketplaceProducts(tenantId);
+    } catch {
+      // non-fatal
+    }
     const [
       stats,
       recent_movements,

@@ -123,6 +123,19 @@ export const AuthProvider = ({ children }) => {
     if (epoch !== sessionEpochRef.current) return res;
 
     if (res.status === 401) {
+      // Business "not connected" must never log the user out (legacy 401s).
+      let bodyText = "";
+      try {
+        bodyText = await res.clone().text();
+      } catch {
+        bodyText = "";
+      }
+      if (/not connected/i.test(bodyText)) {
+        return new Response(bodyText, {
+          status: 409,
+          headers: { "Content-Type": res.headers.get("Content-Type") || "application/json" },
+        });
+      }
       const refreshToken = getActiveRefreshToken();
       if (!refreshToken || isTokenExpired(refreshToken)) {
         clearSessionAndLogout(session.user);
@@ -140,6 +153,17 @@ export const AuthProvider = ({ children }) => {
         headers: { ...options.headers, Authorization: `Bearer ${refreshed}` },
       });
       if (res.status === 401) {
+        try {
+          bodyText = await res.clone().text();
+        } catch {
+          bodyText = "";
+        }
+        if (/not connected/i.test(bodyText)) {
+          return new Response(bodyText, {
+            status: 409,
+            headers: { "Content-Type": res.headers.get("Content-Type") || "application/json" },
+          });
+        }
         clearSessionAndLogout(session.user);
       }
     }

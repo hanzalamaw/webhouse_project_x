@@ -64,13 +64,30 @@ export const inventoryRepository = {
          (SELECT COUNT(*) FROM inventory_categories WHERE tenant_id = ? AND deleted_at IS NULL AND status = 'active') AS active_categories,
          (SELECT COUNT(*) FROM inventory_warehouses WHERE tenant_id = ? AND deleted_at IS NULL) AS warehouse_count,
          (SELECT COUNT(*) FROM inventory_warehouses WHERE tenant_id = ? AND deleted_at IS NULL AND status = 'active') AS active_warehouses,
-         (SELECT COALESCE(SUM(total_qty), 0) FROM inventory_stock_levels WHERE tenant_id = ? AND deleted_at IS NULL) AS total_stock_units,
-         (SELECT COALESCE(SUM(available_qty), 0) FROM inventory_stock_levels WHERE tenant_id = ? AND deleted_at IS NULL) AS available_units,
-         (SELECT COALESCE(SUM(reserved_qty), 0) FROM inventory_stock_levels WHERE tenant_id = ? AND deleted_at IS NULL) AS reserved_units,
-         (SELECT COALESCE(SUM(damaged_qty), 0) FROM inventory_stock_levels WHERE tenant_id = ? AND deleted_at IS NULL) AS damaged_units,
+         (SELECT COALESCE(SUM(sl.total_qty), 0)
+            FROM inventory_stock_levels sl
+            JOIN inventory_product_variants v ON v.id = sl.variant_id AND ${joinOnTenant("sl", "v")}
+            JOIN inventory_products p ON p.id = v.product_id AND ${joinOnTenant("v", "p")}
+           WHERE sl.tenant_id = ? AND sl.deleted_at IS NULL) AS total_stock_units,
+         (SELECT COALESCE(SUM(sl.available_qty), 0)
+            FROM inventory_stock_levels sl
+            JOIN inventory_product_variants v ON v.id = sl.variant_id AND ${joinOnTenant("sl", "v")}
+            JOIN inventory_products p ON p.id = v.product_id AND ${joinOnTenant("v", "p")}
+           WHERE sl.tenant_id = ? AND sl.deleted_at IS NULL) AS available_units,
+         (SELECT COALESCE(SUM(sl.reserved_qty), 0)
+            FROM inventory_stock_levels sl
+            JOIN inventory_product_variants v ON v.id = sl.variant_id AND ${joinOnTenant("sl", "v")}
+            JOIN inventory_products p ON p.id = v.product_id AND ${joinOnTenant("v", "p")}
+           WHERE sl.tenant_id = ? AND sl.deleted_at IS NULL) AS reserved_units,
+         (SELECT COALESCE(SUM(sl.damaged_qty), 0)
+            FROM inventory_stock_levels sl
+            JOIN inventory_product_variants v ON v.id = sl.variant_id AND ${joinOnTenant("sl", "v")}
+            JOIN inventory_products p ON p.id = v.product_id AND ${joinOnTenant("v", "p")}
+           WHERE sl.tenant_id = ? AND sl.deleted_at IS NULL) AS damaged_units,
          (SELECT COALESCE(SUM(sl.available_qty * v.cost_price), 0)
             FROM inventory_stock_levels sl
             JOIN inventory_product_variants v ON v.id = sl.variant_id AND ${joinOnTenant("sl", "v")}
+            JOIN inventory_products p ON p.id = v.product_id AND ${joinOnTenant("v", "p")}
            WHERE sl.tenant_id = ? AND sl.deleted_at IS NULL) AS inventory_value_cost,
          (SELECT COALESCE(SUM(sl.available_qty * GREATEST(v.selling_price - p.discount + p.tax, 0)), 0)
             FROM inventory_stock_levels sl
@@ -161,13 +178,14 @@ export const inventoryRepository = {
   async dashboardStockByWarehouse(tenantId) {
     const [rows] = await readDb.query(
       `SELECT w.warehouse_name AS label,
-              COUNT(DISTINCT sl.variant_id) AS product_count,
-              COALESCE(SUM(sl.total_qty), 0) AS total_qty,
-              COALESCE(SUM(sl.available_qty), 0) AS available_qty,
-              COALESCE(SUM(sl.available_qty * v.cost_price), 0) AS value_cost
+              COUNT(DISTINCT CASE WHEN v.id IS NOT NULL AND p.id IS NOT NULL THEN sl.variant_id END) AS product_count,
+              COALESCE(SUM(CASE WHEN v.id IS NOT NULL AND p.id IS NOT NULL THEN sl.total_qty ELSE 0 END), 0) AS total_qty,
+              COALESCE(SUM(CASE WHEN v.id IS NOT NULL AND p.id IS NOT NULL THEN sl.available_qty ELSE 0 END), 0) AS available_qty,
+              COALESCE(SUM(CASE WHEN v.id IS NOT NULL AND p.id IS NOT NULL THEN sl.available_qty * v.cost_price ELSE 0 END), 0) AS value_cost
        FROM inventory_warehouses w
        LEFT JOIN inventory_stock_levels sl ON sl.warehouse_id = w.id AND ${joinOnTenant("w", "sl")}
        LEFT JOIN inventory_product_variants v ON v.id = sl.variant_id AND ${joinOnTenant("sl", "v")}
+       LEFT JOIN inventory_products p ON p.id = v.product_id AND ${joinOnTenant("v", "p")}
        WHERE w.tenant_id = ? AND w.deleted_at IS NULL
        GROUP BY w.id, w.warehouse_name
        ORDER BY total_qty DESC`,
@@ -441,9 +459,20 @@ export const inventoryRepository = {
     );
     if (result.affectedRows > 0) {
       await writeDb.query(
-        `UPDATE inventory_product_variants SET deleted_at = NOW()
-         WHERE product_id = ? AND tenant_id = ? AND deleted_at IS NULL`,
+        `UPDATE inventory_product_variants
+         SET deleted_at = COALESCE(deleted_at, NOW()),
+             sku = CONCAT('__deleted_', id)
+         WHERE product_id = ? AND tenant_id = ?
+           AND (deleted_at IS NULL OR sku NOT LIKE '__deleted_%')`,
         [id, tenantId]
+      );
+      await writeDb.query(
+        `UPDATE inventory_stock_levels sl
+         INNER JOIN inventory_product_variants v
+           ON v.id = sl.variant_id AND v.tenant_id = sl.tenant_id
+         SET sl.deleted_at = NOW()
+         WHERE sl.tenant_id = ? AND v.product_id = ? AND sl.deleted_at IS NULL`,
+        [tenantId, id]
       );
     }
     return result.affectedRows > 0;
@@ -512,8 +541,12 @@ export const inventoryRepository = {
 
   async findVariantBySku(tenantId, sku, excludeId = null) {
     const params = [tenantId, sku];
-    let sql = `SELECT v.id, v.product_id, v.sku, v.variant_name, v.cost_price, v.selling_price, v.status
+    // Only match live products — soft-deleted parents must not block re-import (SKU uniqueness is tenant-scoped).
+    let sql = `SELECT v.id, v.product_id, v.sku, v.variant_name, v.cost_price, v.selling_price, v.status,
+              p.source AS product_source, p.product_name, p.deleted_at AS product_deleted_at
        FROM inventory_product_variants v
+       INNER JOIN inventory_products p
+         ON p.id = v.product_id AND p.tenant_id = v.tenant_id AND p.deleted_at IS NULL
        WHERE v.tenant_id = ? AND v.sku = ? AND v.deleted_at IS NULL`;
     if (excludeId) {
       sql += ` AND v.id != ?`;
@@ -531,8 +564,11 @@ export const inventoryRepository = {
     const exact = await this.findVariantBySku(tenantId, trimmed, excludeId);
     if (exact) return exact;
     const params = [tenantId, trimmed];
-    let sql = `SELECT v.id, v.product_id, v.sku, v.variant_name, v.cost_price, v.selling_price, v.status
+    let sql = `SELECT v.id, v.product_id, v.sku, v.variant_name, v.cost_price, v.selling_price, v.status,
+              p.source AS product_source, p.product_name, p.deleted_at AS product_deleted_at
        FROM inventory_product_variants v
+       INNER JOIN inventory_products p
+         ON p.id = v.product_id AND p.tenant_id = v.tenant_id AND p.deleted_at IS NULL
        WHERE v.tenant_id = ? AND LOWER(TRIM(v.sku)) = LOWER(TRIM(?)) AND v.deleted_at IS NULL`;
     if (excludeId) {
       sql += ` AND v.id != ?`;
@@ -541,6 +577,79 @@ export const inventoryRepository = {
     sql += ` LIMIT 1`;
     const [rows] = await readDb.query(sql, params);
     return rows[0] || null;
+  },
+
+  /** Soft-deleted variant still holding a SKU (blocks uk_inventory_variants_tenant_sku). */
+  async findSoftDeletedVariantBySku(tenantId, sku) {
+    const trimmed = String(sku || "").trim();
+    if (!trimmed) return null;
+    const [rows] = await readDb.query(
+      `SELECT v.id, v.product_id, v.sku, p.source AS product_source, p.deleted_at AS product_deleted_at
+       FROM inventory_product_variants v
+       INNER JOIN inventory_products p ON p.id = v.product_id AND p.tenant_id = v.tenant_id
+       WHERE v.tenant_id = ? AND v.sku = ? AND v.deleted_at IS NOT NULL
+       LIMIT 1`,
+      [tenantId, trimmed],
+    );
+    return rows[0] || null;
+  },
+
+  async getProductByIdIncludingDeleted(tenantId, id) {
+    const [rows] = await readDb.query(
+      `SELECT id, product_name, description, unit, delivery_charges, discount, tax,
+              status, source, category_id, tenant_id, created_at, updated_at, deleted_at
+       FROM inventory_products
+       WHERE id = ? AND tenant_id = ?
+       LIMIT 1`,
+      [id, tenantId],
+    );
+    return rows[0] || null;
+  },
+
+  async reviveProduct(tenantId, id) {
+    await writeDb.query(
+      `UPDATE inventory_products SET deleted_at = NULL WHERE id = ? AND tenant_id = ?`,
+      [id, tenantId],
+    );
+    await writeDb.query(
+      `UPDATE inventory_product_variants SET deleted_at = NULL
+       WHERE product_id = ? AND tenant_id = ?`,
+      [id, tenantId],
+    );
+    await writeDb.query(
+      `UPDATE inventory_stock_levels sl
+       INNER JOIN inventory_product_variants v
+         ON v.id = sl.variant_id AND v.tenant_id = sl.tenant_id
+       SET sl.deleted_at = NULL
+       WHERE sl.tenant_id = ? AND v.product_id = ? AND sl.deleted_at IS NOT NULL`,
+      [tenantId, id],
+    );
+  },
+
+  /** Free SKUs held by soft-deleted (or orphan live) variants so a new import can reuse them. */
+  async releaseSoftDeletedSku(tenantId, sku) {
+    const trimmed = String(sku || "").trim();
+    if (!trimmed) return 0;
+    // Soft-deleted variants still holding the original SKU
+    const [soft] = await writeDb.query(
+      `UPDATE inventory_product_variants
+       SET sku = CONCAT('__deleted_', id)
+       WHERE tenant_id = ? AND sku = ? AND deleted_at IS NOT NULL
+         AND sku NOT LIKE '__deleted_%'`,
+      [tenantId, trimmed],
+    );
+    // Live variants whose parent product is soft-deleted (orphan rows that still block uk_tenant_sku)
+    const [orphan] = await writeDb.query(
+      `UPDATE inventory_product_variants v
+       INNER JOIN inventory_products p
+         ON p.id = v.product_id AND p.tenant_id = v.tenant_id
+       SET v.deleted_at = COALESCE(v.deleted_at, NOW()),
+           v.sku = CONCAT('__deleted_', v.id)
+       WHERE v.tenant_id = ? AND v.sku = ? AND v.deleted_at IS NULL
+         AND p.deleted_at IS NOT NULL`,
+      [tenantId, trimmed],
+    );
+    return (soft.affectedRows || 0) + (orphan.affectedRows || 0);
   },
 
   /** @deprecated use findVariantBySku */
@@ -699,10 +808,12 @@ export const inventoryRepository = {
   async listWarehouses(tenantId, { limit, offset }) {
     const [rows] = await readDb.query(
       `SELECT w.id, w.warehouse_name, w.location, w.city, w.status, w.created_at, w.tenant_id,
-              COUNT(DISTINCT sl.variant_id) AS product_count,
-              COALESCE(SUM(sl.total_qty), 0) AS total_units
+              COUNT(DISTINCT CASE WHEN v.id IS NOT NULL AND p.id IS NOT NULL THEN sl.variant_id END) AS product_count,
+              COALESCE(SUM(CASE WHEN v.id IS NOT NULL AND p.id IS NOT NULL THEN sl.total_qty ELSE 0 END), 0) AS total_units
        FROM inventory_warehouses w
        LEFT JOIN inventory_stock_levels sl ON sl.warehouse_id = w.id AND ${joinOnTenant("w", "sl")}
+       LEFT JOIN inventory_product_variants v ON v.id = sl.variant_id AND ${joinOnTenant("sl", "v")}
+       LEFT JOIN inventory_products p ON p.id = v.product_id AND ${joinOnTenant("v", "p")}
        WHERE ${tenantWhere("w", tenantId)}
        GROUP BY w.id
        ORDER BY w.warehouse_name ASC
@@ -739,6 +850,7 @@ export const inventoryRepository = {
               COALESCE(SUM(sl.available_qty * v.selling_price), 0) AS stock_value_retail
        FROM inventory_stock_levels sl
        JOIN inventory_product_variants v ON v.id = sl.variant_id AND ${joinOnTenant("sl", "v")}
+       JOIN inventory_products p ON p.id = v.product_id AND ${joinOnTenant("v", "p")}
        WHERE sl.warehouse_id = ? AND ${tenantWhere("sl", tenantId)}`,
       [warehouseId, tenantId]
     );
@@ -823,6 +935,13 @@ export const inventoryRepository = {
        WHERE id = ? AND ${tenantWhere("inventory_warehouses", tenantId)}`,
       [id, tenantId]
     );
+    if (result.affectedRows > 0) {
+      await writeDb.query(
+        `UPDATE inventory_stock_levels SET deleted_at = NOW()
+         WHERE warehouse_id = ? AND tenant_id = ? AND deleted_at IS NULL`,
+        [id, tenantId]
+      );
+    }
     return result.affectedRows > 0;
   },
 

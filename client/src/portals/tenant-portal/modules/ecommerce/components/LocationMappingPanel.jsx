@@ -14,19 +14,23 @@ function capacityText(cap, noun) {
 }
 
 /** Rows for the warehouse/outlet target <select>: skip, create new, or an existing target. */
-function warehouseOptions(warehouses, canCreate, currentLocationId) {
+function warehouseOptions(warehouses, canCreate, currentLocationId, { locked = false } = {}) {
   return (
     <>
-      <option value={SKIP}>Don’t map</option>
-      <option value={CREATE} disabled={!canCreate}>
-        {canCreate ? "Create new warehouse" : "Create new warehouse (limit reached)"}
-      </option>
+      {!locked && <option value={SKIP}>Don’t map</option>}
+      {!locked && (
+        <option value={CREATE} disabled={!canCreate}>
+          {canCreate ? "Create new warehouse" : "Create new warehouse (limit reached)"}
+        </option>
+      )}
       {(warehouses || []).map((item) => {
         const takenElsewhere = item.mappedLocationId && item.mappedLocationId !== currentLocationId;
+        const selectedHere = item.mappedLocationId === currentLocationId;
+        if (locked && !selectedHere) return null;
         return (
-          <option key={item.id} value={`existing:${item.id}`} disabled={takenElsewhere}>
+          <option key={item.id} value={`existing:${item.id}`} disabled={takenElsewhere || locked}>
             {item.name}
-            {takenElsewhere ? " (mapped to another location)" : ""}
+            {takenElsewhere ? " (mapped to another location)" : locked ? " (connected)" : ""}
           </option>
         );
       })}
@@ -34,18 +38,23 @@ function warehouseOptions(warehouses, canCreate, currentLocationId) {
   );
 }
 
-function targetOptions(list, canCreate, nounCreate) {
+function targetOptions(list, canCreate, nounCreate, { locked = false, currentId = null } = {}) {
   return (
     <>
-      <option value={SKIP}>Don’t map</option>
-      <option value={CREATE} disabled={!canCreate}>
-        {canCreate ? `Create new ${nounCreate}` : `Create new ${nounCreate} (limit reached)`}
-      </option>
-      {list.map((item) => (
-        <option key={item.id} value={`existing:${item.id}`}>
-          {item.name}
+      {!locked && <option value={SKIP}>Don’t map</option>}
+      {!locked && (
+        <option value={CREATE} disabled={!canCreate}>
+          {canCreate ? `Create new ${nounCreate}` : `Create new ${nounCreate} (limit reached)`}
         </option>
-      ))}
+      )}
+      {list.map((item) => {
+        if (locked && currentId && Number(item.id) !== Number(currentId)) return null;
+        return (
+          <option key={item.id} value={`existing:${item.id}`} disabled={locked}>
+            {item.name}{locked ? " (connected)" : ""}
+          </option>
+        );
+      })}
     </>
   );
 }
@@ -105,17 +114,29 @@ export default function LocationMappingPanel({ platform = "shopify", authFetch: 
     setSaving(true);
     setNotice("");
     try {
-      const selections = Object.entries(choices).map(([shopifyLocationId, c]) => {
-        const wh = parseAction(c.warehouse);
-        const out = parseAction(c.outlet);
-        return {
-          shopifyLocationId,
-          warehouseAction: wh.action,
-          warehouseId: wh.id,
-          outletAction: out.action,
-          outletId: out.id,
-        };
-      });
+      const selections = Object.entries(choices)
+        .map(([shopifyLocationId, c]) => {
+          const loc = (data?.locations || []).find(
+            (l) => String(l.shopifyLocationId) === String(shopifyLocationId),
+          );
+          // Already-connected warehouse mappings stay locked — never send a remap.
+          if (loc?.warehouseId || loc?.mapped) return null;
+          const wh = parseAction(c.warehouse);
+          const out = parseAction(c.outlet);
+          return {
+            shopifyLocationId,
+            warehouseAction: wh.action,
+            warehouseId: wh.id,
+            outletAction: out.action,
+            outletId: out.id,
+          };
+        })
+        .filter(Boolean);
+      if (!selections.length) {
+        setNotice("All locations are already connected. Nothing new to map.");
+        setSaving(false);
+        return;
+      }
       const res = await ecomApiPost(platform, "locations/import", authFetch, { selections });
       const failed = (res.results || []).filter((r) => !r.ok);
       setData(res);
@@ -164,8 +185,8 @@ export default function LocationMappingPanel({ platform = "shopify", authFetch: 
             <h3 className="wh-card__title">{isDaraz ? "Daraz warehouses" : "Store locations"}</h3>
             <p className="wh-muted" style={{ margin: "0.35rem 0 0" }}>
               {isDaraz
-                ? "Map each Daraz warehouse to an ERP warehouse (and optional POS outlet). Stock push and import use these mappings so inventory lands in the correct place."
-                : "Choose which store locations become warehouses and POS outlets in your ERP. Only active Shopify locations are shown (legacy or inactive locations are hidden). Each warehouse can map to only one Shopify location."}
+                ? "Map each Daraz warehouse to an ERP warehouse (and optional POS outlet). Once connected, mapping is locked so stock keeps landing in the same place."
+                : "Map store locations to ERP warehouses and POS outlets. Once a location is connected, remapping is turned off by default."}
             </p>
           </div>
         </div>
@@ -191,7 +212,10 @@ export default function LocationMappingPanel({ platform = "shopify", authFetch: 
               </tr>
             </thead>
             <tbody>
-              {data.locations.map((loc) => (
+              {data.locations.map((loc) => {
+                const warehouseLocked = Boolean(loc.warehouseId || loc.mapped);
+                const outletLocked = Boolean(loc.outletId);
+                return (
                 <tr key={loc.shopifyLocationId}>
                   <td>
                     <strong>{loc.name}</strong>
@@ -201,28 +225,62 @@ export default function LocationMappingPanel({ platform = "shopify", authFetch: 
                       </div>
                     ) : null}
                     {loc.city ? <div className="wh-muted">{loc.city}</div> : null}
+                    {warehouseLocked && (
+                      <div className="wh-badge wh-badge--success" style={{ marginTop: "0.35rem" }}>
+                        Connected
+                      </div>
+                    )}
                     {!loc.active && <div className="wh-muted">(inactive)</div>}
                   </td>
                   <td>
-                    <select
-                      className="wh-input"
-                      value={choices[loc.shopifyLocationId]?.warehouse ?? SKIP}
-                      onChange={(e) => setChoice(loc.shopifyLocationId, "warehouse", e.target.value)}
-                    >
-                      {warehouseOptions(data.warehouses, data.warehouseCapacity?.canCreate, loc.shopifyLocationId)}
-                    </select>
+                    {warehouseLocked ? (
+                      <div>
+                        <strong>
+                          {(data.warehouses || []).find((w) => Number(w.id) === Number(loc.warehouseId))?.name
+                            || "Mapped warehouse"}
+                        </strong>
+                        <div className="wh-muted" style={{ fontSize: "0.85em" }}>
+                          Locked — already connected during sync
+                        </div>
+                      </div>
+                    ) : (
+                      <select
+                        className="wh-input"
+                        value={choices[loc.shopifyLocationId]?.warehouse ?? SKIP}
+                        onChange={(e) => setChoice(loc.shopifyLocationId, "warehouse", e.target.value)}
+                      >
+                        {warehouseOptions(
+                          data.warehouses,
+                          data.warehouseCapacity?.canCreate,
+                          loc.shopifyLocationId,
+                        )}
+                      </select>
+                    )}
                   </td>
                   <td>
-                    <select
-                      className="wh-input"
-                      value={choices[loc.shopifyLocationId]?.outlet ?? SKIP}
-                      onChange={(e) => setChoice(loc.shopifyLocationId, "outlet", e.target.value)}
-                    >
-                      {targetOptions(data.outlets, data.outletCapacity?.canCreate, "outlet")}
-                    </select>
+                    {outletLocked ? (
+                      <div>
+                        <strong>
+                          {(data.outlets || []).find((o) => Number(o.id) === Number(loc.outletId))?.name
+                            || "Mapped outlet"}
+                        </strong>
+                        <div className="wh-muted" style={{ fontSize: "0.85em" }}>
+                          Locked — already connected
+                        </div>
+                      </div>
+                    ) : (
+                      <select
+                        className="wh-input"
+                        value={choices[loc.shopifyLocationId]?.outlet ?? SKIP}
+                        onChange={(e) => setChoice(loc.shopifyLocationId, "outlet", e.target.value)}
+                      >
+                        {targetOptions(data.outlets, data.outletCapacity?.canCreate, "outlet")}
+                      </select>
+                    )}
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>

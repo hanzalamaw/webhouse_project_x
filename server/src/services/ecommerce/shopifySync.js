@@ -196,7 +196,14 @@ export async function registerWebhooks(store, grantedScopes = []) {
 }
 
 export async function runInitialFullSync(storeId, tenantId) {
-  if (runningSyncs.has(storeId)) return;
+  if (runningSyncs.has(storeId)) {
+    await addSyncLog(storeId, tenantId, {
+      syncType: "initial_sync",
+      status: "skipped",
+      message: "A sync is already running for this store — skipped duplicate start",
+    });
+    return;
+  }
   runningSyncs.add(storeId);
 
   const store = await getStoreById(storeId, tenantId);
@@ -335,7 +342,11 @@ export async function retryPostInstall(storeId, tenantId) {
   const store = await getStoreById(storeId, tenantId);
   if (!store) return { ok: false, error: "Store not found" };
 
-  await updateInitialSyncStatus(storeId, tenantId, "pending");
+  // Keep "running" if the HTTP handler already set it — avoid flickering back to pending
+  // which can confuse the UI completion detector.
+  if (store.initial_sync_status !== "running") {
+    await updateInitialSyncStatus(storeId, tenantId, "pending");
+  }
   await onAppInstalled(storeId, tenantId);
   return { ok: true };
 }

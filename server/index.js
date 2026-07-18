@@ -132,6 +132,13 @@ const startServer = async () => {
 
   // Run after server is listening so DB is fully ready
   server.on("listening", () => {
+    // Catch up any rows already past delete_after / deleted_at (e.g. server was
+    // down at midnight, or dates were backdated). Then arm for next local midnight.
+    setTimeout(() => {
+      runDailyRetention().catch((err) => {
+        console.error("[retention] startup catch-up failed:", err?.message || err);
+      });
+    }, 5000);
     scheduleDailyRetention(runDailyRetention);
     // Pull Shopify changes into the ERP without opening the ecommerce module.
     setTimeout(() => runShopifyBackgroundSync().catch(() => {}), 15000);

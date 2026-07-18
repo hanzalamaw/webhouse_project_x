@@ -28,10 +28,21 @@ export default function ShopifyTab() {
   const [notice, setNotice] = useState("");
   const [autoSyncSaving, setAutoSyncSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [syncPreviewOpen, setSyncPreviewOpen] = useState(false);
   const pollRef = useRef(null);
+  const prevSyncStatusRef = useRef(null);
+  const awaitSyncPreviewRef = useRef(false);
+  const serverSawRunningRef = useRef(false);
 
   const connected = connection?.connected;
   const shopQuery = (shop) => (shop ? `?shop=${encodeURIComponent(shop)}` : "");
+  const syncInProgress =
+    syncing
+    || connection?.initialSyncStatus === "running"
+    || connection?.initialSyncStatus === "pending";
+
+  const openSyncPreview = useCallback(() => setSyncPreviewOpen(true), []);
+  const closeSyncPreview = useCallback(() => setSyncPreviewOpen(false), []);
 
   const loadSyncStatus = useCallback(
     async (shop) => {
@@ -40,6 +51,11 @@ export default function ShopifyTab() {
         if (data.connected) {
           setConnection(data);
           writeCachedConnection("shopify", data);
+          if (data.initialSyncStatus === "running" || data.initialSyncStatus === "pending") {
+            serverSawRunningRef.current = true;
+            setSyncing(true);
+            sessionStorage.setItem("ecom_shopify_syncing", "1");
+          }
         } else {
           setConnection(null);
           clearCachedConnection("shopify");
@@ -59,8 +75,16 @@ export default function ShopifyTab() {
       window.history.replaceState({}, "", window.location.pathname);
     }
     if (params.get("shopify_connected")) {
-      setNotice("Store connected. We are fetching your data — you will review before anything is added to your ERP.");
+      setNotice("Store connected. We are fetching your data — stay on this page until the review window opens.");
+      awaitSyncPreviewRef.current = true;
+      setSyncing(true);
+      sessionStorage.setItem("ecom_shopify_await_sync_preview", "1");
+      sessionStorage.setItem("ecom_shopify_syncing", "1");
       window.history.replaceState({}, "", window.location.pathname);
+    }
+    if (sessionStorage.getItem("ecom_shopify_syncing") === "1") {
+      setSyncing(true);
+      awaitSyncPreviewRef.current = true;
     }
 
     const shop = params.get("shop");
@@ -72,26 +96,64 @@ export default function ShopifyTab() {
   useEffect(() => {
     if (!connected) return undefined;
     const shop = connection?.shop || shopInput;
-    // Poll faster while a re-sync is in progress so completion is detected promptly.
-    pollRef.current = setInterval(() => loadSyncStatus(shop), syncing ? 2500 : 5000);
+    const fast = syncInProgress;
+    pollRef.current = setInterval(() => loadSyncStatus(shop), fast ? 2500 : 5000);
     return () => clearInterval(pollRef.current);
-  }, [connected, connection?.shop, shopInput, loadSyncStatus, syncing]);
+  }, [connected, connection?.shop, shopInput, loadSyncStatus, syncInProgress]);
 
-  // Detect when an in-progress re-sync finishes and surface a clear result.
+  // Warn before leaving while sync is in progress (UI progress / review only — server keeps going).
   useEffect(() => {
-    if (!syncing) return;
+    if (!syncInProgress) return undefined;
+    const onBeforeUnload = (e) => {
+      e.preventDefault();
+      e.returnValue = "A store sync is still running. Stay on this page until it finishes.";
+      return e.returnValue;
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [syncInProgress]);
+
+  // Open CSV-style review whenever sync finishes (re-sync or first connect).
+  useEffect(() => {
     const status = connection?.initialSyncStatus;
-    if (status === "completed") {
+    const prev = prevSyncStatusRef.current;
+    prevSyncStatusRef.current = status;
+
+    if (sessionStorage.getItem("ecom_shopify_await_sync_preview") === "1") {
+      awaitSyncPreviewRef.current = true;
+    }
+
+    // Only treat completion as real after the server confirmed running/pending
+    // (avoids first-click false "done" while status was still the previous completed).
+    const finishedOk =
+      status === "completed"
+      && serverSawRunningRef.current
+      && (prev === "running" || prev === "pending");
+    const finishedFail =
+      status === "failed"
+      && serverSawRunningRef.current
+      && (prev === "running" || prev === "pending");
+
+    if (finishedOk) {
       setSyncing(false);
+      awaitSyncPreviewRef.current = false;
+      serverSawRunningRef.current = false;
+      sessionStorage.removeItem("ecom_shopify_await_sync_preview");
+      sessionStorage.removeItem("ecom_shopify_syncing");
       const c = connection?.counts || {};
       setNotice(
-        `Re-sync complete — ${c.order ?? 0} orders, ${c.product ?? 0} products, ${c.customer ?? 0} customers, ${c.location ?? 0} locations fetched.`,
+        `Sync complete — ${c.order ?? 0} orders, ${c.product ?? 0} products, ${c.customer ?? 0} customers, ${c.location ?? 0} locations fetched. Review the details in the window.`,
       );
-    } else if (status === "failed") {
+      setSyncPreviewOpen(true);
+    } else if (finishedFail) {
       setSyncing(false);
-      setNotice("Re-sync failed — see the sync log below for details.");
+      awaitSyncPreviewRef.current = false;
+      serverSawRunningRef.current = false;
+      sessionStorage.removeItem("ecom_shopify_await_sync_preview");
+      sessionStorage.removeItem("ecom_shopify_syncing");
+      setNotice("Re-sync failed — see Import failures below for details.");
     }
-  }, [connection, syncing]);
+  }, [connection?.initialSyncStatus, connection?.counts]);
 
   const handleIntegrate = async () => {
     if (!shopInput.trim()) return;
@@ -126,25 +188,26 @@ export default function ShopifyTab() {
   const handleRetrySync = async () => {
     const shop = connection?.shop || shopInput;
     setSyncing(true);
-    setNotice("Re-syncing from Shopify… repairing your imported data.");
-    // Optimistically mark as running so the completion detector doesn't fire on the stale status.
+    awaitSyncPreviewRef.current = true;
+    serverSawRunningRef.current = false;
+    sessionStorage.setItem("ecom_shopify_await_sync_preview", "1");
+    sessionStorage.setItem("ecom_shopify_syncing", "1");
+    setNotice(
+      "Re-syncing from Shopify… Stay on this page until it finishes. Leaving may interrupt progress updates (the server sync can still continue).",
+    );
     setConnection((prev) => (prev ? { ...prev, initialSyncStatus: "running" } : prev));
-    let data;
+    prevSyncStatusRef.current = "running";
     try {
-      data = await ecomApiPostEmpty("shopify", `sync/retry${shopQuery(shop)}`, authFetch);
+      await ecomApiPostEmpty("shopify", `sync/retry${shopQuery(shop)}`, authFetch);
+      serverSawRunningRef.current = true;
     } catch {
       setSyncing(false);
+      awaitSyncPreviewRef.current = false;
+      sessionStorage.removeItem("ecom_shopify_await_sync_preview");
+      sessionStorage.removeItem("ecom_shopify_syncing");
       setNotice("Could not start the re-sync. Please try again.");
       return;
     }
-    const r = data?.repaired;
-    if (r) {
-      setNotice(
-        `Repaired ${r.products} product(s), ${r.orders} order(s), ${r.customers} customer(s) — dates and warehouse stock corrected. Fetching the latest from Shopify in the background…`,
-      );
-    }
-    // Refresh counts/status; the background fetch continues and the completion detector
-    // will report when the fresh pull finishes.
     setTimeout(() => loadSyncStatus(shop), 1500);
   };
 
@@ -208,11 +271,17 @@ export default function ShopifyTab() {
           onRetrySync={handleRetrySync}
           onImported={handleImported}
           showRetry
-          retryBusy={syncing}
+          retryBusy={syncing || connection.initialSyncStatus === "running" || connection.initialSyncStatus === "pending"}
           retryLabel={connection.initialSyncStatus === "failed" ? "Retry sync" : "Re-sync from Shopify"}
+          syncStayWarning={
+            syncing || connection.initialSyncStatus === "running" || connection.initialSyncStatus === "pending"
+          }
           autoSyncEnabled={connection.autoSyncEnabled !== false}
           autoSyncSaving={autoSyncSaving}
           onAutoSyncChange={handleAutoSyncChange}
+          syncPreviewOpen={syncPreviewOpen}
+          onSyncPreviewClose={closeSyncPreview}
+          onOpenSyncPreview={openSyncPreview}
         />
       </>
     );

@@ -267,7 +267,7 @@ router.get("/sync/push-logs", async (req, res) => {
 
 router.post("/sync/push-retry", async (req, res) => {
   const store = await getStoreFromRequest(req);
-  if (!store) return res.status(401).json({ success: false, error: "Not connected" });
+  if (!store) return res.status(409).json({ success: false, error: "Not connected" });
   const syncType = String(req.body?.syncType || "");
   const entityType = String(req.body?.entityType || syncType.replace(/^erp_push:/, "")).trim();
   const externalId = String(req.body?.externalId || "").trim();
@@ -283,7 +283,7 @@ router.post("/sync/push-retry", async (req, res) => {
 
 router.get("/categories/suggest", async (req, res) => {
   const store = await getStoreFromRequest(req);
-  if (!store) return res.status(401).json({ success: false, error: "Not connected" });
+  if (!store) return res.status(409).json({ success: false, error: "Not connected" });
   const productName = String(req.query.product_name || req.query.q || "").trim();
   if (!productName) {
     return res.status(400).json({ success: false, error: "product_name is required" });
@@ -299,21 +299,30 @@ router.get("/categories/suggest", async (req, res) => {
 
 router.post("/sync/import-inventory", async (req, res) => {
   const store = await getStoreFromRequest(req);
-  if (!store) return res.status(401).json({ success: false, error: "Not connected" });
+  if (!store) return res.status(409).json({ success: false, error: "Not connected" });
   req.body = { entities: ["product"], ...(req.body || {}) };
   await shared.handleImport(req, res, store);
 });
 
 router.post("/sync/retry", async (req, res) => {
   const store = await getStoreFromRequest(req);
-  if (!store) return res.status(401).json({ success: false, error: "Not connected" });
+  if (!store) return res.status(409).json({ success: false, error: "Not connected" });
+  try {
+    const { updateInitialSyncStatus } = await import("../repositories/ecommerceRepository.js");
+    await updateInitialSyncStatus(store.id, store.tenant_id, "running");
+  } catch {
+    // best-effort
+  }
+  res.json({
+    success: true,
+    message: "Re-sync started in the background. Stay on this page to watch progress.",
+  });
   runDarazInitialSync(store.id, store.tenant_id).catch((err) => console.error("Daraz retry sync:", err));
-  res.json({ success: true, message: "Sync started" });
 });
 
 router.get("/locations", async (req, res) => {
   const store = await getStoreFromRequest(req);
-  if (!store) return res.status(401).json({ success: false, error: "Not connected" });
+  if (!store) return res.status(409).json({ success: false, error: "Not connected" });
   try {
     const data = await getDarazLocationMappingData(req.tenantId, store.id);
     res.json({ success: true, ...data });
@@ -327,7 +336,7 @@ router.get("/locations", async (req, res) => {
 
 router.post("/locations/import", async (req, res) => {
   const store = await getStoreFromRequest(req);
-  if (!store) return res.status(401).json({ success: false, error: "Not connected" });
+  if (!store) return res.status(409).json({ success: false, error: "Not connected" });
   const selections = Array.isArray(req.body?.selections) ? req.body.selections : [];
   const data = await applyDarazLocationSelections(req.tenantId, store.id, selections);
   res.json({ success: true, ...data });
@@ -335,7 +344,7 @@ router.post("/locations/import", async (req, res) => {
 
 router.get("/db/:entityType", async (req, res) => {
   const store = await getStoreFromRequest(req);
-  if (!store) return res.status(401).json({ success: false, error: "Not connected" });
+  if (!store) return res.status(409).json({ success: false, error: "Not connected" });
 
   const typeMap = { orders: "order", products: "product", customers: "customer" };
   const entityType = typeMap[req.params.entityType];
@@ -353,7 +362,7 @@ router.get("/db/:entityType", async (req, res) => {
 
 router.post("/live/:entityType", async (req, res) => {
   const store = await getStoreFromRequest(req);
-  if (!store) return res.status(401).json({ success: false, error: "Not connected" });
+  if (!store) return res.status(409).json({ success: false, error: "Not connected" });
 
   const creds = darazCredentialsForStore(store);
   const apiBase = apiBaseFromStore(store);

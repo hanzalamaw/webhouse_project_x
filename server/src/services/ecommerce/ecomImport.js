@@ -7,6 +7,7 @@ import { financeRepository } from "../../repositories/financeRepository.js";
 import { TRANSACTION_TYPES } from "../../utils/financeConstants.js";
 import {
   getSyncedRecords,
+  getSyncedRecordsNeedingImport,
   getEntityCounts,
   addSyncLog,
   getEntityLink,
@@ -21,7 +22,26 @@ import {
 
 const MARKETPLACE_CATEGORY = "Marketplace";
 const DEFAULT_WAREHOUSE = "Main Warehouse";
+/** Rows returned per action in the inline preview card. */
 const SAMPLE_LIMIT = 8;
+/** Rows returned per action when reviewing a full store sync in the modal. */
+const FULL_PREVIEW_LIMIT = 500;
+
+/** Why + how-to-fix text for skips/failures (plain language for tenants). */
+function formatImportIssue({ why, fixInErp = "", fixInStore = "" } = {}) {
+  const whyText = String(why || "This record could not be imported.").trim();
+  const parts = [];
+  if (fixInErp) parts.push(`In ERP: ${fixInErp}`);
+  if (fixInStore) parts.push(`In store: ${fixInStore}`);
+  const fixText = parts.length
+    ? parts.join(" · ")
+    : "Review the record in your ERP and in the store, then sync again.";
+  return {
+    why: whyText,
+    fix: fixText,
+    reason: `Why: ${whyText} How to fix: ${fixText}`,
+  };
+}
 
 const categoryCache = new Map();
 const warehouseCache = new Map();
@@ -312,14 +332,30 @@ async function syncShopifyProductVariants(tenantId, storeId, productId, normaliz
       variantId = match.id;
     } else {
       const costPrice = resolveCostPriceFromShopify(sv, 0);
-      variantId = await inventoryRepository.createVariant(tenantId, {
-        product_id: productId,
-        sku,
-        variant_name: variantName,
-        cost_price: costPrice,
-        selling_price: sellingPrice,
-        status,
-      });
+      try {
+        variantId = await inventoryRepository.createVariant(tenantId, {
+          product_id: productId,
+          sku,
+          variant_name: variantName,
+          cost_price: costPrice,
+          selling_price: sellingPrice,
+          status,
+        });
+      } catch (err) {
+        if (/ER_DUP_ENTRY|Duplicate entry/i.test(err?.message || "")) {
+          await inventoryRepository.releaseSoftDeletedSku(tenantId, sku);
+          variantId = await inventoryRepository.createVariant(tenantId, {
+            product_id: productId,
+            sku,
+            variant_name: variantName,
+            cost_price: costPrice,
+            selling_price: sellingPrice,
+            status,
+          });
+        } else {
+          throw err;
+        }
+      }
       existingBySku.set(sku.toLowerCase(), { id: variantId, sku, cost_price: costPrice, status });
     }
 
@@ -595,25 +631,104 @@ async function applyProductStock(tenantId, storeId, variantId, normalized, aggre
 }
 
 async function classifyProduct(tenantId, storeId, normalized) {
+  const platform = normalized.platform || "shopify";
   const link = await getEntityLink(storeId, "product", normalized.externalId);
-  if (link) return { action: "already_imported", existingId: link.internal_id };
-
-  const sku = resolveSku(normalized);
-  const existing = await inventoryRepository.findVariantBySku(tenantId, sku);
-  if (!existing) return { action: "create" };
-
-  const product = await inventoryRepository.getProductById(tenantId, existing.product_id);
-  const source = product?.source || "manual";
-  if (source === "manual") return { action: "skip", reason: "SKU matches a manually added product" };
-  if (source === normalized.platform) {
-    return { action: "update", existingId: existing.product_id, variantId: existing.id };
+  if (link) {
+    const linkedProduct = await inventoryRepository.getProductByIdIncludingDeleted(
+      tenantId,
+      link.internal_id,
+    );
+    if (linkedProduct && !linkedProduct.deleted_at) {
+      return { action: "already_imported", existingId: link.internal_id };
+    }
+    // Link points at a soft-deleted product — revive on import instead of skipping.
+    if (linkedProduct?.deleted_at) {
+      return { action: "revive", existingId: link.internal_id };
+    }
   }
-  return { action: "skip", reason: `SKU matches a product from ${source}` };
+
+  const skusToCheck = new Set();
+  const primarySku = resolveSku(normalized);
+  if (primarySku) skusToCheck.add(primarySku);
+  for (const sv of shopifyVariantsForImport(normalized)) {
+    const sku = String(sv.sku || "").trim();
+    if (sku) skusToCheck.add(sku.slice(0, 100));
+  }
+  if (!skusToCheck.size) {
+    const issue = formatImportIssue({
+      why: "This store product has no SKU, so it can’t be matched safely in Inventory.",
+      fixInStore: "Open the product in your store admin, add a unique SKU, then Re-sync and import again.",
+      fixInErp: "No ERP change needed until the store product has a SKU.",
+    });
+    return { action: "skip", reason: issue.reason, why: issue.why, fix: issue.fix };
+  }
+
+  // SKU uniqueness is per-tenant only — other tenants may reuse the same SKUs freely.
+  for (const sku of skusToCheck) {
+    const existing =
+      (await inventoryRepository.findVariantBySkuLoose(tenantId, sku)) ||
+      (await inventoryRepository.findVariantBySku(tenantId, sku));
+    if (!existing) {
+      // Soft-deleted / orphan rows may still hold the unique key — free it so create can proceed.
+      await inventoryRepository.releaseSoftDeletedSku(tenantId, sku);
+      continue;
+    }
+
+    const product = await inventoryRepository.getProductById(tenantId, existing.product_id);
+    const source = String(product?.source || existing.product_source || "manual").toLowerCase();
+    const productName = product?.product_name || existing.product_name || "an existing product";
+
+    if (source === platform) {
+      return { action: "update", existingId: existing.product_id, variantId: existing.id };
+    }
+    if (source === "manual" || !source) {
+      const issue = formatImportIssue({
+        why: `SKU "${sku}" is already used by "${productName}" in this tenant’s Inventory (manual product).`,
+        fixInErp: `Go to Inventory → Products, find "${productName}" (SKU ${sku}). Delete it, soft-delete it, or change its SKU — then import again. (Other tenants can still use the same SKU.)`,
+        fixInStore: `Or change this product’s SKU in the store to something unique for this tenant, then Re-sync and import.`,
+      });
+      return { action: "skip", reason: issue.reason, why: issue.why, fix: issue.fix, existingId: existing.product_id };
+    }
+    const issue = formatImportIssue({
+      why: `SKU "${sku}" already belongs to "${productName}" from ${source} in this tenant. The same SKU can’t be owned by two different sources here.`,
+      fixInErp: `In Inventory, open "${productName}" and change/remove that SKU, or delete that product if it shouldn’t stay.`,
+      fixInStore: `Or change this store product’s SKU to a new unique value for this tenant, then Re-sync and import.`,
+    });
+    return { action: "skip", reason: issue.reason, why: issue.why, fix: issue.fix, existingId: existing.product_id };
+  }
+
+  return { action: "create" };
 }
 
 async function classifyCustomer(tenantId, storeId, normalized) {
+  const platform = normalized.platform || "shopify";
   const link = await getEntityLink(storeId, "customer", normalized.externalId);
-  if (link) return { action: "already_imported", existingId: link.internal_id };
+  if (link) {
+    const [rows] = await readDb.query(
+      `SELECT id, deleted_at, source FROM crm_customers WHERE id = ? AND tenant_id = ? LIMIT 1`,
+      [link.internal_id, tenantId],
+    );
+    const linked = rows[0];
+    if (linked && !linked.deleted_at) {
+      return { action: "already_imported", existingId: link.internal_id };
+    }
+    if (linked?.deleted_at) {
+      await writeDb.query(
+        `UPDATE crm_customers SET deleted_at = NULL WHERE id = ? AND tenant_id = ?`,
+        [link.internal_id, tenantId],
+      );
+      try {
+        await writeDb.query(
+          `UPDATE crm_customer_addresses SET deleted_at = NULL
+           WHERE customer_id = ? AND tenant_id = ? AND deleted_at IS NOT NULL`,
+          [link.internal_id, tenantId],
+        );
+      } catch {
+        // ignore
+      }
+      return { action: "already_imported", existingId: link.internal_id };
+    }
+  }
 
   const match = await crmRepository.findCustomerByPhoneOrEmail(
     tenantId,
@@ -623,15 +738,47 @@ async function classifyCustomer(tenantId, storeId, normalized) {
   if (!match) return { action: "create" };
 
   const source = match.source || "manual";
-  if (source === "manual" || source === normalized.platform) {
+  if (source === "manual" || source === platform) {
     return { action: "update", existingId: match.id };
   }
-  return { action: "skip", reason: `Matches a customer from ${source}`, existingId: match.id };
+  const name = match.customer_name || "A customer";
+  const issue = formatImportIssue({
+    why: `"${name}" already exists from ${source} with the same phone/email, so we won’t overwrite them from the store.`,
+    fixInErp: `In CRM → Customers, open "${name}". If this is the same person, you can leave them as-is (store data won’t replace ${source}). If it’s a duplicate, merge/delete the extra record or clear the conflicting phone/email.`,
+    fixInStore: `Or update the store customer’s phone/email so it doesn’t clash, then Re-sync and import.`,
+  });
+  return {
+    action: "skip",
+    reason: issue.reason,
+    why: issue.why,
+    fix: issue.fix,
+    existingId: match.id,
+  };
 }
 
-async function classifyOrder(storeId, normalized) {
+async function classifyOrder(storeId, tenantId, normalized, platform = "shopify") {
+  const source = platform || normalized.platform || "shopify";
+  const orderNo = `${String(source).toUpperCase()}-${normalized.externalId}`;
+
   const link = await getEntityLink(storeId, "order", normalized.externalId);
-  if (link) return { action: "update", existingId: link.internal_id };
+  if (link) {
+    const linked = await orderRepository.getOrderByIdIncludingDeleted(tenantId, link.internal_id);
+    if (linked && !linked.deleted_at) {
+      return { action: "update", existingId: link.internal_id };
+    }
+    if (linked?.deleted_at) {
+      return { action: "revive", existingId: link.internal_id };
+    }
+  }
+
+  const byNo = await orderRepository.findOrderByOrderNoIncludingDeleted(tenantId, orderNo);
+  if (byNo && !byNo.deleted_at) {
+    return { action: "update", existingId: byNo.id };
+  }
+  if (byNo?.deleted_at) {
+    return { action: "revive", existingId: byNo.id };
+  }
+
   return { action: "create" };
 }
 
@@ -687,7 +834,7 @@ async function resolveOrderCustomerId(tenantId, storeId, platform, normalized, c
 
   // Nothing matched — create a customer from the order's customer info so the order isn't orphaned.
   if (cust.name || cust.email || cust.phone || cust.externalId) {
-    const created = await crmRepository.createCustomer(tenantId, null, {
+    const created = await crmRepository.createCustomer(tenantId, await getImportActorId(tenantId), {
       customer_name: cust.name || cust.email || "Guest customer",
       phone: cust.phone || null,
       email: cust.email || null,
@@ -706,28 +853,38 @@ async function resolveOrderCustomerId(tenantId, storeId, platform, normalized, c
   return null;
 }
 
-async function buildEntityPreview(storeId, tenantId, entityType) {
-  const records = await getSyncedRecords(storeId, tenantId, entityType, 5000, { importStatus: "staged" });
+async function buildEntityPreview(storeId, tenantId, entityType, sampleLimit = SAMPLE_LIMIT, { includeImported = false } = {}) {
+  const records = includeImported
+    ? await getSyncedRecords(storeId, tenantId, entityType, 5000)
+    : await getSyncedRecordsNeedingImport(storeId, tenantId, entityType, 5000);
   const summary = { create: 0, update: 0, skip: 0, already_imported: 0 };
   const samples = { create: [], update: [], skip: [], already_imported: [] };
 
   for (const record of records) {
     const normalized = record.normalized;
+    const platform = record.platform || normalized?.platform || "shopify";
     let classification;
     if (entityType === "product") {
-      classification = await classifyProduct(tenantId, storeId, normalized);
+      classification = await classifyProduct(tenantId, storeId, { ...normalized, platform });
     } else if (entityType === "customer") {
-      classification = await classifyCustomer(tenantId, storeId, normalized);
+      classification = await classifyCustomer(tenantId, storeId, { ...normalized, platform });
     } else {
-      classification = await classifyOrder(storeId, normalized);
+      classification = await classifyOrder(storeId, tenantId, normalized, platform);
     }
 
-    const action = classification.action;
+    // Records already marked imported in staging should still appear in a full sync review.
+    let action =
+      includeImported && record.importStatus === "imported" && classification.action === "create"
+        ? "already_imported"
+        : classification.action;
+    if (action === "revive") action = "update";
     summary[action] = (summary[action] || 0) + 1;
-    if (samples[action]?.length < SAMPLE_LIMIT) {
+    if (samples[action]?.length < sampleLimit) {
       samples[action].push(
         summarizeRecord(entityType, normalized, action, {
-          reason: classification.reason,
+          reason: classification.reason || (action === "already_imported" ? "Already in ERP" : undefined),
+          why: classification.why,
+          fix: classification.fix,
           existingId: classification.existingId,
         }),
       );
@@ -737,11 +894,13 @@ async function buildEntityPreview(storeId, tenantId, entityType) {
   return { total: records.length, summary, samples };
 }
 
-export async function getImportPreview(storeId, tenantId) {
+export async function getImportPreview(storeId, tenantId, { full = false } = {}) {
+  const sampleLimit = full ? FULL_PREVIEW_LIMIT : SAMPLE_LIMIT;
+  const opts = { includeImported: full };
   const [products, customers, orders] = await Promise.all([
-    buildEntityPreview(storeId, tenantId, "product"),
-    buildEntityPreview(storeId, tenantId, "customer"),
-    buildEntityPreview(storeId, tenantId, "order"),
+    buildEntityPreview(storeId, tenantId, "product", sampleLimit, opts),
+    buildEntityPreview(storeId, tenantId, "customer", sampleLimit, opts),
+    buildEntityPreview(storeId, tenantId, "order", sampleLimit, opts),
   ]);
 
   const pendingTotal =
@@ -764,7 +923,7 @@ export async function getImportPreview(storeId, tenantId) {
 export async function importNormalizedProduct(
   tenantId,
   normalized,
-  { storeId, platform, allowUpdate = true } = {},
+  { storeId, platform, allowUpdate = true, _skuRetry = false } = {},
 ) {
   if (!normalized?.externalId) return { ok: false, reason: "missing_external_id" };
 
@@ -772,7 +931,18 @@ export async function importNormalizedProduct(
     ? await classifyProduct(tenantId, storeId, normalized)
     : { action: "create" };
 
-  if (classification.action === "already_imported") {
+  if (classification.action === "already_imported" || classification.action === "revive") {
+    if (classification.action === "revive") {
+      await inventoryRepository.reviveProduct(tenantId, classification.existingId);
+    } else {
+      const linked = await inventoryRepository.getProductByIdIncludingDeleted(
+        tenantId,
+        classification.existingId,
+      );
+      if (linked?.deleted_at) {
+        await inventoryRepository.reviveProduct(tenantId, classification.existingId);
+      }
+    }
     const current = await inventoryRepository.getProductById(tenantId, classification.existingId);
     const status = mapProductStatus(normalized.status);
     await inventoryRepository.updateProduct(tenantId, classification.existingId, {
@@ -788,13 +958,30 @@ export async function importNormalizedProduct(
     });
     await syncShopifyProductVariants(tenantId, storeId, classification.existingId, normalized, { status });
     await repairCreatedAt("inventory_products", classification.existingId, tenantId, normalized.createdAt);
-    return { ok: true, productId: classification.existingId, action: "already_imported" };
+    if (storeId) {
+      await markSyncedRecordImported(storeId, tenantId, "product", normalized.externalId);
+    }
+    return {
+      ok: true,
+      productId: classification.existingId,
+      action: classification.action === "revive" ? "update" : "already_imported",
+    };
   }
   if (classification.action === "skip") {
-    return { ok: false, action: "skip", reason: classification.reason };
+    return {
+      ok: false,
+      action: "skip",
+      reason: classification.reason,
+      why: classification.why,
+      fix: classification.fix,
+    };
   }
   if (classification.action === "update" && !allowUpdate) {
-    return { ok: false, action: "skip", reason: "Update not requested" };
+    const issue = formatImportIssue({
+      why: "This product already exists in your ERP, and update-on-import was turned off.",
+      fixInErp: "Import again with “update existing” enabled, or edit the product manually in Inventory.",
+    });
+    return { ok: false, action: "skip", reason: issue.reason, why: issue.why, fix: issue.fix };
   }
 
   try {
@@ -806,6 +993,7 @@ export async function importNormalizedProduct(
     const source = platform || normalized.platform || "shopify";
 
     let productId;
+    let createdNewProduct = false;
 
     if (classification.action === "update") {
       const current = await inventoryRepository.getProductById(tenantId, classification.existingId);
@@ -823,6 +1011,11 @@ export async function importNormalizedProduct(
       productId = classification.existingId;
       await repairCreatedAt("inventory_products", productId, tenantId, normalized.createdAt);
     } else {
+      // Free any orphan/soft-deleted SKUs before create so variant insert can't leave an empty parent.
+      for (const sv of shopifyVariantsForImport(normalized)) {
+        const sku = String(sv.sku || "").trim() || resolveSku({ ...normalized, externalId: sv.externalId });
+        if (sku) await inventoryRepository.releaseSoftDeletedSku(tenantId, sku);
+      }
       productId = await inventoryRepository.createProduct(tenantId, {
         product_name: productName,
         description: normalized.description || null,
@@ -835,9 +1028,21 @@ export async function importNormalizedProduct(
         source,
         created_at: toMysqlDateTime(normalized.createdAt),
       });
+      createdNewProduct = true;
     }
 
-    await syncShopifyProductVariants(tenantId, storeId, productId, normalized, { status });
+    try {
+      await syncShopifyProductVariants(tenantId, storeId, productId, normalized, { status });
+    } catch (variantErr) {
+      if (createdNewProduct) {
+        try {
+          await inventoryRepository.softDeleteProduct(tenantId, productId);
+        } catch {
+          // best-effort cleanup of empty parent
+        }
+      }
+      throw variantErr;
+    }
 
     if (storeId) {
       await upsertEntityLink({
@@ -853,22 +1058,72 @@ export async function importNormalizedProduct(
 
     return { ok: true, productId, action: classification.action === "update" ? "update" : "create" };
   } catch (error) {
+    let failMessage = error?.message || "Failed to import product";
+    // Soft-deleted product still holding the SKU unique key — release SKU or revive Shopify copy.
+    if (!_skuRetry && /ER_DUP_ENTRY|Duplicate entry/i.test(failMessage)) {
+      try {
+        const skus = new Set();
+        const primary = resolveSku(normalized);
+        if (primary) skus.add(primary);
+        for (const sv of shopifyVariantsForImport(normalized)) {
+          const s = String(sv.sku || "").trim();
+          if (s) skus.add(s.slice(0, 100));
+        }
+        for (const sku of skus) {
+          const soft = await inventoryRepository.findSoftDeletedVariantBySku(tenantId, sku);
+          if (!soft?.product_id) {
+            await inventoryRepository.releaseSoftDeletedSku(tenantId, sku);
+            continue;
+          }
+          const softProduct = await inventoryRepository.getProductByIdIncludingDeleted(
+            tenantId,
+            soft.product_id,
+          );
+          const softSource = String(softProduct?.source || soft.product_source || "").toLowerCase();
+          if (softSource === (platform || normalized.platform || "shopify") || softSource === "") {
+            await inventoryRepository.reviveProduct(tenantId, soft.product_id);
+            break;
+          }
+          await inventoryRepository.releaseSoftDeletedSku(tenantId, sku);
+        }
+        return importNormalizedProduct(tenantId, normalized, {
+          storeId,
+          platform,
+          allowUpdate: true,
+          _skuRetry: true,
+        });
+      } catch (reviveErr) {
+        failMessage = formatImportIssue({
+          why: "This product’s SKU is already used by another product in this tenant’s Inventory.",
+          fixInErp: "In Inventory → Products, find the conflicting SKU and delete it or change its SKU, then import again. Other tenants are not affected.",
+          fixInStore: "Or change this product’s SKU in the store to a unique value for this tenant, then Re-sync and import.",
+        }).reason;
+        if (reviveErr?.message) failMessage = `${failMessage} (${reviveErr.message})`;
+      }
+    } else if (/ER_DUP_ENTRY|Duplicate entry/i.test(failMessage)) {
+      failMessage = formatImportIssue({
+        why: "This product’s SKU is already used by another product in this tenant’s Inventory.",
+        fixInErp: "In Inventory → Products, find the conflicting SKU and delete it or change its SKU, then import again. Other tenants are not affected.",
+        fixInStore: "Or change this product’s SKU in the store to a unique value for this tenant, then Re-sync and import.",
+      }).reason;
+    }
     if (storeId) {
       await addSyncLog(storeId, tenantId, {
         syncType: "erp_import:product",
         status: "failed",
         externalId: String(normalized.externalId),
-        message: error.message || "Failed to import product",
+        message: failMessage,
       });
     }
-    console.error("[ecomImport] product", normalized.externalId, error.message);
-    return { ok: false, reason: error.message };
+    console.error("[ecomImport] product", normalized.externalId, failMessage);
+    return { ok: false, reason: failMessage };
   }
 }
 
 export async function importNormalizedCustomer(tenantId, normalized, { storeId, platform } = {}) {
   if (!normalized?.externalId) return { ok: false, reason: "missing_external_id" };
 
+  const actorId = await getImportActorId(tenantId);
   const classification = storeId
     ? await classifyCustomer(tenantId, storeId, normalized)
     : { action: "create" };
@@ -888,7 +1143,7 @@ export async function importNormalizedCustomer(tenantId, normalized, { storeId, 
         : [],
       source,
     };
-    await crmRepository.updateCustomer(tenantId, null, classification.existingId, payload);
+    await crmRepository.updateCustomer(tenantId, actorId, classification.existingId, payload);
     if (storeId) {
       await upsertEntityLink({
         tenantId,
@@ -905,7 +1160,13 @@ export async function importNormalizedCustomer(tenantId, normalized, { storeId, 
     return { ok: true, customerId: classification.existingId, action: "already_imported" };
   }
   if (classification.action === "skip") {
-    return { ok: false, action: "skip", reason: classification.reason };
+    return {
+      ok: false,
+      action: "skip",
+      reason: classification.reason,
+      why: classification.why,
+      fix: classification.fix,
+    };
   }
 
   try {
@@ -927,11 +1188,11 @@ export async function importNormalizedCustomer(tenantId, normalized, { storeId, 
 
     let customerId;
     if (classification.action === "update") {
-      await crmRepository.updateCustomer(tenantId, null, classification.existingId, payload);
+      await crmRepository.updateCustomer(tenantId, actorId, classification.existingId, payload);
       customerId = classification.existingId;
       await repairCreatedAt("crm_customers", customerId, tenantId, normalized.createdAt);
     } else {
-      const created = await crmRepository.createCustomer(tenantId, null, payload);
+      const created = await crmRepository.createCustomer(tenantId, actorId, payload);
       customerId = created.id;
     }
 
@@ -971,10 +1232,26 @@ export async function importNormalizedOrder(
   if (!normalized?.externalId) return { ok: false, reason: "missing_external_id" };
 
   const classification = storeId
-    ? await classifyOrder(storeId, normalized)
+    ? await classifyOrder(storeId, tenantId, normalized, platform)
     : { action: "create" };
 
+  if (classification.action === "revive") {
+    await orderRepository.reviveOrder(tenantId, classification.existingId);
+    return updateNormalizedOrder(tenantId, classification.existingId, normalized, {
+      storeId,
+      platform,
+      customerIdMap,
+    });
+  }
+
   if (classification.action === "update") {
+    const existing = await orderRepository.getOrderByIdIncludingDeleted(
+      tenantId,
+      classification.existingId,
+    );
+    if (existing?.deleted_at) {
+      await orderRepository.reviveOrder(tenantId, classification.existingId);
+    }
     return updateNormalizedOrder(tenantId, classification.existingId, normalized, {
       storeId,
       platform,
@@ -1069,15 +1346,40 @@ export async function importNormalizedOrder(
 
     return { ok: true, orderId, action: "create" };
   } catch (error) {
+    // Soft-deleted ERP orders still hold order_no unique key — revive + update instead of failing forever.
+    let failMessage = error?.message || "Failed to import order";
+    if (/ER_DUP_ENTRY|Duplicate entry/i.test(failMessage)) {
+      try {
+        const source = platform || normalized.platform || "shopify";
+        const orderNo = `${String(source).toUpperCase()}-${normalized.externalId}`;
+        const [existingRows] = await writeDb.query(
+          `SELECT id, deleted_at FROM orders WHERE tenant_id = ? AND order_no = ? LIMIT 1`,
+          [tenantId, orderNo],
+        );
+        const existing = existingRows[0];
+        if (existing?.id) {
+          if (existing.deleted_at) {
+            await orderRepository.reviveOrder(tenantId, existing.id);
+          }
+          return updateNormalizedOrder(tenantId, existing.id, normalized, {
+            storeId,
+            platform,
+            customerIdMap,
+          });
+        }
+      } catch (reviveErr) {
+        failMessage = reviveErr?.message || failMessage;
+      }
+    }
     if (storeId) {
       await addSyncLog(storeId, tenantId, {
         syncType: "erp_import:order",
         status: "failed",
         externalId: String(normalized.externalId),
-        message: error.message || "Failed to import order",
+        message: failMessage,
       });
     }
-    return { ok: false, reason: error.message };
+    return { ok: false, reason: failMessage };
   }
 }
 
@@ -1190,13 +1492,21 @@ export async function applyResolvedOrderToErp(storeId, tenantId, externalId) {
 }
 
 async function importEntityType(storeId, tenantId, entityType, platform, options = {}) {
-  const records = await getSyncedRecords(storeId, tenantId, entityType, 5000, { importStatus: "staged" });
-  const result = { created: 0, updated: 0, skipped: 0, failed: 0, already_imported: 0 };
+  const records = await getSyncedRecordsNeedingImport(storeId, tenantId, entityType, 5000);
+  const result = {
+    created: 0,
+    updated: 0,
+    skipped: 0,
+    failed: 0,
+    already_imported: 0,
+    failures: [],
+    skips: [],
+  };
   const customerIdMap = {};
 
   if (entityType === "customer" || entityType === "order") {
     const customerRecords = entityType === "order"
-      ? await getSyncedRecords(storeId, tenantId, "customer", 5000, { importStatus: "staged" })
+      ? await getSyncedRecordsNeedingImport(storeId, tenantId, "customer", 5000)
       : [];
     for (const rec of customerRecords) {
       const imp = await importNormalizedCustomer(tenantId, rec.normalized, { storeId, platform });
@@ -1208,6 +1518,7 @@ async function importEntityType(storeId, tenantId, entityType, platform, options
 
   for (const record of records) {
     let imp;
+    const normalizedForName = record.normalized;
     if (entityType === "product") {
       const normalized = resolveProductNormalized(record.normalized, record.raw, platform);
       imp = await importNormalizedProduct(tenantId, normalized, {
@@ -1226,9 +1537,46 @@ async function importEntityType(storeId, tenantId, entityType, platform, options
       });
     }
 
+    const label =
+      normalizedForName?.name
+      || normalizedForName?.orderNo
+      || record.externalId
+      || record.normalized?.externalId;
+
     if (!imp.ok) {
-      if (imp.action === "skip") result.skipped += 1;
-      else result.failed += 1;
+      if (imp.action === "skip") {
+        result.skipped += 1;
+        if (result.skips.length < 100) {
+          result.skips.push({
+            entityType,
+            externalId: record.externalId || record.normalized?.externalId,
+            name: label,
+            reason: imp.reason || "Skipped",
+            why: imp.why || null,
+            fix: imp.fix || null,
+          });
+        }
+        if (storeId && imp.reason) {
+          await addSyncLog(storeId, tenantId, {
+            syncType: `erp_import:${entityType}`,
+            status: "skipped",
+            externalId: String(record.externalId || record.normalized?.externalId || ""),
+            message: imp.reason,
+          });
+        }
+      } else {
+        result.failed += 1;
+        if (result.failures.length < 100) {
+          result.failures.push({
+            entityType,
+            externalId: record.externalId || record.normalized?.externalId,
+            name: label,
+            reason: imp.reason || "Import failed",
+            why: imp.why || null,
+            fix: imp.fix || null,
+          });
+        }
+      }
       continue;
     }
     if (imp.action === "already_imported") result.already_imported += 1;
@@ -1289,10 +1637,11 @@ export async function importEntitiesToErp(storeId, tenantId, platform, entities 
 
   for (const entityType of types) {
     results[entityType] = await importEntityType(storeId, tenantId, entityType, platform, options);
+    const r = results[entityType];
     await addSyncLog(storeId, tenantId, {
       syncType: `erp_import:${entityType}`,
-      status: results[entityType].failed ? "partial" : "success",
-      message: `${entityType}: created ${results[entityType].created}, updated ${results[entityType].updated}, skipped ${results[entityType].skipped}`,
+      status: r.failed ? "partial" : "success",
+      message: `${entityType}: created ${r.created}, updated ${r.updated}, skipped ${r.skipped}, failed ${r.failed}`,
     });
   }
 
@@ -1305,7 +1654,14 @@ export async function importEntitiesToErp(storeId, tenantId, platform, entities 
     customerLinksRepaired = await repairCustomerLinksFromOrders(tenantId, storeId);
   }
 
-  return { success: true, results, erpImportStatus: finalStatus, customerLinksRepaired };
+  const failures = types.flatMap((t) => results[t]?.failures || []);
+  const skips = types.flatMap((t) => results[t]?.skips || []);
+  try {
+    await purgeOrphanMarketplaceProducts(tenantId, storeId);
+  } catch {
+    // non-fatal
+  }
+  return { success: true, results, failures, skips, erpImportStatus: finalStatus, customerLinksRepaired };
 }
 
 export async function importAllSyncedProductsForStore(storeId, tenantId, platform) {
@@ -1373,6 +1729,96 @@ export async function getEntityCountsForImport(storeId, tenantId) {
 }
 
 /**
+ * Soft-delete marketplace product shells that inflate Inventory dashboard counts:
+ * shopify/daraz products with no live variants (failed import left an empty parent).
+ */
+export async function purgeOrphanMarketplaceProducts(tenantId, storeId = null) {
+  const result = { emptyProducts: 0, orphanVariants: 0 };
+
+  const [orphanVar] = await writeDb.query(
+    `UPDATE inventory_product_variants v
+     INNER JOIN inventory_products p
+       ON p.id = v.product_id AND p.tenant_id = v.tenant_id
+     SET v.deleted_at = COALESCE(v.deleted_at, NOW()),
+         v.sku = IF(v.sku LIKE '__deleted_%', v.sku, CONCAT('__deleted_', v.id))
+     WHERE v.tenant_id = ? AND v.deleted_at IS NULL AND p.deleted_at IS NOT NULL`,
+    [tenantId],
+  );
+  result.orphanVariants = orphanVar.affectedRows || 0;
+
+  const [empty] = await writeDb.query(
+    `UPDATE inventory_products p
+     SET p.deleted_at = NOW()
+     WHERE p.tenant_id = ? AND p.deleted_at IS NULL
+       AND LOWER(TRIM(COALESCE(p.source, ''))) IN ('shopify', 'daraz')
+       AND NOT EXISTS (
+         SELECT 1 FROM inventory_product_variants v
+         WHERE v.product_id = p.id AND v.tenant_id = p.tenant_id AND v.deleted_at IS NULL
+       )`,
+    [tenantId],
+  );
+  result.emptyProducts = empty.affectedRows || 0;
+
+  // Unlinked marketplace products with variants but no stock rows (leftover from failed imports).
+  // Linked products are kept even with zero qty so re-sync can refill stock.
+  const [unlinkedNoStock] = await writeDb.query(
+    `UPDATE inventory_products p
+     SET p.deleted_at = NOW()
+     WHERE p.tenant_id = ? AND p.deleted_at IS NULL
+       AND LOWER(TRIM(COALESCE(p.source, ''))) IN ('shopify', 'daraz')
+       AND NOT EXISTS (
+         SELECT 1 FROM ecom_entity_links el
+         INNER JOIN ecom_store_connections sc
+           ON sc.id = el.store_id AND sc.deleted_at IS NULL AND sc.status = 'connected'
+         WHERE el.tenant_id = p.tenant_id
+           AND el.entity_type = 'product'
+           AND el.internal_id = p.id
+           AND el.deleted_at IS NULL
+       )
+       AND NOT EXISTS (
+         SELECT 1 FROM inventory_stock_levels sl
+         INNER JOIN inventory_product_variants v
+           ON v.id = sl.variant_id AND v.tenant_id = sl.tenant_id AND v.deleted_at IS NULL
+         WHERE v.product_id = p.id AND sl.tenant_id = p.tenant_id AND sl.deleted_at IS NULL
+       )`,
+    [tenantId],
+  );
+  result.emptyProducts += unlinkedNoStock.affectedRows || 0;
+
+  await writeDb.query(
+    `UPDATE inventory_stock_levels sl
+     INNER JOIN inventory_product_variants v
+       ON v.id = sl.variant_id AND v.tenant_id = sl.tenant_id
+     INNER JOIN inventory_products p
+       ON p.id = v.product_id AND p.tenant_id = v.tenant_id
+     SET sl.deleted_at = NOW()
+     WHERE sl.tenant_id = ? AND sl.deleted_at IS NULL AND p.deleted_at IS NOT NULL`,
+    [tenantId],
+  );
+
+  await writeDb.query(
+    `UPDATE inventory_product_variants v
+     INNER JOIN inventory_products p
+       ON p.id = v.product_id AND p.tenant_id = v.tenant_id
+     SET v.deleted_at = COALESCE(v.deleted_at, NOW()),
+         v.sku = IF(v.sku LIKE '__deleted_%', v.sku, CONCAT('__deleted_', v.id))
+     WHERE v.tenant_id = ? AND p.deleted_at IS NOT NULL
+       AND (v.deleted_at IS NULL OR v.sku NOT LIKE '__deleted_%')`,
+    [tenantId],
+  );
+
+  if (storeId) {
+    await addSyncLog(storeId, tenantId, {
+      syncType: "orphan_product_cleanup",
+      status: "success",
+      message: `Removed ${result.emptyProducts} empty marketplace product shell(s); cleaned ${result.orphanVariants} orphan variant(s)`,
+    });
+  }
+
+  return result;
+}
+
+/**
  * Repair already-imported ERP records from the data already fetched into staging.
  * Fixes: wrong created dates, and stock stuck in the wrong warehouse (re-places into the
  * warehouse mapped to the record's Shopify location, or the store's mapped warehouse).
@@ -1380,8 +1826,14 @@ export async function getEntityCountsForImport(storeId, tenantId) {
  * so it never creates duplicates. Returns real counts for user feedback.
  */
 export async function reconcileImportedData(storeId, tenantId) {
-  const result = { products: 0, customers: 0, orders: 0, failed: 0, removed: 0 };
+  const result = { products: 0, customers: 0, orders: 0, failed: 0, removed: 0, orphans: null };
   if (!storeId) return result;
+
+  try {
+    result.orphans = await purgeOrphanMarketplaceProducts(tenantId, storeId);
+  } catch (err) {
+    console.error("[ecomImport] orphan cleanup:", err?.message || err);
+  }
 
   const store = await getStoreById(storeId, tenantId);
   let shopifyRest = null;

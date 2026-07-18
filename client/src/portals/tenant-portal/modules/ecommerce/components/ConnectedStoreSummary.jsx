@@ -7,6 +7,8 @@ import { SYNC_STATUS_USER, ERP_IMPORT_STATUS_USER } from "../utils/friendlyMessa
 import OrderConflicts from "./OrderConflicts";
 import DisconnectStoreModal from "./DisconnectStoreModal";
 import ImportPreviewPanel from "./ImportPreviewPanel";
+import StoreSyncPreviewModal from "./StoreSyncPreviewModal";
+import ImportFailureLog from "./ImportFailureLog";
 import PushLogPanel from "./PushLogPanel";
 import LocationMappingPanel from "./LocationMappingPanel";
 
@@ -33,6 +35,10 @@ export default function ConnectedStoreSummary({
   autoSyncEnabled = true,
   autoSyncSaving = false,
   onAutoSyncChange,
+  syncPreviewOpen = false,
+  onSyncPreviewClose,
+  onOpenSyncPreview,
+  syncStayWarning = false,
 }) {
   const [disconnectOpen, setDisconnectOpen] = useState(false);
   const syncLabel = SYNC_STATUS_USER[syncStatus] || syncStatus || "—";
@@ -41,6 +47,11 @@ export default function ConnectedStoreSummary({
   const unmapped = Number(
     unmappedLocationCount ?? connection?.unmappedLocationCount ?? 0,
   );
+  const syncBusy =
+    Boolean(syncStayWarning)
+    || retryBusy
+    || syncStatus === "running"
+    || syncStatus === "pending";
 
   const granted = new Set(
     String(connection?.grantedScopes || "")
@@ -79,8 +90,18 @@ export default function ConnectedStoreSummary({
           </div>
           <div className="wh-action-btns">
             {showRetry && (
-              <Button variant="secondary" className="wh-btn--sm" onClick={onRetrySync} disabled={retryBusy}>
-                {retryBusy ? "Syncing…" : retryLabel}
+              <Button variant="secondary" className="wh-btn--sm" onClick={onRetrySync} disabled={syncBusy}>
+                {syncBusy ? "Syncing…" : retryLabel}
+              </Button>
+            )}
+            {onOpenSyncPreview && (
+              <Button
+                variant="secondary"
+                className="wh-btn--sm"
+                onClick={onOpenSyncPreview}
+                disabled={syncBusy}
+              >
+                Review fetched data
               </Button>
             )}
             <Button variant="danger" className="wh-btn--sm" onClick={() => setDisconnectOpen(true)}>
@@ -88,6 +109,18 @@ export default function ConnectedStoreSummary({
             </Button>
           </div>
         </div>
+
+        {syncBusy && (
+          <div
+            className="wh-alert wh-alert--warning"
+            style={{ marginBottom: "1rem" }}
+            role="status"
+          >
+            <strong>Sync in progress.</strong> Stay on this page until it finishes. Leaving or
+            refreshing can interrupt progress updates and you may miss the review window when fetch
+            completes.
+          </div>
+        )}
 
         {apiAccess && !apiAccess.ok && apiAccess.setupMessage && (
           <p className="wh-form-message" style={{ marginBottom: "1rem" }}>
@@ -182,6 +215,8 @@ export default function ConnectedStoreSummary({
         onImported={onImported}
       />
 
+      <ImportFailureLog platform={platform} authFetch={authFetch} connection={connection} />
+
       {platform === "shopify" || platform === "daraz" ? (
         <>
           <LocationMappingPanel platform={platform} authFetch={authFetch} />
@@ -198,6 +233,15 @@ export default function ConnectedStoreSummary({
         storeName={storeName}
         authFetch={authFetch}
         onDisconnected={handleDisconnected}
+      />
+
+      <StoreSyncPreviewModal
+        open={Boolean(syncPreviewOpen)}
+        onClose={() => onSyncPreviewClose?.()}
+        platform={platform}
+        authFetch={authFetch}
+        connection={connection}
+        onImported={onImported}
       />
     </>
   );
