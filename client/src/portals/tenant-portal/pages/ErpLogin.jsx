@@ -46,7 +46,8 @@ export default function ErpLogin({ portal }) {
       navigate("/app");
       return { ok: true };
     }
-    setError(friendlyError(data.message, response.status));
+    // Prefer API login messages (wrong password / user not found) over generic 401 session text.
+    setError(data.message ? friendlyError(data.message, response.status) : friendlyError(null, response.status));
     return { error: true };
   };
 
@@ -93,6 +94,7 @@ export default function ErpLogin({ portal }) {
           <form onSubmit={handleSubmit} noValidate>
             <FormField id="username" label="Username" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" />
             <FormField id="password" label="Password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
+            <p className="login-portal-hint">Use this portal only: <strong>{PORTAL_LABELS[portal] || portal}</strong></p>
             <Button type="submit" className="login-submit" disabled={isSubmitting}>
               {isSubmitting ? "Signing in..." : "Sign in"}
             </Button>

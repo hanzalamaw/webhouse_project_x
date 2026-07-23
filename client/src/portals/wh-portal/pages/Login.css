@@ -58,6 +58,12 @@
   width: 100%;
 }
 
+.login-portal-hint {
+  margin: 0 0 16px;
+  font-size: 13px;
+  color: var(--color-secondary);
+}
+
 .login-register {
   text-align: center;
   margin-top: 24px;

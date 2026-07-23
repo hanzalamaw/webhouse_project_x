@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../../../../../context/AuthContext";
 import { useModulePermission } from "../../../../../../hooks/useModulePermission";
+import { useMoney } from "../../../../../../hooks/useMoney";
 import { apiFetch } from "../../../../../../api/client";
 import { PageHeader } from "../../../../../../components/PageHeader";
 import { FormField } from "../../../../../../components/FormField";
@@ -34,6 +35,7 @@ function timeForApi(value) {
 export default function CreateStore() {
   const { authFetch } = useAuth();
   const { canCreate, readOnly } = useModulePermission("pos");
+  const { amountLabel } = useMoney();
   const navigate = useNavigate();
   const [store, setStore] = useState(EMPTY_STORE);
   const [terminals, setTerminals] = useState([newTerminalRow()]);
@@ -115,7 +117,7 @@ export default function CreateStore() {
               <FormField id="status" label="Status" as="select" value={store.status} onChange={(e) => setStore((f) => ({ ...f, status: e.target.value }))} disabled={disabled}>
                 {OUTLET_STATUSES.map((s) => <option key={s} value={s}>{OUTLET_STATUS_LABELS[s] || s}</option>)}
               </FormField>
-              <FormField id="opening_balance" label="Opening balance (PKR)" type="number" min="0" step="0.01" value={store.opening_balance} onChange={(e) => setStore((f) => ({ ...f, opening_balance: e.target.value }))} disabled={disabled} required />
+              <FormField id="opening_balance" label={amountLabel("Opening balance")} type="number" min="0" step="0.01" value={store.opening_balance} onChange={(e) => setStore((f) => ({ ...f, opening_balance: e.target.value }))} disabled={disabled} required />
               <div className="wh-form-grid__full">
                 <FormField id="location" label="Location" as="textarea" rows={3} value={store.location} onChange={(e) => setStore((f) => ({ ...f, location: e.target.value }))} disabled={disabled} />
               </div>

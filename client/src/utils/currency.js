@@ -1,3 +1,12 @@
+import {
+  currencyFieldSuffix,
+  currencyPrefix,
+  getTenantCurrency,
+  setTenantCurrency,
+} from "./tenantCurrency";
+
+export { currencyFieldSuffix, currencyPrefix, getTenantCurrency, setTenantCurrency };
+
 const MONEY_FORMAT = new Intl.NumberFormat("en-US", {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
@@ -7,6 +16,11 @@ const COMPACT_MONEY_FORMAT = new Intl.NumberFormat("en-US", {
   minimumFractionDigits: 0,
   maximumFractionDigits: 1,
 });
+
+function withPrefix(prefix, formattedNumber) {
+  const spaced = prefix.endsWith(" ") ? prefix : `${prefix} `;
+  return `${spaced}${formattedNumber}`;
+}
 
 /** Format a numeric amount with thousands separators (e.g. 1,234,567.89). */
 export function formatNumber(amount, options = {}) {
@@ -25,24 +39,39 @@ export function formatNumber(amount, options = {}) {
   }).format(n);
 }
 
-/** Pakistani Rupee display — always includes comma-separated thousands. */
-export function formatPKR(amount) {
-  if (amount == null || amount === "") return "Rs. 0.00";
+/**
+ * Format money using the tenant's organization currency (or an explicit code).
+ * Legacy name `formatPKR` kept so existing imports keep working.
+ */
+export function formatMoney(amount, currencyCode = getTenantCurrency()) {
+  const prefix = currencyPrefix(currencyCode);
+  if (amount == null || amount === "") return withPrefix(prefix, "0.00");
   const n = Number(amount);
-  if (!Number.isFinite(n)) return "Rs. 0.00";
-  return `Rs. ${MONEY_FORMAT.format(n)}`;
+  if (!Number.isFinite(n)) return withPrefix(prefix, "0.00");
+  return withPrefix(prefix, MONEY_FORMAT.format(n));
 }
 
-/** Shorter PKR label for charts (e.g. Rs. 1.2M, Rs. 45.5k). */
-export function formatCompactPKR(amount) {
+/** Follows the tenant organization currency. */
+export function formatPKR(amount) {
+  return formatMoney(amount);
+}
+
+/** Compact money label for charts (e.g. Rs. 1.2M / $45.5k). */
+export function formatCompactMoney(amount, currencyCode = getTenantCurrency()) {
+  const prefix = currencyPrefix(currencyCode);
   const n = Number(amount) || 0;
   if (n >= 1_000_000) {
-    return `Rs. ${COMPACT_MONEY_FORMAT.format(n / 1_000_000)}M`;
+    return withPrefix(prefix, `${COMPACT_MONEY_FORMAT.format(n / 1_000_000)}M`);
   }
   if (n >= 1_000) {
-    return `Rs. ${COMPACT_MONEY_FORMAT.format(n / 1_000)}k`;
+    return withPrefix(prefix, `${COMPACT_MONEY_FORMAT.format(n / 1_000)}k`);
   }
-  return formatPKR(Math.round(n));
+  return formatMoney(Math.round(n), currencyCode);
+}
+
+/** Follows the tenant organization currency. */
+export function formatCompactPKR(amount) {
+  return formatCompactMoney(amount);
 }
 
 export const LOGIN_PORTAL_OPTIONS = [

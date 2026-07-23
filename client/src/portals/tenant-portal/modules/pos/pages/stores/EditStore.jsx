@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../../../../../../context/AuthContext";
 import { useModulePermission } from "../../../../../../hooks/useModulePermission";
+import { useMoney } from "../../../../../../hooks/useMoney";
 import { apiFetch } from "../../../../../../api/client";
 import { PageHeader } from "../../../../../../components/PageHeader";
 import { FormField } from "../../../../../../components/FormField";
@@ -45,6 +46,7 @@ export default function EditStore() {
   const { storeId } = useParams();
   const { authFetch } = useAuth();
   const { canEdit, canCreate, canDelete, readOnly } = useModulePermission("pos");
+  const { amountLabel } = useMoney();
   const navigate = useNavigate();
   const [form, setForm] = useState(EMPTY);
   const [terminals, setTerminals] = useState([]);
@@ -186,7 +188,7 @@ export default function EditStore() {
               <FormField id="status" label="Status" as="select" value={form.status} onChange={(e) => setForm((f) => ({ ...f, status: e.target.value }))} disabled={disabled}>
                 {OUTLET_STATUSES.map((s) => <option key={s} value={s}>{OUTLET_STATUS_LABELS[s] || s}</option>)}
               </FormField>
-              <FormField id="opening_balance" label="Opening balance (PKR)" type="number" min="0" step="0.01" value={form.opening_balance} onChange={(e) => setForm((f) => ({ ...f, opening_balance: e.target.value }))} disabled={disabled} />
+              <FormField id="opening_balance" label={amountLabel("Opening balance")} type="number" min="0" step="0.01" value={form.opening_balance} onChange={(e) => setForm((f) => ({ ...f, opening_balance: e.target.value }))} disabled={disabled} />
               <div className="wh-form-grid__full">
                 <FormField id="location" label="Location" as="textarea" rows={3} value={form.location} onChange={(e) => setForm((f) => ({ ...f, location: e.target.value }))} disabled={disabled} />
               </div>

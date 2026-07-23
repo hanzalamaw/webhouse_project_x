@@ -13,6 +13,8 @@ import { isSuperAdminRole, isSuperAdminRoleName, isSuperAdminUser } from "../uti
 import { assertUsernameAvailable } from "../utils/usernamePolicy.js";
 import { decrypt } from "../utils/cipher.js";
 import { getRequestAuditMeta } from "../utils/clientIp.js";
+import { permissionCache } from "../utils/permissionCache.js";
+import { exchangeRateService } from "./exchangeRateService.js";
 
 function auditCtx(req) {
   const meta = getRequestAuditMeta(req);
@@ -156,6 +158,10 @@ export const tenantPortalService = {
     await tenantUserRepository.update(ctx.tenantId, userId, payload);
     const updated = await tenantUserRepository.findById(ctx.tenantId, userId);
 
+    if (payload.role_id != null && Number(payload.role_id) !== Number(old.role_id)) {
+      permissionCache.invalidateUser(ctx.tenantId, userId);
+    }
+
     if (old.status === "active" && body.status === "inactive") {
       await createActivityAlert({
         tenantId: ctx.tenantId,
@@ -199,6 +205,7 @@ export const tenantPortalService = {
       if (allowed.has(String(mid))) filtered[mid] = actions;
     }
     const id = await tenantRoleRepository.create(ctx.tenantId, { ...body, permissions: filtered });
+    permissionCache.invalidateTenant(ctx.tenantId);
     await createActivityAlert({
       tenantId: ctx.tenantId,
       userId: ctx.userId,
@@ -232,6 +239,7 @@ export const tenantPortalService = {
     }
 
     await tenantRoleRepository.update(ctx.tenantId, roleId, { ...body, permissions: filtered });
+    permissionCache.invalidateTenant(ctx.tenantId);
     await createActivityAlert({
       tenantId: ctx.tenantId,
       userId: ctx.userId,
@@ -422,6 +430,43 @@ export const tenantPortalService = {
     const activeUsers = await tenantUserRepository.countActive(tenantId);
     const billing = await transactionRepository.findTenantBillingById(tenantId);
     const payments = await transactionRepository.findPaymentsByTenant(tenantId);
+    const org = await organizationSettingsRepository.getByTenant(tenantId);
+    const displayCurrency = String(org?.currency || "PKR").toUpperCase() || "PKR";
+
+    const fxMeta = await exchangeRateService.getPkrToRate(displayCurrency);
+    const rate = fxMeta?.rate ?? (displayCurrency === "PKR" ? 1 : null);
+    const convert = (value) => {
+      if (value == null || value === "") return value;
+      if (rate == null) return Number(value);
+      return exchangeRateService.convertAmount(value, rate);
+    };
+
+    const moneyKeys = [
+      "plan_price",
+      "total_billing_amount",
+      "total_amount_due",
+      "total_received",
+      "current_cycle_amount",
+      "current_cycle_received",
+      "current_cycle_due",
+      "period_total",
+      "amount_due",
+      "bank",
+      "cash",
+    ];
+
+    const convertRow = (row) => {
+      if (!row) return row;
+      const next = { ...row };
+      for (const key of moneyKeys) {
+        if (next[key] != null && next[key] !== "") {
+          next[`${key}_pkr`] = Number(next[key]);
+          next[key] = convert(next[key]);
+        }
+      }
+      return next;
+    };
+
     return {
       tenant: {
         company_name: tenant?.company_name,
@@ -438,9 +483,20 @@ export const tenantPortalService = {
         max_stores: tenant?.max_stores,
         max_orders_per_month: tenant?.max_orders_per_month,
       },
-      billing,
+      currency: rate == null ? "PKR" : displayCurrency,
+      billing_currency: "PKR",
+      fx: {
+        from: "PKR",
+        to: rate == null ? "PKR" : displayCurrency,
+        rate: rate == null ? 1 : rate,
+        rate_date: fxMeta?.rate_date || null,
+        source: fxMeta?.source || null,
+        converted: Boolean(rate != null && displayCurrency !== "PKR"),
+        fallback: rate == null && displayCurrency !== "PKR",
+      },
+      billing: convertRow(billing),
       modules,
-      payments,
+      payments: (payments || []).map(convertRow),
     };
   },
 

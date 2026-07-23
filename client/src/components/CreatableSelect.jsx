@@ -136,7 +136,7 @@ export function CreatableSelect({
           onFocus={() => {
             if (!disabled && !loading) {
               setOpen(true);
-              setQuery(selected?.label || "");
+              setQuery("");
             }
           }}
           onChange={(e) => {
@@ -155,7 +155,7 @@ export function CreatableSelect({
             if (disabled || loading) return;
             setOpen((v) => !v);
             if (!open) {
-              setQuery(selected?.label || "");
+              setQuery("");
               inputRef.current?.focus();
             }
           }}

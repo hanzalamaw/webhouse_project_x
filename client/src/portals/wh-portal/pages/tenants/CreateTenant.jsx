@@ -182,7 +182,7 @@ function ReviewRow({ label, value }) {
   return (
     <div className="wh-review-row">
       <span className="wh-review-row__label">{label}</span>
-      <span className="wh-review-row__value">{value ?? "â€”"}</span>
+      <span className="wh-review-row__value">{value ?? "—"}</span>
     </div>
   );
 }
@@ -527,7 +527,7 @@ export default function CreateTenant() {
         break;
       case 1:
         if (!draft.subscription_plan_id) return "Select a subscription plan.";
-        if (!selectedPlan?.login_portal) return "Selected plan has no ERP portal â€” set it on the subscription plan.";
+        if (!selectedPlan?.login_portal) return "Selected plan has no ERP portal — set it on the subscription plan.";
         break;
       case 2:
         if (!draft.subscription_plan_id) return "Select a subscription plan first.";
@@ -630,7 +630,7 @@ export default function CreateTenant() {
         const createdPassword = draft.super_admin.password;
         const created = await apiFetch("/tenants", { method: "POST", body: JSON.stringify(payload) }, authFetch);
         clearDraft();
-        setDetailsTitle(`Tenant created â€” ${created.company_name || draft.company.company_name}`);
+        setDetailsTitle(`Tenant created — ${created.company_name || draft.company.company_name}`);
         setDetailsSections(
           buildTenantAccountSections({
             tenant: created,
@@ -666,7 +666,7 @@ export default function CreateTenant() {
       </ReviewBlock>
       <ReviewBlock step={2} title="Subscription">
         <ReviewRow label="Plan" value={selectedPlan?.plan_name} />
-        <ReviewRow label="Monthly price" value={selectedPlan ? formatPKR(selectedPlan.plan_price) : "â€”"} />
+        <ReviewRow label="Monthly price" value={selectedPlan ? formatPKR(selectedPlan.plan_price) : "—"} />
         <ReviewRow label="ERP portal" value={selectedPlan?.login_portal?.toUpperCase()} />
       </ReviewBlock>
       <ReviewBlock step={3} title="Modules">
@@ -676,7 +676,7 @@ export default function CreateTenant() {
             displayModules
               .filter((m) => draft.module_ids.includes(m.id))
               .map((m) => formatModuleLabel(m))
-              .join(", ") || "â€”"
+              .join(", ") || "—"
           }
         />
       </ReviewBlock>
@@ -698,14 +698,14 @@ export default function CreateTenant() {
         <ReviewRow label="Bank" value={formatPKR(draft.payment.bank)} />
         <ReviewRow label="Cash" value={formatPKR(draft.payment.cash)} />
         <ReviewRow label="Total received" value={formatPKR(draft.payment.total_received)} />
-        <ReviewRow label="Received at" value={draft.payment.received_at || "â€”"} />
+        <ReviewRow label="Received at" value={draft.payment.received_at || "—"} />
       </ReviewBlock>
       <ReviewBlock step={7} title="Organization">
         <ReviewRow label="Company" value={draft.company.company_name} />
-        <ReviewRow label="Logo URL" value={draft.organization.logo_url || "â€”"} />
+        <ReviewRow label="Logo URL" value={draft.organization.logo_url || "—"} />
         <ReviewRow label="Timezone" value={formatTimezoneDisplay(draft.organization.timezone)} />
         <ReviewRow label="Currency" value={formatCurrencyDisplay(draft.organization.currency, currencies)} />
-        <ReviewRow label="Language" value={draft.organization.language === "en" ? "English" : draft.organization.language || "â€”"} />
+        <ReviewRow label="Language" value={draft.organization.language === "en" ? "English" : draft.organization.language || "—"} />
         <ReviewRow label="Fiscal year start" value={formatFiscalDisplay(draft.organization.fiscal_year_start)} />
         <ReviewRow label="Fiscal year end" value={formatFiscalDisplay(draft.organization.fiscal_year_end)} />
       </ReviewBlock>
@@ -713,7 +713,7 @@ export default function CreateTenant() {
         <ReviewRow label="Name" value={isEdit ? draft.super_admin.name : draft.company.owner_name} />
         <ReviewRow label="Username" value={draft.super_admin.username} />
         <ReviewRow label="Email" value={isEdit ? draft.super_admin.email : draft.company.owner_email} />
-        <ReviewRow label="Password" value={draft.super_admin.password ? "â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢" : "â€”"} />
+        <ReviewRow label="Password" value={draft.super_admin.password ? "••••••••" : "—"} />
       </ReviewBlock>
     </div>
   );
@@ -740,7 +740,7 @@ export default function CreateTenant() {
           }
         />
         {!hydrated ? (
-          <p className="wh-muted">Loading tenantâ€¦</p>
+          <p className="wh-muted">Loading tenant…</p>
         ) : (
           <form
             className="wh-form-stack"
@@ -789,10 +789,10 @@ export default function CreateTenant() {
                       }}
                       required
                     >
-                      <option value="">Select planâ€¦</option>
+                      <option value="">Select plan…</option>
                       {plans.map((p) => (
                         <option key={p.id} value={p.id}>
-                          {p.plan_name} â€” {formatPKR(p.plan_price)}/mo
+                          {p.plan_name} — {formatPKR(p.plan_price)}/mo
                         </option>
                       ))}
                     </FormField>
@@ -944,7 +944,7 @@ export default function CreateTenant() {
             <FormActions>
               {isEdit ? (
                 <Button type="submit" disabled={loading}>
-                  {loading ? "Savingâ€¦" : "Save changes"}
+                  {loading ? "Saving…" : "Save changes"}
                 </Button>
               ) : phase === "review" ? (
                 <>
@@ -952,7 +952,7 @@ export default function CreateTenant() {
                     Back
                   </Button>
                   <Button type="submit" disabled={loading}>
-                    {loading ? "Creatingâ€¦" : "Create tenant"}
+                    {loading ? "Creating…" : "Create tenant"}
                   </Button>
                 </>
               ) : (

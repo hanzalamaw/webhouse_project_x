@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../../../../../context/AuthContext";
 import { useModulePermission } from "../../../../../hooks/useModulePermission";
+import { useMoney } from "../../../../../hooks/useMoney";
 import { apiFetch } from "../../../../../api/client";
 import { PageHeader } from "../../../../../components/PageHeader";
 import { FormPageLayout } from "../../../../../components/FormPageLayout";
@@ -28,6 +29,7 @@ export default function ViewVendorBill() {
   const { billId } = useParams();
   const { authFetch } = useAuth();
   const { canCreate, canEdit } = useModulePermission("finance");
+  const { amountLabel } = useMoney();
   const navigate = useNavigate();
   const [bill, setBill] = useState(null);
   const [payments, setPayments] = useState([]);
@@ -159,7 +161,7 @@ export default function ViewVendorBill() {
                 <div className="wh-form-grid wh-form-grid--2">
                   <PaymentAmountField
                     id="vb_view_amount"
-                    label="Payment amount (Rs.)"
+                    label={amountLabel("Payment amount")}
                     value={addForm.amount_paid}
                     onChange={(e) => setAddForm((f) => ({ ...f, amount_paid: e.target.value }))}
                     amount={addAmount}

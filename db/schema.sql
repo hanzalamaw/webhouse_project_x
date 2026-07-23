@@ -53,12 +53,30 @@ CREATE TABLE IF NOT EXISTS `modules` (
 CREATE TABLE IF NOT EXISTS `wh_subscription_plans` (
   `id` INT NOT NULL AUTO_INCREMENT,
   `plan_name` VARCHAR(45) NOT NULL,
-  `plan_price` DECIMAL(12,2) NOT NULL,
+  `plan_price` DECIMAL(12,2) NOT NULL COMMENT 'Monthly price always in PKR',
   `login_portal` VARCHAR(20) NOT NULL DEFAULT 'erp1',
   `created_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
   `last_updated_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `deleted_at` TIMESTAMP NULL DEFAULT NULL,
   PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- -----------------------------------------------------
+-- Table `wh_exchange_rates` (PKR → tenant display currencies)
+-- -----------------------------------------------------
+CREATE TABLE IF NOT EXISTS `wh_exchange_rates` (
+  `id` INT NOT NULL AUTO_INCREMENT,
+  `base_currency` VARCHAR(10) NOT NULL DEFAULT 'PKR',
+  `target_currency` VARCHAR(10) NOT NULL,
+  `rate` DECIMAL(24, 12) NOT NULL COMMENT 'Units of target per 1 base (PKR)',
+  `rate_date` DATE NULL DEFAULT NULL,
+  `source` VARCHAR(100) NULL DEFAULT NULL,
+  `fetched_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at` DATETIME NULL DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE INDEX `uk_wh_exchange_rates_pair` (`base_currency` ASC, `target_currency` ASC)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -----------------------------------------------------

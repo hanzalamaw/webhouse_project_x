@@ -39,7 +39,10 @@ export default function TenantSidebar({ moduleSlug }) {
   const { user, logout, authFetch } = useAuth();
   const { darkMode, toggleDarkMode } = useTheme();
 
-  const menuItems = useMemo(() => getTenantMenuItems(moduleSlug), [moduleSlug]);
+  const menuItems = useMemo(
+    () => getTenantMenuItems(moduleSlug, user?.manifest),
+    [moduleSlug, user?.manifest]
+  );
   const logoutRedirect = `/${user?.login_portal || "erp1"}`;
   const [orgBranding, setOrgBranding] = useState({ logoUrl: null, companyName: null });
 

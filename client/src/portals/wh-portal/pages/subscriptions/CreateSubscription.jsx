@@ -208,6 +208,7 @@ export default function CreateSubscription() {
                 value={form.plan_price}
                 onChange={(e) => setForm((f) => ({ ...f, plan_price: e.target.value }))}
                 required
+                hint="Plans are always priced in Pakistani Rupees (PKR). Tenants see a converted amount in their organization currency."
               />
             </div>
             <div className="wh-field">

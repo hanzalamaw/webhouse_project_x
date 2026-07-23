@@ -115,7 +115,8 @@ export function SearchableSelect({
           onFocus={() => {
             if (!disabled && !loading) {
               setOpen(true);
-              setQuery(selected?.label || "");
+              // Clear so the user can type a search immediately; value restores if they leave without picking.
+              setQuery("");
             }
           }}
           onChange={(e) => {
@@ -134,7 +135,7 @@ export function SearchableSelect({
             if (disabled || loading) return;
             setOpen((v) => !v);
             if (!open) {
-              setQuery(selected?.label || "");
+              setQuery("");
               inputRef.current?.focus();
             }
           }}

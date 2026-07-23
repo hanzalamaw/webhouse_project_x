@@ -4,7 +4,7 @@ import { DataTable } from "../../../../../components/DataTable";
 import { StatusBadge } from "../../../../../components/Badge";
 import { useAuth } from "../../../../../context/AuthContext";
 import { apiFetch } from "../../../../../api/client";
-import { formatPKR } from "../../../../../utils/currency";
+import { formatMoney } from "../../../../../utils/currency";
 import { formatDate, formatDateTime } from "../../../../../utils/dateTime";
 import { ModuleIcon, SubscriptionIcon } from "../../../../../components/icons";
 
@@ -135,6 +135,8 @@ export default function PlanSubscription() {
   const tenant = data?.tenant || {};
   const modules = data?.modules || [];
   const payments = data?.payments || [];
+  const displayCurrency = data?.currency || "PKR";
+  const fx = data?.fx;
 
   const planName = tenant.plan_name || billing?.plan_name || "—";
   const billingCycle = tenant.billing_cycle || billing?.billing_cycle;
@@ -151,15 +153,22 @@ export default function PlanSubscription() {
   const totalDue = Number(billing?.total_amount_due ?? 0);
   const cycleDue = Number(billing?.current_cycle_due ?? 0);
 
+  const money = (n) => (loading ? "—" : formatMoney(n, displayCurrency));
+
   const paymentColumns = [
     { key: "received_at", label: "Date", format: formatDateTime },
-    { key: "bank", label: "Bank", format: (v) => formatPKR(v) },
-    { key: "cash", label: "Cash", format: (v) => formatPKR(v) },
-    { key: "total_received", label: "Total Paid", format: (v) => formatPKR(v) },
+    { key: "bank", label: "Bank", format: (v) => formatMoney(v, displayCurrency) },
+    { key: "cash", label: "Cash", format: (v) => formatMoney(v, displayCurrency) },
+    { key: "total_received", label: "Total Paid", format: (v) => formatMoney(v, displayCurrency) },
   ];
 
   const dash = (v) => (loading ? "—" : v);
-  const money = (n) => (loading ? "—" : formatPKR(n));
+
+  const fxHint = fx?.converted
+    ? `Shown in ${fx.to} (converted from PKR plan pricing${fx.rate_date ? ` · rate as of ${formatDate(fx.rate_date)}` : ""})`
+    : fx?.fallback
+      ? "Exchange rate unavailable — amounts shown in PKR until rates refresh"
+      : "Subscription plans are priced in PKR";
 
   return (
     <div className="wh-page wh-page--wide">
@@ -174,6 +183,9 @@ export default function PlanSubscription() {
         <p className="wh-muted wh-sub-loading">Loading subscription details…</p>
       ) : (
         <>
+          <p className="wh-muted" style={{ marginTop: -8, marginBottom: 16 }}>
+            {fxHint}
+          </p>
           <div className="wh-dash-grid">
             <div className="wh-dash-col-8">
               <div className="wh-plan-hero">
@@ -191,7 +203,7 @@ export default function PlanSubscription() {
                   </div>
                   <div className="wh-plan-hero__meta-item">
                     <span>Plan price</span>
-                    <strong>{planPrice != null ? formatPKR(planPrice) : "—"}</strong>
+                    <strong>{planPrice != null ? money(planPrice) : "—"}</strong>
                   </div>
                   <div className="wh-plan-hero__meta-item">
                     <span>Period start</span>

@@ -15,7 +15,8 @@ function DetailRow({ label, value, copyValue, sensitive, onCopied }) {
   const textToCopy = copyValue ?? raw;
 
   const handleCopy = async () => {
-    const ok = await copyToClipboard(`Do not share these credentials with anyone.\n\n${label}: ${textToCopy}`);
+    // Copy the raw value only so login fields can be pasted cleanly.
+    const ok = await copyToClipboard(textToCopy);
     if (ok) onCopied(label);
   };
 
@@ -64,8 +65,15 @@ export function AccountDetailsModal({
 
   const handleCopyAll = async () => {
     const rows = sections.flatMap((section) => section.rows || []);
+    // Put username/password before the portal link so pasting into login fields works.
+    const priority = { Username: 0, Password: 1, Link: 2 };
+    const ordered = [...rows].sort((a, b) => {
+      const pa = priority[a.label] ?? 50;
+      const pb = priority[b.label] ?? 50;
+      return pa - pb;
+    });
     const warning = "Do not share these credentials with anyone.";
-    const ok = await copyToClipboard(`${warning}\n\n${buildCopyBlock(rows)}`);
+    const ok = await copyToClipboard(`${warning}\n\n${buildCopyBlock(ordered)}`);
     if (ok) setCopiedLabel("All credentials");
   };
 

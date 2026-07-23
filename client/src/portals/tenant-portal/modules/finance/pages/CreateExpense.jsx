@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../../../../../context/AuthContext";
 import { useModulePermission } from "../../../../../hooks/useModulePermission";
+import { useMoney } from "../../../../../hooks/useMoney";
 import { apiFetch, fetchAllTableRows } from "../../../../../api/client";
 import { PageHeader } from "../../../../../components/PageHeader";
 import { FormPageLayout, FormPageAlerts, FormActions } from "../../../../../components/FormPageLayout";
@@ -16,6 +17,7 @@ export default function CreateExpense() {
   const isEdit = Boolean(expenseId);
   const { authFetch } = useAuth();
   const { canCreate, canEdit } = useModulePermission("finance");
+  const { amountLabel } = useMoney();
   const navigate = useNavigate();
   const [categories, setCategories] = useState([]);
   const [subCategories, setSubCategories] = useState([]);
@@ -114,7 +116,7 @@ export default function CreateExpense() {
           <FormBlock title="Expense details" description="Title, amount, category, and payment method. Sub-category is optional for finer reporting.">
             <div className="wh-form-grid">
               <FormField id="expense_title" label="Title" value={form.expense_title} onChange={(e) => setForm((f) => ({ ...f, expense_title: e.target.value }))} required disabled={disabled} />
-              <FormField id="amount" label="Amount (Rs.)" type="number" step="0.01" min="0" value={form.amount} onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))} required disabled={disabled} />
+              <FormField id="amount" label={amountLabel("Amount")} type="number" step="0.01" min="0" value={form.amount} onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))} required disabled={disabled} />
               <FormField id="category_id" label="Category" as="select" value={form.category_id} onChange={(e) => setForm((f) => ({ ...f, category_id: e.target.value, sub_category_id: "" }))} required disabled={disabled}>
                 <option value="">Select…</option>
                 {categories.map((c) => <option key={c.id} value={c.id}>{c.category_name}</option>)}

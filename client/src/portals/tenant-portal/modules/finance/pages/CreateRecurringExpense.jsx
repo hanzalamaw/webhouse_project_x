@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../../../../../context/AuthContext";
 import { useModulePermission } from "../../../../../hooks/useModulePermission";
+import { useMoney } from "../../../../../hooks/useMoney";
 import { apiFetch, fetchAllTableRows } from "../../../../../api/client";
 import { PageHeader } from "../../../../../components/PageHeader";
 import { FormPageLayout, FormPageAlerts, FormActions } from "../../../../../components/FormPageLayout";
@@ -16,6 +17,7 @@ export default function CreateRecurringExpense() {
   const isEdit = Boolean(recurringId);
   const { authFetch } = useAuth();
   const { canCreate, canEdit } = useModulePermission("finance");
+  const { amountLabel } = useMoney();
   const navigate = useNavigate();
   const [categories, setCategories] = useState([]);
   const [subCategories, setSubCategories] = useState([]);
@@ -120,7 +122,7 @@ export default function CreateRecurringExpense() {
           <FormBlock title="Schedule" description="Amount, frequency, and next due date.">
             <div className="wh-form-grid">
               <FormField id="title" label="Title" value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} required disabled={disabled} />
-              <FormField id="amount" label="Amount (Rs.)" type="number" step="0.01" min="0" value={form.amount} onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))} required disabled={disabled} />
+              <FormField id="amount" label={amountLabel("Amount")} type="number" step="0.01" min="0" value={form.amount} onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))} required disabled={disabled} />
               <FormField id="frequency" label="Frequency" as="select" value={form.frequency} onChange={(e) => setForm((f) => ({ ...f, frequency: e.target.value }))} disabled={disabled}>
                 {RECURRING_FREQUENCIES.map((f) => <option key={f} value={f}>{f}</option>)}
               </FormField>

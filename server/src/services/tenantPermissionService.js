@@ -2,6 +2,7 @@ import { PERMISSION_ACTIONS } from "../utils/permissionRules.js";
 import { isSuperAdminRoleName } from "../utils/tenantRoles.js";
 import { tenantPermissionRepository } from "../repositories/tenantPermissionRepository.js";
 import { tenantRepository } from "../repositories/tenantRepository.js";
+import { permissionCache } from "../utils/permissionCache.js";
 
 const ALL_ACTIONS = [...PERMISSION_ACTIONS, "manage"];
 
@@ -38,36 +39,77 @@ function buildMatrix(rows) {
   return permissions;
 }
 
-export const tenantPermissionService = {
-  async resolveForUser(tenantId, userId, { impersonating = false } = {}) {
-    const enabledModules = (await tenantRepository.getTenantModules(tenantId)).filter((m) => m.is_enabled);
+function intersectWithEnabled(permissions, enabledNames) {
+  const clipped = {};
+  for (const [moduleName, actions] of Object.entries(permissions || {})) {
+    if (!enabledNames.has(moduleName)) continue;
+    clipped[moduleName] = actions;
+  }
+  return clipped;
+}
 
-    if (impersonating) {
-      return {
+function toEnabledSet(modules) {
+  return new Set((modules || []).filter((m) => m.is_enabled).map((m) => m.module_name));
+}
+
+function withEnabledContext(ctx, enabledModules) {
+  const enabledNames = toEnabledSet(enabledModules);
+  return {
+    ...ctx,
+    enabled_modules: [...enabledNames],
+    enabledModuleSet: enabledNames,
+    enabledModuleRows: enabledModules.filter((m) => m.is_enabled),
+  };
+}
+
+async function resolveForUserUncached(tenantId, userId, { impersonating = false } = {}) {
+  const enabledModules = (await tenantRepository.getTenantModules(tenantId)).filter((m) => m.is_enabled);
+
+  if (impersonating) {
+    return withEnabledContext(
+      {
         is_super_admin: true,
         permissions: permissionsFromEnabledModules(enabledModules),
-      };
-    }
+      },
+      enabledModules
+    );
+  }
 
-    const role = await tenantPermissionRepository.findUserRole(tenantId, userId);
-    if (!role?.role_id) {
-      return { is_super_admin: false, permissions: {} };
-    }
+  const role = await tenantPermissionRepository.findUserRole(tenantId, userId);
+  if (!role?.role_id) {
+    return withEnabledContext({ is_super_admin: false, permissions: {} }, enabledModules);
+  }
 
-    if (isSuperAdminRoleName(role.role_name)) {
-      return {
+  if (isSuperAdminRoleName(role.role_name)) {
+    return withEnabledContext(
+      {
         is_super_admin: true,
         role_name: role.role_name,
         permissions: permissionsFromEnabledModules(enabledModules),
-      };
-    }
+      },
+      enabledModules
+    );
+  }
 
-    const rows = await tenantPermissionRepository.findPermissionsByRole(tenantId, role.role_id);
-    return {
+  const rows = await tenantPermissionRepository.findPermissionsByRole(tenantId, role.role_id);
+  const enabledNames = toEnabledSet(enabledModules);
+  return withEnabledContext(
+    {
       is_super_admin: false,
       role_name: role.role_name,
-      permissions: buildMatrix(rows),
-    };
+      permissions: intersectWithEnabled(buildMatrix(rows), enabledNames),
+    },
+    enabledModules
+  );
+}
+
+export const tenantPermissionService = {
+  async resolveForUser(tenantId, userId, { impersonating = false } = {}) {
+    const cached = permissionCache.get(tenantId, userId, { impersonating });
+    if (cached) return cached;
+
+    const ctx = await resolveForUserUncached(tenantId, userId, { impersonating });
+    return permissionCache.set(tenantId, userId, ctx, { impersonating });
   },
 
   toClientPayload(ctx) {
@@ -81,7 +123,16 @@ export const tenantPermissionService = {
   canAccess(ctx, moduleName, action) {
     if (!moduleName || !action) return false;
     if (!ctx) return false;
-    if (ctx.is_super_admin) return true;
+
+    const enabled = ctx.enabledModuleSet || new Set(ctx.enabled_modules || []);
+    if (enabled.size > 0 && !enabled.has(moduleName)) return false;
+    // If enabled set is empty and we have no permissions, deny.
+    if (enabled.size === 0 && !ctx.permissions?.[moduleName]) return false;
+
+    if (ctx.is_super_admin) {
+      return enabled.has(moduleName);
+    }
+
     const granted = new Set(ctx.permissions?.[moduleName] || []);
     if (granted.has(action)) return true;
     if (granted.has("manage")) return true;

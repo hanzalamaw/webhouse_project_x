@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Modal } from "../../../../../components/Modal";
 import { FormField } from "../../../../../components/FormField";
 import { Button } from "../../../../../components/Button";
+import { useMoney } from "../../../../../hooks/useMoney";
 
 export default function VariantDetailModal({
   open,
@@ -13,6 +14,7 @@ export default function VariantDetailModal({
   warehouseOptions = [],
   showWarehouseStock = false,
 }) {
+  const { amountLabel } = useMoney();
   const [form, setForm] = useState(null);
   const [error, setError] = useState("");
 
@@ -139,7 +141,7 @@ export default function VariantDetailModal({
           </FormField>
           <FormField
             id="variant_cost"
-            label="Cost price (PKR)"
+            label={amountLabel("Cost price")}
             type="number"
             min="0"
             step="0.01"
@@ -148,7 +150,7 @@ export default function VariantDetailModal({
           />
           <FormField
             id="variant_sell"
-            label="Selling price (PKR)"
+            label={amountLabel("Selling price")}
             type="number"
             min="0"
             step="0.01"

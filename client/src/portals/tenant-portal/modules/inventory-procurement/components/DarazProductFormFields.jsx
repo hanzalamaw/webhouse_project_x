@@ -2,6 +2,7 @@ import { FormBlock } from "../../../../../components/FormBlock";
 import { FormField } from "../../../../../components/FormField";
 import { Button } from "../../../../../components/Button";
 import { SearchableSelect } from "../../../../../components/SearchableSelect";
+import { useMoney } from "../../../../../hooks/useMoney";
 
 /**
  * Daraz-specific listing fields for create product.
@@ -19,6 +20,7 @@ export function DarazProductFormFields({
   refLoading = false,
   fieldErrors = {},
 }) {
+  const { amountLabel } = useMoney();
   const set = (key, value) => onChange({ ...daraz, [key]: value });
   const setPackage = (key, value) =>
     onChange({ ...daraz, package: { ...(daraz.package || {}), [key]: value } });
@@ -183,7 +185,7 @@ export function DarazProductFormFields({
           />
           <FormField
             id="daraz_price"
-            label="Selling price (PKR)"
+            label={amountLabel("Selling price")}
             type="number"
             min="0"
             step="1"
@@ -205,7 +207,7 @@ export function DarazProductFormFields({
           />
           <FormField
             id="daraz_cost"
-            label="Cost price (PKR)"
+            label={amountLabel("Cost price")}
             type="number"
             min="0"
             step="0.01"

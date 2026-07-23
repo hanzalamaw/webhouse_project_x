@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../../../../../../context/AuthContext";
 import { useModulePermission } from "../../../../../../hooks/useModulePermission";
+import { useMoney } from "../../../../../../hooks/useMoney";
 import { apiFetch, fetchAllTableRows, TABLE_PAGE_SIZE } from "../../../../../../api/client";
 import { PageHeader } from "../../../../../../components/PageHeader";
 import { Card } from "../../../../../../components/Card";
@@ -68,6 +69,7 @@ export default function ManagePayments() {
   const navigate = useNavigate();
   const pendingOrderIdRef = useRef(location.state?.openOrderId);
   const { canCreate, canEdit, canDelete } = useModulePermission("order-management");
+  const { amountLabel } = useMoney();
   const [summary, setSummary] = useState(null);
   const [rows, setRows] = useState([]);
   const [page, setPage] = useState(1);
@@ -368,7 +370,7 @@ export default function ManagePayments() {
           <div className="wh-form-grid wh-form-grid--2">
             <PaymentAmountField
               id="om_tx_add_amount"
-              label="Amount (Rs.)"
+              label={amountLabel("Amount")}
               value={addForm.amount}
               onChange={(e) => setAddForm((f) => ({ ...f, amount: e.target.value }))}
               amount={addAmount}
@@ -479,7 +481,7 @@ export default function ManagePayments() {
           <div className="wh-form-grid wh-form-grid--2">
             <PaymentAmountField
               id="om_tx_fix_amount"
-              label="Amount (Rs.)"
+              label={amountLabel("Amount")}
               value={fixForm.amount}
               onChange={(e) => setFixForm((f) => ({ ...f, amount: e.target.value }))}
               amount={fixAmount}

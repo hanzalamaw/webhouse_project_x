@@ -19,6 +19,7 @@ import { shopifyWebhookHandler } from "./src/routes/shopifyWebhooks.js";
 import { purgeSoftDeleted } from "./src/jobs/purgeSoftDeleted.js";
 import { runShopifyBackgroundSync } from "./src/jobs/shopifyBackgroundSync.js";
 import { processPendingShopifyDeletes } from "./src/jobs/processPendingShopifyDeletes.js";
+import { refreshExchangeRatesJob } from "./src/jobs/refreshExchangeRates.js";
 import { PURGE_AFTER_DAYS } from "./src/utils/softDeletePolicy.js";
 import { SHOPIFY_PENDING_DELETE_DAYS } from "./src/utils/shopifyDeferredDelete.js";
 
@@ -122,6 +123,12 @@ const startServer = async () => {
       }
     } catch (err) {
       console.error("[marketplace-deferred-delete] failed:", err?.message || err);
+    }
+
+    try {
+      await refreshExchangeRatesJob();
+    } catch (err) {
+      console.error("[fx] daily rate refresh failed:", err?.message || err);
     }
   };
 

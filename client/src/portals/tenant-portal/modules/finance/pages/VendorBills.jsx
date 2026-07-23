@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../../../../context/AuthContext";
 import { useModulePermission } from "../../../../../hooks/useModulePermission";
+import { useMoney } from "../../../../../hooks/useMoney";
 import { apiFetch, fetchAllTableRows, TABLE_PAGE_SIZE } from "../../../../../api/client";
 import { PageHeader } from "../../../../../components/PageHeader";
 import { Card } from "../../../../../components/Card";
@@ -49,6 +50,7 @@ function canSubmitAmount(amount, maxAllowed) {
 export default function VendorBills() {
   const { authFetch } = useAuth();
   const { canCreate } = useModulePermission("finance");
+  const { amountLabel } = useMoney();
   const navigate = useNavigate();
   const [rows, setRows] = useState([]);
   const [page, setPage] = useState(1);
@@ -223,7 +225,7 @@ export default function VendorBills() {
                 <div className="wh-form-grid wh-form-grid--2">
                   <PaymentAmountField
                     id="vb_amount"
-                    label="Payment amount (Rs.)"
+                    label={amountLabel("Payment amount")}
                     value={addForm.amount_paid}
                     onChange={(e) => setAddForm((f) => ({ ...f, amount_paid: e.target.value }))}
                     amount={addAmount}

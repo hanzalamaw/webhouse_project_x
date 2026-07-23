@@ -22,7 +22,9 @@ export const LOGIN_PORTALS = [
 
 export function loginPortalUrl(portal) {
   if (!portal) return "";
-  return `${window.location.origin}/${portal}`;
+  const configured = String(import.meta.env.VITE_APP_ORIGIN || "").trim().replace(/\/+$/, "");
+  const origin = configured || (typeof window !== "undefined" ? window.location.origin : "");
+  return origin ? `${origin}/${portal}` : `/${portal}`;
 }
 
 export const TENANT_STATUS = ["active", "suspended", "inactive"];

@@ -1,3 +1,6 @@
+import { useState } from "react";
+import { EyeIcon, EyeOffIcon } from "./icons";
+
 export function FormField({
   id,
   label,
@@ -13,11 +16,16 @@ export function FormField({
   children,
   displayOnly = false,
   suppressErrorMessage = false,
+  revealable,
   ...rest
 }) {
+  const [revealed, setRevealed] = useState(false);
   const inputClass = displayOnly
     ? "wh-field__input wh-field__input--display"
     : `wh-field__input${rest.readOnly ? " wh-field__input--readonly" : ""}`;
+
+  const showReveal = (revealable ?? type === "password") && type === "password" && !displayOnly && !children;
+  const inputType = showReveal && revealed ? "text" : type;
 
   return (
     <div className={`wh-field${error ? " wh-field--error" : ""}`}>
@@ -53,11 +61,34 @@ export function FormField({
           placeholder={placeholder}
           {...rest}
         />
+      ) : showReveal ? (
+        <div className="wh-field__password-wrap">
+          <input
+            id={id}
+            type={inputType}
+            className={`${inputClass} wh-field__input--with-reveal`}
+            value={value}
+            onChange={onChange}
+            placeholder={placeholder}
+            autoComplete={autoComplete ?? "off"}
+            {...rest}
+          />
+          <button
+            type="button"
+            className="wh-field__reveal"
+            onClick={() => setRevealed((v) => !v)}
+            title={revealed ? "Hide password" : "Show password"}
+            aria-label={revealed ? "Hide password" : "Show password"}
+            tabIndex={-1}
+          >
+            {revealed ? <EyeOffIcon /> : <EyeIcon />}
+          </button>
+        </div>
       ) : (
         <input
           id={id}
           type={type}
-          className={`wh-field__input${rest.readOnly ? " wh-field__input--readonly" : ""}`}
+          className={inputClass}
           value={value}
           onChange={onChange}
           placeholder={placeholder}

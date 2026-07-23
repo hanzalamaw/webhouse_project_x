@@ -2,6 +2,7 @@ import { subscriptionRepository } from "../repositories/subscriptionRepository.j
 import { tenantRepository } from "../repositories/tenantRepository.js";
 import { logWhAudit } from "../utils/whAudit.js";
 import { paginatedResponse, parsePagination } from "../utils/pagination.js";
+import { permissionCache } from "../utils/permissionCache.js";
 
 export const subscriptionService = {
   async list(query) {
@@ -47,7 +48,10 @@ export const subscriptionService = {
     if (loginPortal && loginPortal !== old.login_portal) {
       await tenantRepository.syncLoginPortalForPlan(id, loginPortal);
     }
-    await tenantRepository.syncModulesForPlanTenants(id);
+    const affectedTenantIds = await tenantRepository.syncModulesForPlanTenants(id);
+    for (const tenantId of affectedTenantIds || []) {
+      permissionCache.invalidateTenant(tenantId);
+    }
     const updated = await this.getById(id);
     await logWhAudit({
       adminUserId: audit.adminUserId,

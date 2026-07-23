@@ -5,11 +5,20 @@ export function moduleNameFromSlug(slug) {
   return mod?.name || null;
 }
 
+function permissionMatrix(user) {
+  return user?.manifest?.permissions || user?.permissions || {};
+}
+
+/** Display-only check — backend always re-enforces on API calls. */
 export function hasPermission(user, moduleName, action) {
   if (!user || !moduleName || !action) return false;
-  if (user.impersonating || user.is_super_admin) return true;
 
-  const granted = new Set(user.permissions?.[moduleName] || []);
+  if (user.manifest?.modules?.length) {
+    const entitled = user.manifest.modules.some((m) => m.module_name === moduleName);
+    if (!entitled) return false;
+  }
+
+  const granted = new Set(permissionMatrix(user)[moduleName] || []);
   if (granted.has(action)) return true;
   if (granted.has("manage")) return true;
   return false;

@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../../../../../../context/AuthContext";
+import { useMoney } from "../../../../../../hooks/useMoney";
 import { apiFetch } from "../../../../../../api/client";
 import { PageHeader } from "../../../../../../components/PageHeader";
 import { FormField } from "../../../../../../components/FormField";
@@ -87,6 +88,7 @@ export default function CreateProduct() {
   const { productId } = useParams();
   const isEdit = Boolean(productId);
   const { authFetch } = useAuth();
+  const { amountLabel } = useMoney();
   const [form, setForm] = useState(INITIAL);
   const { categories, outlets, loading: refLoading, reload } = usePosReference(form.outlet_id || null);
   const [options, setOptions] = useState(() => makeDefaultOptions());
@@ -274,15 +276,15 @@ export default function CreateProduct() {
 
         <FormBlock title="Default variant pricing" description="Applied to new generated variants. Override per variant below.">
           <div className="wh-form-grid">
-            <FormField id="default_cost_price" label="Default cost price (PKR)" type="number" min="0" step="0.01" value={form.default_cost_price} onChange={(e) => set("default_cost_price", e.target.value)} />
-            <FormField id="default_selling_price" label="Default selling price (PKR)" type="number" min="0" step="0.01" value={form.default_selling_price} onChange={(e) => set("default_selling_price", e.target.value)} />
+            <FormField id="default_cost_price" label={amountLabel("Default cost price")} type="number" min="0" step="0.01" value={form.default_cost_price} onChange={(e) => set("default_cost_price", e.target.value)} />
+            <FormField id="default_selling_price" label={amountLabel("Default selling price")} type="number" min="0" step="0.01" value={form.default_selling_price} onChange={(e) => set("default_selling_price", e.target.value)} />
           </div>
         </FormBlock>
 
         <FormBlock title="Product pricing" description="Discount and tax at product level.">
           <div className="wh-form-grid">
-            <FormField id="discount" label="Discount (PKR)" type="number" min="0" step="0.01" value={form.discount} onChange={(e) => set("discount", e.target.value)} />
-            <FormField id="tax" label="Tax (PKR)" type="number" min="0" step="0.01" value={form.tax} onChange={(e) => set("tax", e.target.value)} />
+            <FormField id="discount" label={amountLabel("Discount")} type="number" min="0" step="0.01" value={form.discount} onChange={(e) => set("discount", e.target.value)} />
+            <FormField id="tax" label={amountLabel("Tax")} type="number" min="0" step="0.01" value={form.tax} onChange={(e) => set("tax", e.target.value)} />
           </div>
         </FormBlock>
 

@@ -212,6 +212,43 @@ button {
   outline: none;
   transition: border-color 0.15s, box-shadow 0.15s, background-color 0.15s;
 }
+
+.wh-field__password-wrap {
+  position: relative;
+  width: 100%;
+}
+
+.wh-field__input--with-reveal {
+  padding-right: 40px;
+}
+
+.wh-field__reveal {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.wh-field__reveal:hover {
+  color: var(--text-primary);
+  background: var(--hover-bg);
+}
+
+.wh-field__reveal svg {
+  width: 16px;
+  height: 16px;
+}
 .wh-field__input:-webkit-autofill:hover,
 .wh-field__input:-webkit-autofill:focus {
   -webkit-text-fill-color: var(--text-primary);

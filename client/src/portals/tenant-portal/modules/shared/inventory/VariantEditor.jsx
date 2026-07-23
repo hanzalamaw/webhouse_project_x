@@ -1,6 +1,7 @@
 import { useRef, useCallback } from "react";
 import { FormField } from "../../../../../components/FormField";
 import { Button } from "../../../../../components/Button";
+import { useMoney } from "../../../../../hooks/useMoney";
 import { formatTotalPrice } from "../../inventory-procurement/utils/pricing";
 
 function emptyAttribute(key) {
@@ -54,6 +55,7 @@ export default function VariantEditor({
   warehouseOptions = [],
   showWarehouseStock = false,
 }) {
+  const { amountLabel } = useMoney();
   const attrKeyRef = useRef(0);
   const whKeyRef = useRef(0);
 
@@ -192,7 +194,7 @@ export default function VariantEditor({
             />
             <FormField
               id={`cost_${variant._key}`}
-              label="Cost price (PKR)"
+              label={amountLabel("Cost price")}
               type="number"
               min="0"
               step="0.01"
@@ -202,7 +204,7 @@ export default function VariantEditor({
             />
             <FormField
               id={`sell_${variant._key}`}
-              label="Selling price (PKR)"
+              label={amountLabel("Selling price")}
               type="number"
               min="0"
               step="0.01"
@@ -223,7 +225,7 @@ export default function VariantEditor({
             </FormField>
             <FormField
               id={`total_${variant._key}`}
-              label="Line total (PKR)"
+              label={amountLabel("Line total")}
               value={formatTotalPrice(variant.selling_price, 0, 0)}
               displayOnly
             />

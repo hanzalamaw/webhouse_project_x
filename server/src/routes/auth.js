@@ -3,9 +3,8 @@ import crypto from "crypto";
 import { verifyPassword } from "../utils/cipher.js";
 import { readDb, writeDb } from "../database/db.js";
 import { sessionRepository } from "../repositories/sessionRepository.js";
-import { tenantRepository } from "../repositories/tenantRepository.js";
 import { createActivityAlert } from "../utils/activityAlerts.js";
-import { tenantPermissionService } from "../services/tenantPermissionService.js";
+import { manifestService } from "../services/manifestService.js";
 import { extractClientIp } from "../utils/clientIp.js";
 import { establishTenantContext } from "../middleware/tenantContext.js";
 
@@ -70,34 +69,52 @@ async function tenantLogin(
   { forceLogoutOthers = false } = {}
 ) {
   const normalized = String(username).trim().toLowerCase();
+  const plaintextPassword = String(password ?? "");
   const [rows] = await readDb.query(
     `SELECT u.*, t.id AS tid, t.company_name, t.login_portal, t.status AS tenant_status
-     FROM wh_tenants t
-     INNER JOIN users u ON u.tenant_id = t.id AND u.deleted_at IS NULL
+     FROM users u
+     INNER JOIN wh_tenants t ON t.id = u.tenant_id AND t.deleted_at IS NULL
      WHERE t.login_portal = ?
-       AND t.deleted_at IS NULL
-       AND t.status = 'active'
        AND LOWER(u.username) = ?
-       AND u.status = 'active'
+       AND u.deleted_at IS NULL
      LIMIT 1`,
     [portal, normalized],
     SKIP
   );
   const row = rows[0];
-  if (!row || !verifyPassword(password, row.password)) {
-    if (row) {
-      await createActivityAlert({
-        tenantId: row.tid,
-        userId: row.id,
-        alertType: "failed_login",
-        title: "Failed login attempt",
-        message: `Failed login for ${normalized} from ${ip || "unknown IP"}.`,
-        priority: "high",
-        ipAddress: ip || null,
-        deviceInfo: deviceInfo || null,
-      });
-    }
-    return null;
+  if (!row) {
+    return {
+      authError: "USER_NOT_FOUND",
+      message: "No account found with that username on this portal.",
+    };
+  }
+
+  if (!verifyPassword(plaintextPassword, row.password)) {
+    await createActivityAlert({
+      tenantId: row.tid,
+      userId: row.id,
+      alertType: "failed_login",
+      title: "Failed login attempt",
+      message: `Failed login for ${normalized} from ${ip || "unknown IP"}.`,
+      priority: "high",
+      ipAddress: ip || null,
+      deviceInfo: deviceInfo || null,
+    });
+    return { authError: "WRONG_PASSWORD", message: "Incorrect password." };
+  }
+
+  if (row.tenant_status !== "active") {
+    return {
+      authError: "TENANT_INACTIVE",
+      message: "This company account is not active. Contact your administrator.",
+    };
+  }
+
+  if (row.status !== "active") {
+    return {
+      authError: "USER_INACTIVE",
+      message: "Your account is inactive. Contact your administrator.",
+    };
   }
 
   await writeDb.query(
@@ -205,6 +222,9 @@ export function registerAuthRoutes(app, _db, { JWT_SECRET, JWT_EXPIRES_IN, JWT_R
       { forceLogoutOthers: Boolean(req.body.forceLogoutOthers) }
     );
     if (!result) return res.status(401).json({ message: "Invalid credentials" });
+    if (result.authError) {
+      return res.status(401).json({ message: result.message, code: result.authError });
+    }
     if (result.error) return res.status(403).json({ message: result.error });
     if (result.conflict) {
       return res.status(409).json({
@@ -213,7 +233,7 @@ export function registerAuthRoutes(app, _db, { JWT_SECRET, JWT_EXPIRES_IN, JWT_R
         existingSession: result.existingSession,
       });
     }
-    result.user = await tenantPermissionService.enrichUserPayload(result.user, result.user.tenant_id);
+    result.user = await manifestService.enrichUserWithManifest(result.user, result.user.tenant_id);
     res.json(result);
   });
 
@@ -306,22 +326,25 @@ export function registerAuthRoutes(app, _db, { JWT_SECRET, JWT_EXPIRES_IN, JWT_R
       userPayload.impersonating = true;
       userPayload.impersonated_by = req.impersonatedBy;
     }
-    const enriched = await tenantPermissionService.enrichUserPayload(userPayload, row.tenant_id, {
+    const enriched = await manifestService.enrichUserWithManifest(userPayload, row.tenant_id, {
       impersonating: Boolean(req.impersonatedBy),
     });
     res.json({ user: enriched });
   });
 
-  app.get("/api/tenant/modules", verifyToken, establishTenantContext, requireActiveTenantSession, async (req, res) => {
+  app.get("/api/tenant/manifest", verifyToken, establishTenantContext, requireActiveTenantSession, async (req, res) => {
     if (req.userRole !== "tenant") return res.status(403).json({ message: "Forbidden" });
-    const permCtx = await tenantPermissionService.resolveForUser(req.tenantId, req.userId, {
+    const manifest = await manifestService.buildManifest(req.tenantId, req.userId, {
       impersonating: Boolean(req.impersonatedBy),
     });
-    const modules = await tenantRepository.getTenantModules(req.tenantId);
-    res.json({
-      data: modules.filter(
-        (m) => m.is_enabled && tenantPermissionService.canViewModule(permCtx, m.module_name)
-      ),
+    res.json({ data: manifest });
+  });
+
+  app.get("/api/tenant/modules", verifyToken, establishTenantContext, requireActiveTenantSession, async (req, res) => {
+    if (req.userRole !== "tenant") return res.status(403).json({ message: "Forbidden" });
+    const manifest = await manifestService.buildManifest(req.tenantId, req.userId, {
+      impersonating: Boolean(req.impersonatedBy),
     });
+    res.json({ data: manifest.modules });
   });
 }

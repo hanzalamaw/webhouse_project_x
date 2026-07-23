@@ -2,6 +2,7 @@ import { readDb, writeDb } from "../database/db.js";
 import { encrypt } from "../utils/cipher.js";
 import { cascadeSoftDeleteTenant } from "../utils/softDeleteCascade.js";
 import { joinOnTenant } from "../utils/tenantScope.js";
+import { permissionCache } from "../utils/permissionCache.js";
 import { subscriptionRepository } from "./subscriptionRepository.js";
 
 const PERMISSION_ACTIONS = ["view", "create", "edit", "delete", "manage"];
@@ -123,6 +124,7 @@ export const tenantRepository = {
         [moduleId, tenantId]
       );
     }
+    permissionCache.invalidateTenant(tenantId);
   },
 
   async syncTenantModulesFromPlan(tenantId, planId, connection = null) {
@@ -137,9 +139,12 @@ export const tenantRepository = {
        WHERE subscription_plan_id = ? AND deleted_at IS NULL`,
       [planId]
     );
+    const tenantIds = [];
     for (const { tenant_id } of tenants) {
       await this.syncTenantModulesFromPlan(tenant_id, planId);
+      tenantIds.push(tenant_id);
     }
+    return tenantIds;
   },
 
   async updateLoginPortal(id, loginPortal) {

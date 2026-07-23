@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../../../../../context/AuthContext";
 import { useModulePermission } from "../../../../../hooks/useModulePermission";
+import { useMoney } from "../../../../../hooks/useMoney";
 import { apiFetch, fetchAllTableRows } from "../../../../../api/client";
 import { PageHeader } from "../../../../../components/PageHeader";
 import { FormPageLayout, FormPageAlerts, FormActions } from "../../../../../components/FormPageLayout";
@@ -16,6 +17,7 @@ export default function CreateVendorBill() {
   const isEdit = Boolean(billId);
   const { authFetch } = useAuth();
   const { canCreate, canEdit } = useModulePermission("finance");
+  const { amountLabel } = useMoney();
   const navigate = useNavigate();
   const [form, setForm] = useState({
     vendor_name: "",
@@ -91,7 +93,7 @@ export default function CreateVendorBill() {
             <div className="wh-form-grid">
               <FormField id="vendor_name" label="Vendor name" value={form.vendor_name} onChange={(e) => setForm((f) => ({ ...f, vendor_name: e.target.value }))} required disabled={disabled} />
               <FormField id="bill_no" label="Bill #" value={form.bill_no} onChange={(e) => setForm((f) => ({ ...f, bill_no: e.target.value }))} required disabled={disabled} />
-              <FormField id="bill_amount" label="Bill amount (Rs.)" type="number" step="0.01" min="0" value={form.bill_amount} onChange={(e) => setForm((f) => ({ ...f, bill_amount: e.target.value }))} required disabled={disabled} />
+              <FormField id="bill_amount" label={amountLabel("Bill amount")} type="number" step="0.01" min="0" value={form.bill_amount} onChange={(e) => setForm((f) => ({ ...f, bill_amount: e.target.value }))} required disabled={disabled} />
               <FormField id="due_date" label="Due date" type="date" value={form.due_date} onChange={(e) => setForm((f) => ({ ...f, due_date: e.target.value }))} required disabled={disabled} />
               <FormField id="status" label="Status" as="select" value={form.status} onChange={(e) => setForm((f) => ({ ...f, status: e.target.value }))} disabled={disabled}>
                 {VENDOR_BILL_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}

@@ -97,6 +97,27 @@ export const AuthProvider = ({ children }) => {
     return accessToken;
   }, [refreshAccessToken]);
 
+  const refreshTenantManifest = useCallback(async () => {
+    const session = readStoredSession();
+    if (!session?.user || session.user.portal !== "tenant") return null;
+    const accessToken = await resolveAccessToken(session.user);
+    if (!accessToken) return null;
+    try {
+      const res = await fetch(`${API_BASE}/tenant/me`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (!data?.user) return null;
+      const merged = mergeTenantUserFromApi(data.user, session.user);
+      setUser(merged);
+      updateActiveUser(merged);
+      return merged;
+    } catch {
+      return null;
+    }
+  }, [resolveAccessToken]);
+
   const authFetch = useCallback(async (url, options = {}) => {
     const epoch = sessionEpochRef.current;
     const session = readStoredSession();
@@ -167,8 +188,21 @@ export const AuthProvider = ({ children }) => {
         clearSessionAndLogout(session.user);
       }
     }
+
+    if (res.status === 403 && session.user?.portal === "tenant") {
+      let bodyText = "";
+      try {
+        bodyText = await res.clone().text();
+      } catch {
+        bodyText = "";
+      }
+      if (/insufficient permissions/i.test(bodyText)) {
+        refreshTenantManifest().catch(() => {});
+      }
+    }
+
     return res;
-  }, [clearSessionAndLogout, refreshAccessToken]);
+  }, [clearSessionAndLogout, refreshAccessToken, refreshTenantManifest]);
 
   const validateStoredSession = useCallback(async () => {
     const epoch = bumpSessionEpoch();
@@ -320,7 +354,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, loading, authFetch }}>
+    <AuthContext.Provider value={{ user, login, logout, loading, authFetch, refreshTenantManifest }}>
       {children}
       {user?.impersonating && user?.portal === "tenant" && (
         <ImpersonationGhostIndicator tenantName={user.tenant_name} onEnd={logout} />

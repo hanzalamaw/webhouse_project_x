@@ -193,8 +193,19 @@ export function filterAssignedModules(assignedFromApi) {
   );
 }
 
-export function getTenantMenuItems(moduleSlug) {
+export function getTenantMenuItems(moduleSlug, entitlements = null) {
   const mod = getModuleBySlug(moduleSlug);
   if (!mod) return [];
+
+  if (entitlements?.nav?.length) {
+    const allowed = entitlements.nav.some((n) => n.slug === moduleSlug);
+    if (!allowed) return [];
+  } else if (entitlements?.modules?.length) {
+    const allowed = entitlements.modules.some(
+      (m) => m.slug === moduleSlug || moduleMatchesAssignment(mod, m.module_name)
+    );
+    if (!allowed) return [];
+  }
+
   return mod.getNavItems();
 }

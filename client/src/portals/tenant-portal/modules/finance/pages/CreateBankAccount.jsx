@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../../../../../context/AuthContext";
 import { useModulePermission } from "../../../../../hooks/useModulePermission";
+import { useMoney } from "../../../../../hooks/useMoney";
 import { apiFetch, fetchAllTableRows } from "../../../../../api/client";
 import { PageHeader } from "../../../../../components/PageHeader";
 import { FormPageLayout, FormPageAlerts, FormActions } from "../../../../../components/FormPageLayout";
@@ -15,6 +16,7 @@ export default function CreateBankAccount() {
   const isEdit = Boolean(accountId);
   const { authFetch } = useAuth();
   const { canCreate, canEdit } = useModulePermission("finance");
+  const { amountLabel } = useMoney();
   const navigate = useNavigate();
   const [form, setForm] = useState({
     bank_name: "",
@@ -91,7 +93,7 @@ export default function CreateBankAccount() {
               <FormField id="bank_name" label="Bank name" value={form.bank_name} onChange={(e) => setForm((f) => ({ ...f, bank_name: e.target.value }))} required disabled={disabled} />
               <FormField id="account_title" label="Account title" value={form.account_title} onChange={(e) => setForm((f) => ({ ...f, account_title: e.target.value }))} required disabled={disabled} />
               <FormField id="account_number" label="Account number" value={form.account_number} onChange={(e) => setForm((f) => ({ ...f, account_number: e.target.value }))} required disabled={disabled} />
-              <FormField id="current_balance" label="Current balance (Rs.)" type="number" step="0.01" value={form.current_balance} onChange={(e) => setForm((f) => ({ ...f, current_balance: e.target.value }))} disabled={disabled} />
+              <FormField id="current_balance" label={amountLabel("Current balance")} type="number" step="0.01" value={form.current_balance} onChange={(e) => setForm((f) => ({ ...f, current_balance: e.target.value }))} disabled={disabled} />
               <FormField id="status" label="Status" as="select" value={form.status} onChange={(e) => setForm((f) => ({ ...f, status: e.target.value }))} disabled={disabled}>
                 {BANK_ACCOUNT_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
               </FormField>

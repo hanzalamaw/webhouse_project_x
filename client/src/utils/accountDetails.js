@@ -11,9 +11,9 @@ export function buildUserLoginSections({ loginLink, username, password }) {
     {
       title: "Sign-in details",
       rows: [
-        row("Link", loginLink),
         row("Username", username),
         row("Password", password, { sensitive: true }),
+        row("Link", loginLink),
       ],
     },
   ];
@@ -38,9 +38,9 @@ export function buildTenantAccountSections({
     {
       title: "Sign-in details",
       rows: [
-        row("Link", loginLink),
         row("Username", credentials?.username || credentials?.email),
         row("Password", credentials?.password, { sensitive: true }),
+        row("Link", loginLink),
       ],
     },
     {

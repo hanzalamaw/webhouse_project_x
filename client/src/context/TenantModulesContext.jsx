@@ -5,10 +5,17 @@ import { filterAssignedModules } from "../portals/tenant-portal/modules/registry
 
 const TenantModulesContext = createContext(null);
 
+function modulesFromUser(user) {
+  if (user?.manifest && Array.isArray(user.manifest.modules)) {
+    return user.manifest.modules;
+  }
+  return null;
+}
+
 export function TenantModulesProvider({ children }) {
   const { authFetch, user } = useAuth();
-  const [assigned, setAssigned] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [assigned, setAssigned] = useState(() => modulesFromUser(user) || []);
+  const [loading, setLoading] = useState(() => user?.portal === "tenant" && !user?.manifest);
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
@@ -18,6 +25,15 @@ export function TenantModulesProvider({ children }) {
       setError("");
       return;
     }
+
+    const cached = modulesFromUser(user);
+    if (cached) {
+      setAssigned(cached);
+      setLoading(false);
+      setError("");
+      return;
+    }
+
     setLoading(true);
     setError("");
     try {
@@ -29,7 +45,7 @@ export function TenantModulesProvider({ children }) {
     } finally {
       setLoading(false);
     }
-  }, [authFetch, user?.portal]);
+  }, [authFetch, user]);
 
   useEffect(() => {
     load().catch(() => {});
